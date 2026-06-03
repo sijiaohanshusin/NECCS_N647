@@ -1,0 +1,55 @@
+# OS/editor noise
+Thumbs.db
+Desktop.ini
+*.tmp
+*.temp
+*.log
+*.bak
+*.orig
+*.swp
+*.swo
+
+# Codex/local analysis scratch
+.codex/
+_analysis/
+_cubeide_ws_*/
+
+# Vendor data disk copy; keep smaller curated references separately.
+【正点原子】N647开发板资料盘(A盘)/
+
+# STM32CubeIDE/Eclipse workspace metadata
+.metadata/
+RemoteSystemsTempFiles/
+*.launch
+
+# STM32CubeIDE generated build directories
+**/Debug/
+**/Release/
+**/build/
+**/cmake-build-*/
+
+# Generated compiler/linker artifacts
+*.o
+*.obj
+*.d
+*.su
+*.cyclo
+*.elf
+*.axf
+*.out
+*.bin
+*.map
+*.list
+*.lst
+*.a
+*.lib
+*.exe
+
+# Generated flash/programming artifacts. Re-enable curated images below.
+*.hex
+*.stldr
+
+!_flash_images/
+!_flash_images/*.hex
+!_vendor_fsbl_ref/Binary/
+!_vendor_fsbl_ref/Binary/*.hex
