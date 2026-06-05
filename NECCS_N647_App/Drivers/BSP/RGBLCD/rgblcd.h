@@ -86,6 +86,9 @@ typedef struct
 extern _rgblcd_dev rgblcddev;
 extern uint32_t g_back_color;
 extern uint16_t g_ltdc_lcd_framebuf[1280 * 800] __attribute__((section(".EXTRAM")));
+extern volatile uint16_t g_rgblcd_raw_panel_id;
+extern volatile uint16_t g_rgblcd_effective_panel_id;
+extern volatile uint32_t g_rgblcd_init_stage;
 
 /* 函数声明 */
 void rgblcd_init(void);                                                                                                     /* 初始化RGB LED */

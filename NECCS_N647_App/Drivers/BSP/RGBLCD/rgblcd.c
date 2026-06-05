@@ -33,11 +33,23 @@ uint32_t g_back_color = 0xFFFF;
 /* RGB LCD重要参数 */
 _rgblcd_dev rgblcddev;
 
+#define RGBLCD_PANEL_ATK_MD0700R_1024600  0x7016U
+
+/* Current NECCS_N647 bring-up hardware uses the 1024x600 RGBLCD even if ID straps read otherwise. */
+#ifndef RGBLCD_FORCE_PANEL_ID
+#define RGBLCD_FORCE_PANEL_ID             RGBLCD_PANEL_ATK_MD0700R_1024600
+#endif
+
+volatile uint16_t g_rgblcd_raw_panel_id = 0;
+volatile uint16_t g_rgblcd_effective_panel_id = 0;
+volatile uint32_t g_rgblcd_init_stage = 0;
+
 /* LTDC帧缓冲区 */
 uint16_t g_ltdc_lcd_framebuf[1280 * 800] __attribute__((section(".EXTRAM")));
 
 /* 函数声明 */
 static uint16_t rgblcd_panelid_read(void);
+static void rgblcd_use_default_panel(void);
 static uint8_t rgblcd_ltdc_clk_set(uint32_t clock);
 static uint32_t rgblcd_pow(uint8_t m, uint8_t n);
 
@@ -50,7 +62,13 @@ void rgblcd_init(void)
 {
     LTDC_LayerCfgTypeDef ltdc_layer_cfg_struct = {0};
 
-    rgblcddev.id = rgblcd_panelid_read();
+    g_rgblcd_init_stage = 1;
+    g_rgblcd_raw_panel_id = rgblcd_panelid_read();
+#if (RGBLCD_FORCE_PANEL_ID != 0U)
+    rgblcddev.id = RGBLCD_FORCE_PANEL_ID;
+#else
+    rgblcddev.id = g_rgblcd_raw_panel_id;
+#endif
     if (rgblcddev.id == 0x4342)         /* ATK-MD0430R-480272 */
     {
         rgblcddev.pwidth = 480;         /* LCD面板的宽度 */
@@ -113,6 +131,15 @@ void rgblcd_init(void)
         rgblcddev.vfp = 3;              /* 垂直前廊 */
     }
 
+    if ((rgblcddev.pwidth == 0U) || (rgblcddev.pheight == 0U) ||
+        (rgblcddev.hsw == 0U) || (rgblcddev.vsw == 0U))
+    {
+        rgblcd_use_default_panel();
+    }
+
+    g_rgblcd_effective_panel_id = rgblcddev.id;
+    g_rgblcd_init_stage = 2;
+
     hltdc.Init.PCPolarity = (rgblcddev.id == 0x1018) ? LTDC_PCPOLARITY_IIPC : LTDC_PCPOLARITY_IPC;
     hltdc.Init.HorizontalSync = rgblcddev.hsw - 1;
     hltdc.Init.VerticalSync = rgblcddev.vsw - 1;
@@ -169,8 +196,11 @@ void rgblcd_init(void)
     HAL_LTDC_SetAddress(&hltdc, (uint32_t)g_ltdc_lcd_framebuf, 0);
 
     rgblcd_display_dir(0);
+    g_rgblcd_init_stage = 3;
     rgblcd_clear(0xFFFF);
+    g_rgblcd_init_stage = 4;
     RGBLCD_BL(1);
+    g_rgblcd_init_stage = 5;
 }
 
 /**
@@ -215,6 +245,13 @@ void rgblcd_fill(uint16_t sx, uint16_t sy, uint16_t ex, uint16_t ey, uint16_t co
     uint16_t psy;
     uint16_t pex;
     uint16_t pey;
+
+    if ((rgblcddev.width == 0U) || (rgblcddev.height == 0U) ||
+        (rgblcddev.pwidth == 0U) || (rgblcddev.pheight == 0U) ||
+        (sx > ex) || (sy > ey))
+    {
+        return;
+    }
 
     if (rgblcddev.dir == 0)
     {
@@ -336,6 +373,11 @@ uint16_t rgblcd_read_point(uint16_t x, uint16_t y)
  */
 void rgblcd_clear(uint16_t color)
 {
+    if ((rgblcddev.width == 0U) || (rgblcddev.height == 0U))
+    {
+        return;
+    }
+
     rgblcd_fill(0, 0, rgblcddev.width - 1, rgblcddev.height - 1, color);
 }
 
@@ -816,6 +858,19 @@ static uint16_t rgblcd_panelid_read(void)
     HAL_GPIO_Init(RGBLCD_R7_GPIO_PORT, &gpio_init_struct);
 
     return pids[id];
+}
+
+static void rgblcd_use_default_panel(void)
+{
+    rgblcddev.id = RGBLCD_PANEL_ATK_MD0700R_1024600;      /* ATK-MD0700R-1024600 */
+    rgblcddev.pwidth = 1024;
+    rgblcddev.pheight = 600;
+    rgblcddev.hsw = 20;
+    rgblcddev.vsw = 3;
+    rgblcddev.hbp = 140;
+    rgblcddev.vbp = 20;
+    rgblcddev.hfp = 160;
+    rgblcddev.vfp = 12;
 }
 
 /**

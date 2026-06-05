@@ -2,15 +2,16 @@ $ErrorActionPreference = "Stop"
 
 $projectDir = Split-Path -Parent $PSCommandPath
 $projectRoot = Resolve-Path (Join-Path $projectDir "..\..")
+$buildDir = Resolve-Path (Get-Location)
 $binaryDir = Join-Path $projectRoot "Binary"
 $outputHex = Join-Path $binaryDir "appli.hex"
 
-$bin = Get-ChildItem -LiteralPath $projectDir -Recurse -Filter "*_Appli.bin" |
+$bin = Get-ChildItem -LiteralPath $buildDir -Filter "*_Appli.bin" |
     Sort-Object LastWriteTime -Descending |
     Select-Object -First 1
 
 if ($null -eq $bin) {
-    throw "Cannot find *_Appli.bin under $projectDir"
+    throw "Cannot find *_Appli.bin under $buildDir"
 }
 
 New-Item -ItemType Directory -Force -Path $binaryDir | Out-Null

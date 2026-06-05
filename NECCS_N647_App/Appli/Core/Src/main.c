@@ -69,6 +69,10 @@ static volatile uint32_t g_app_hyperram_test_ok = 0;
 static volatile uint32_t g_app_hyperram_error_addr = 0;
 static volatile uint32_t g_app_hyperram_expected = 0;
 static volatile uint32_t g_app_hyperram_actual = 0;
+volatile uint32_t g_app_tick_recover_vtor = 0;
+volatile uint32_t g_app_tick_recover_ctrl = 0;
+volatile uint32_t g_app_tick_recover_load = 0;
+volatile uint32_t g_app_tick_recover_primask = 0;
 
 /* USER CODE END PV */
 
@@ -80,11 +84,34 @@ static void SystemIsolation_Config(void);
 /* USER CODE BEGIN PFP */
 static uint32_t App_HyperRAM_SelfTest(void);
 static void App_ShowBringUpPage(uint16_t color, const char *color_name, const char *status_line);
+static void App_RecoverHalTick(void);
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+extern const uint32_t g_pfnVectors[];
+
+static void App_RecoverHalTick(void)
+{
+  SCB->VTOR = (uint32_t)g_pfnVectors;
+  __DSB();
+  __ISB();
+
+  if (HAL_InitTick(TICK_INT_PRIORITY) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  HAL_ResumeTick();
+  __enable_irq();
+
+  g_app_tick_recover_vtor = SCB->VTOR;
+  g_app_tick_recover_ctrl = SysTick->CTRL;
+  g_app_tick_recover_load = SysTick->LOAD;
+  g_app_tick_recover_primask = __get_PRIMASK();
+}
+
 static uint32_t App_HyperRAM_SelfTest(void)
 {
   volatile uint32_t *ram = (volatile uint32_t *)APP_HYPERRAM_BASE;
@@ -171,6 +198,8 @@ int main(void)
   SCB_EnableDCache();
 
   /* MCU Configuration--------------------------------------------------------*/
+  /* Update SystemCoreClock variable according to RCC registers values. */
+  SystemCoreClockUpdate();
   HAL_Init();
 
   /* USER CODE BEGIN Init */
@@ -179,6 +208,10 @@ int main(void)
 #endif
 
   /* USER CODE END Init */
+
+  /* Update SystemCoreClock variable */
+  SystemCoreClockUpdate();
+  App_RecoverHalTick();
 
   /* USER CODE BEGIN SysInit */
   MX_XSPI1_Init();
