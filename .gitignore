@@ -21,6 +21,7 @@ _cubeide_ws_*/
 .metadata/
 RemoteSystemsTempFiles/
 *.launch
+**/.settings/com.st.stm32cube.ide.mcu.sfrview.prefs
 
 # STM32CubeIDE generated build directories
 **/Debug/

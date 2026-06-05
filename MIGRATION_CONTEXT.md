@@ -853,3 +853,89 @@ Important diagnostic conclusion:
 - If FSBL external-memory initialization is disabled, debug may still appear to work because the loader/debugger has already configured external memory.
 - That is not a valid cold-boot fix.
 - Final FSBL must keep `MX_XSPI2_Init()`, `MX_EXTMEM_MANAGER_Init()`, HyperRAM init, and `BOOT_Application()` enabled so the board can boot without debugger help.
+
+## 15. 2026-06-03 Next Stage: HyperRAM And RGB LCD Bring-Up
+
+Audio acquisition hardware is not fully soldered yet, so the next migration stage should focus on board-native memory and display bring-up first.
+
+Use the local ALIENTEK software package as the concrete reference, not assumptions:
+
+- RAM/display reference example:
+  - `【正点原子】N647开发板资料盘(A盘)/4，程序源码/SoftwarePackage/Projects/15_RGBLCD`
+- Image/display stress reference:
+  - `【正点原子】N647开发板资料盘(A盘)/4，程序源码/SoftwarePackage/Projects/41_Picture_Show`
+- BSP drivers:
+  - `【正点原子】N647开发板资料盘(A盘)/4，程序源码/SoftwarePackage/Drivers/BSP/HyperRAM`
+  - `【正点原子】N647开发板资料盘(A盘)/4，程序源码/SoftwarePackage/Drivers/BSP/RGBLCD`
+
+Recommended order:
+
+1. Bring up HyperRAM only.
+2. Run a small memory self-test at the HyperRAM mapped address.
+3. Add LTDC + DMA2D + RGBLCD only after RAM is proven stable.
+4. Put the LCD framebuffer into `.EXTRAM`.
+5. Test screen with solid colors or color bars before adding touch, images, LVGL, or audio UI.
+
+Key HyperRAM facts from `15_RGBLCD`:
+
+- Device: `W958D8NBYA5I`
+- Interface: `XSPI1`, Port1, HyperBus mode.
+- Mapped address used by the linker scripts: `0x90000000`.
+- Clock source in the reference `.ioc`: `RCC_XSPI1CLKSOURCE_IC4`.
+- Reference XSPI1 frequency: `200 MHz`.
+- Reference XSPI1 settings:
+  - `MemorySize = HAL_XSPI_SIZE_256MB`
+  - `ChipSelectHighTimeCycle = 2`
+  - `ClockPrescaler = 1 - 1`
+  - `AccessTimeCycle = 7`
+  - `RWRecoveryTimeCycle = 7`
+  - `LatencyMode = HAL_XSPI_FIXED_LATENCY`
+  - `WriteZeroLatency = HAL_XSPI_LATENCY_ON_WRITE`
+  - `WrapSize = HAL_XSPI_WRAP_32_BYTES`
+
+Important initialization order from the reference app:
+
+```c
+MX_XSPI1_Init();
+HyperRAM_Init(&HyperRAMObject, &hxspi1);
+HyperRAM_EnableMemoryMappedMode(&HyperRAMObject);
+MX_GPIO_Init();
+MX_DMA2D_Init();
+MX_LTDC_Init();
+rgblcd_init();
+```
+
+Key RGB LCD facts from `15_RGBLCD`:
+
+- Reference panel timing starts with `480 x 272`, RGB565.
+- LTDC clock is about `9 MHz` for the 480 x 272 panel ID path.
+- `DMA2D` is configured as memory-to-memory with pixel format conversion, output RGB565.
+- Backlight GPIO is `PA3`, active high in the BSP macro `RGBLCD_BL(1)`.
+- The BSP framebuffer is:
+
+```c
+uint16_t g_ltdc_lcd_framebuf[1280 * 800] __attribute__((section(".EXTRAM")));
+```
+
+Therefore the application linker script must define `.EXTRAM` in HyperRAM. The reference linker script `STM32N647X0HXQ_LRUN_RAMxspi1.ld` maps it as:
+
+```ld
+EXTRAM (rw) : ORIGIN = 0x90000000, LENGTH = 32M
+
+.EXTRAM (NOLOAD) :
+{
+  *(.EXTRAM)
+} >EXTRAM
+```
+
+Do not judge LCD bring-up until these three things are all true:
+
+- HyperRAM self-test passes from software after cold boot.
+- `.EXTRAM` is mapped to `0x90000000`, not internal SRAM.
+- `rgblcd_init()` can turn on the backlight and set the LTDC framebuffer address.
+
+Expected first acceptance tests:
+
+- RAM stage passes a deterministic pattern test over a small range, then a larger range.
+- LCD stage shows stable full-screen red/green/blue/white/black fills.
+- Only after that, move to picture display, touch, or UI framework integration.
