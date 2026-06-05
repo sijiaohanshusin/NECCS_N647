@@ -23,8 +23,8 @@
 /* USER CODE BEGIN Includes */
 #ifdef DEBUG
 #include "./SYS/sys.h"
-#endif
 #include "./HyperRAM/hyperram.h"
+#endif
 #include "./LED/led.h"
 #include "./RGBLCD/rgblcd.h"
 #include <stdio.h>
@@ -63,7 +63,9 @@ LTDC_HandleTypeDef hltdc;
 XSPI_HandleTypeDef hxspi1;
 
 /* USER CODE BEGIN PV */
+#ifdef DEBUG
 static HyperRAM_ObjectTypeDef HyperRAMObject = {0};
+#endif
 static volatile uint32_t g_app_hyperram_init_ok = 0;
 static volatile uint32_t g_app_hyperram_test_ok = 0;
 static volatile uint32_t g_app_hyperram_error_addr = 0;
@@ -214,6 +216,7 @@ int main(void)
   App_RecoverHalTick();
 
   /* USER CODE BEGIN SysInit */
+#ifdef DEBUG
   MX_XSPI1_Init();
   if (HyperRAM_Init(&HyperRAMObject, &hxspi1) != HyperRAM_OK)
   {
@@ -224,6 +227,10 @@ int main(void)
     Error_Handler();
   }
   g_app_hyperram_init_ok = 1;
+#else
+  /* In cold boot, FSBL already configures XSPI1 HyperRAM before jumping to Appli. */
+  g_app_hyperram_init_ok = 2;
+#endif
 
   g_app_hyperram_test_ok = App_HyperRAM_SelfTest();
   if (g_app_hyperram_test_ok == 0)
