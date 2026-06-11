@@ -72,8 +72,14 @@ void HAL_MspInit(void)
   HAL_PWREx_EnableVddIO2();
   HAL_PWREx_ConfigVddIORange(PWR_VDDIO2,PWR_VDDIO_RANGE_1V8);
 
+  HAL_PWREx_EnableVddIO3();
+  HAL_PWREx_ConfigVddIORange(PWR_VDDIO3,PWR_VDDIO_RANGE_3V3);
+
   HAL_PWREx_EnableVddIO4();
   HAL_PWREx_ConfigVddIORange(PWR_VDDIO4,PWR_VDDIO_RANGE_3V3);
+
+  HAL_PWREx_EnableVddIO5();
+  HAL_PWREx_ConfigVddIORange(PWR_VDDIO5,PWR_VDDIO_RANGE_3V3);
 
   /* USER CODE BEGIN MspInit 1 */
 
@@ -146,7 +152,7 @@ void HAL_LTDC_MspInit(LTDC_HandleTypeDef* hltdc)
     PeriphClkInitStruct.PeriphClockSelection = RCC_PERIPHCLK_LTDC;
     PeriphClkInitStruct.LtdcClockSelection = RCC_LTDCCLKSOURCE_IC16;
     PeriphClkInitStruct.ICSelection[RCC_IC16].ClockSelection = RCC_ICCLKSOURCE_PLL1;
-    PeriphClkInitStruct.ICSelection[RCC_IC16].ClockDivider = 133;
+    PeriphClkInitStruct.ICSelection[RCC_IC16].ClockDivider = 30;
     if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInitStruct) != HAL_OK)
     {
       Error_Handler();

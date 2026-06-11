@@ -4,12 +4,15 @@
 
 Use this section first if terminal encoding makes Chinese text unreadable.
 
-- Repo now being prepared: `D:\Project\NECCS\Program\NECCS_N647`
-- Old project source of truth: `D:\Project\NECCS\Program\NECCS`
+- Repo now being prepared: `D:\Project\NECCS\N647_BaseBoard\firmware\NECCS_N647`
+- Old project source of truth: `D:\Project\NECCS\H7_Original\firmware\NECCS`
 - Current target: `ALIENTEK` / 正点原子 `ATK-CNN647B` (`STM32N647`)
 - Common shorthand used in chat: `CNN-647B`
   - treat it as the same board as `ATK-CNN647B`
-- Current local board package path: `D:\Project\NECCS\Program\NECCS_N647\【正点原子】N647开发板资料盘(A盘)`
+- Current authoritative local board references:
+  - firmware examples: `D:\Project\NECCS\N647_BaseBoard\firmware\NECCS_N647\_vendor_software_ref`
+  - hardware files: `D:\Project\NECCS\N647_BaseBoard\hardware`
+- Previous board package path was under the deprecated `Program\NECCS_N647` tree and is no longer the active workspace path.
 - Future target: self-developed `STM32N657` board, not current phase
 - Migration is not done until old project capabilities are fully restored
 - New toolchain stack:
@@ -140,8 +143,9 @@ Use this section first if terminal encoding makes Chinese text unreadable.
 
 This section supersedes older assumptions made before the ALIENTEK package was copied in.
 
-- The local package is real and directly usable:
-  - `D:\Project\NECCS\Program\NECCS_N647\【正点原子】N647开发板资料盘(A盘)`
+- The local package is real and directly usable through the reorganized workspace:
+  - firmware examples: `D:\Project\NECCS\N647_BaseBoard\firmware\NECCS_N647\_vendor_software_ref`
+  - hardware files: `D:\Project\NECCS\N647_BaseBoard\hardware`
 - This is not a vague third-party board anymore.
   - It is an `ALIENTEK` / 正点原子 `STM32N647` development-board package.
 - The package contains two board variants:
@@ -230,11 +234,11 @@ This section supersedes older assumptions made before the ALIENTEK package was c
 
 当前迁移工作目录：
 
-- `D:\Project\NECCS\Program\NECCS_N647`
+- `D:\Project\NECCS\N647_BaseBoard\firmware\NECCS_N647`
 
 旧工程目录：
 
-- `D:\Project\NECCS\Program\NECCS`
+- `D:\Project\NECCS\H7_Original\firmware\NECCS`
 
 重要约束：
 
@@ -944,7 +948,7 @@ Expected first acceptance tests:
 
 Target IOC:
 
-- `D:\Project\NECCS\Program\NECCS_N647\NECCS_N647_App\NECCS_N647_App.ioc`
+- `D:\Project\NECCS\N647_BaseBoard\firmware\NECCS_N647\NECCS_N647_App\NECCS_N647_App.ioc`
 
 Reference IOC:
 
