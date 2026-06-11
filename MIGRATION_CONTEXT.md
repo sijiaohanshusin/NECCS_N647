@@ -939,3 +939,70 @@ Expected first acceptance tests:
 - RAM stage passes a deterministic pattern test over a small range, then a larger range.
 - LCD stage shows stable full-screen red/green/blue/white/black fills.
 - Only after that, move to picture display, touch, or UI framework integration.
+
+## 16. 2026-06-08 N657 IOC To N647 APP IOC Baseline
+
+Target IOC:
+
+- `D:\Project\NECCS\Program\NECCS_N647\NECCS_N647_App\NECCS_N647_App.ioc`
+
+Reference IOC:
+
+- `D:\Project\NECCS\STM32N6开发板\CubeMX\CubeMX.ioc`
+
+This stage migrates the N657 application peripheral intent into the N647 APP IOC, but only where the N647 pinout/examples make the configuration confirmable.
+
+Kept from the already verified N647 APP baseline:
+
+- APP-only project structure: `Appli=true`, `FSBL=false`, `ExtMemLoader=false`.
+- `XSPI1` HyperRAM on Port1 HyperBus, mapped by linker scripts to `0x90000000`.
+- `LTDC` + `DMA2D` display path, RGB565.
+- `PA3` LCD backlight, `PE10`/`PG10` LEDs.
+- No `XSPI2` in APP. External NOR flash remains FSBL-owned.
+
+New IOC configuration added for the formal APP baseline:
+
+- `SAI1` follows the N657 microphone-array design exactly:
+  - `PB0 = SAI1_FS_A`
+  - `PB6 = SAI1_SCK_A`
+  - `PB7 = SAI1_SD_A`
+  - `PE3 = SAI1_SD_B`
+  - `SAI_A` and `SAI_B` are both asynchronous slave blocks.
+- `USART1`: `PE5 = TX`, `PE6 = RX`, asynchronous mode.
+- `I2C2`: `PD14 = SCL`, `PD4 = SDA`, timing `0x10707DBC`, matching the N647 camera reference.
+- `SDMMC2`: `PC0/PC3/PC4/PC5/PD2/PE4`, 4-bit bus, clock divider `4`, hardware flow control enabled.
+- `CSI` + `DCMIPP`: enabled using the N647 MIPI camera reference topology, with `DCMIPP_CSI` and Pipe 1 virtual signals.
+- `GPDMA1` remains present in the APP context as preparation for audio/camera data paths, but no concrete DMA request/channel is bound yet.
+- N657 GPIO labels were migrated when the same physical pin is free on the N647 APP baseline. This includes functional GPIOs such as `USB1_EN`, `BOOT1`, `MIC_SHDNZ`, `CAM_EN_MODULE`, `UCPD1_INT`, `USER1`, `LCD_NRST`, `USER2`, `CAM_LED_EN`, `CTP_RST`, `LCD_BL_PWM`, `SPI2_CS0`, `EXT_SMPS_MODE`, `SD_DET`, `UCPD1_VSENSE`, `LED1`, `CTP_INT`, `PWR_SD_EN`, and the non-conflicting `EXP_GPIO_*` / `EXP_ALT_ETH_*` expansion labels.
+- `PG10` is kept as a GPIO output and labeled `LED2` to match the N657 naming.
+
+Important N657-to-N647 differences:
+
+- `SAI1`: deliberately uses the N657 mic-array pin map, not the N647 ALIENTEK audio-recorder example pin map.
+- `LTDC`: N657 used RGB888 intent; N647 APP currently stays on RGB565 because the ATK-CNN647B display/BSP path has already been verified that way.
+- LCD resolution is set to `1024 x 600` for the current panel. IOC timing matches the BSP panel path: `hsw=20`, `vsw=3`, `hbp=140`, `vbp=20`, `hfp=160`, `vfp=12`, LTDC clock `40 MHz`.
+- `XSPI2`: present in the boot chain but intentionally absent from APP configuration. FSBL initializes external NOR and boots APP from `0x70100400`.
+- `USB1_OTG_HS`: not enabled yet. Add it only after Device/Host role and connector wiring are confirmed.
+- `I2C1`, `SPI1`, `SPI2`, `USART2`, and `SAI2`: present in the N657 IOC intent but not enabled in the N647 APP IOC until their board-level usage is confirmed.
+- Camera configuration keeps the N657 DCMIPP/CSI intent but uses the N647 camera example's MIPI CSI/DCMIPP shape instead of copying N657 labels blindly.
+- Newly added peripheral init functions are kept disabled in `ProjectManager.functionlistsort` for now. This prevents SD card, camera, or microphone hardware readiness from breaking the already verified LCD/HyperRAM boot path after code generation.
+- N657 GPIO labels not migrated because the same N647 physical pin is already occupied by a higher-priority validated function:
+  - `PA10 / EXP_GPIO_PA10`: occupied by `LTDC_B4`.
+  - `PA11 / USB1_OCP`: occupied by `LTDC_B3`.
+  - `PA3 / EXP_GPIO_PA3`: kept as the N647 LCD backlight GPIO output.
+  - `PA5 / UCPD1_ISENSE`: occupied by `LTDC_CLK`.
+  - `PB10 / SPI1_CS0`: occupied by `LTDC_G7`.
+  - `PB4 / EXP_ALT_ETH_PB4`: same physical pin as `PB4(NJTRST)`, occupied by `LTDC_R3`.
+  - `PE10 / EXP_GPIO_PE10`: kept as the N647 LED GPIO output.
+  - `PE5 / EXP_GPIO_PE5`: occupied by `USART1_TX`.
+  - `PF9 / EXP_GPIO_PF9`: occupied by `LTDC_HSYNC`.
+  - `PG13 / EXP_GPIO_PG13`: occupied by `LTDC_DE`.
+  - `PG9 / EXP_GPIO_PG9`: occupied by `LTDC_R7`.
+  - `PO5 / SD_LDO_SEL`: occupied by `XSPIM_P1_NCLK` for HyperRAM.
+
+Regeneration checklist:
+
+- Open the IOC in CubeMX and confirm there are no red pin conflicts.
+- Generate code, then confirm APP code still does not contain `MX_XSPI2_Init()`.
+- Rebuild Debug and Release.
+- Verify LCD/LED/HyperRAM behavior first before enabling SAI, SDMMC2, CSI/DCMIPP, or USART startup calls.
