@@ -17,6 +17,11 @@ _cubeide_ws_*/
 # Vendor data disk copy; keep smaller curated references separately.
 【正点原子】N647开发板资料盘(A盘)/
 
+# Archives should live outside the firmware repo.
+*.zip
+*.rar
+*.7z
+
 # STM32CubeIDE/Eclipse workspace metadata
 .metadata/
 RemoteSystemsTempFiles/
