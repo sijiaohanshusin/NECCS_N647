@@ -1,62 +1,78 @@
+[CmdletBinding()]
 param(
     [int]$Jobs = 8,
+
     [ValidateSet("VendorPrebuilt", "Rebuild")]
-    [string]$FsblSource = "VendorPrebuilt"
+    [string]$FsblSource = "VendorPrebuilt",
+
+    [string]$CubeIdeRoot = $env:STM32CUBEIDE_ROOT
 )
 
 $ErrorActionPreference = "Stop"
 
-$root = Resolve-Path (Join-Path $PSScriptRoot "..")
-
-$gnuTools = "C:\ST\STM32CubeIDE_2.1.1\STM32CubeIDE\plugins\com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.14.3.rel1.win32_1.0.100.202602081740\tools\bin"
-$makeTools = "C:\ST\STM32CubeIDE_2.1.1\STM32CubeIDE\plugins\com.st.stm32cube.ide.mcu.externaltools.make.win32_2.2.100.202601091506\tools\bin"
-$signingTool = "C:\Program Files\STMicroelectronics\STM32Cube\STM32CubeProgrammer\bin\STM32_SigningTool_CLI.exe"
-
-$make = Join-Path $makeTools "make.exe"
-$objcopy = Join-Path $gnuTools "arm-none-eabi-objcopy.exe"
-
-foreach ($tool in @($make, $objcopy, $signingTool)) {
-    if (-not (Test-Path -LiteralPath $tool)) {
-        throw "Required tool not found: $tool"
-    }
-}
-
-$env:Path = "$gnuTools;$makeTools;$env:Path"
-
+$root = Split-Path -Parent $PSScriptRoot
+$appBuildScript = Join-Path $PSScriptRoot "build_n647_app.ps1"
+$vendorPrebuiltFsbl = Join-Path $root "_vendor_fsbl_ref\Binary\fsbl.hex"
 $fsblRelease = Join-Path $root "_vendor_software_ref\FSBL\MX25UM25645G_W958D8NBYA5I_Example\STM32CubeIDE\FSBL\Release"
 $fsblBinaryDir = Join-Path $root "_vendor_software_ref\FSBL\MX25UM25645G_W958D8NBYA5I_Example\Binary"
-$vendorPrebuiltFsbl = Join-Path $root "_vendor_fsbl_ref\Binary\fsbl.hex"
-$appRelease = Join-Path $root "_vendor_software_ref\Projects\01_LED\STM32CubeIDE\Appli\Release"
-$appBinaryDir = Join-Path $root "_vendor_software_ref\Projects\01_LED\Binary"
+$appHex = Join-Path $root "NECCS_N647_App\Binary\appli.hex"
 $flashImages = Join-Path $root "_flash_images"
 
-foreach ($dir in @($fsblRelease, $fsblBinaryDir, $appRelease, $appBinaryDir, $flashImages)) {
-    if (-not (Test-Path -LiteralPath $dir)) {
-        New-Item -ItemType Directory -Path $dir | Out-Null
+function Resolve-CubeIdeRoot {
+    param([string]$RequestedRoot)
+
+    if (-not [string]::IsNullOrWhiteSpace($RequestedRoot)) {
+        return $RequestedRoot
     }
+
+    $install = Get-ChildItem -LiteralPath "C:\ST" -Directory -Filter "STM32CubeIDE_*" -ErrorAction SilentlyContinue |
+        Sort-Object Name -Descending |
+        Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName "STM32CubeIDE\headless-build.bat") } |
+        Select-Object -First 1
+
+    if ($null -eq $install) {
+        throw "STM32CubeIDE not found. Set STM32CUBEIDE_ROOT or pass -CubeIdeRoot."
+    }
+
+    return Join-Path $install.FullName "STM32CubeIDE"
+}
+
+function Find-CubeIdeToolDirectory {
+    param(
+        [string]$IdeRoot,
+        [string]$PluginPattern
+    )
+
+    $plugin = Get-ChildItem -LiteralPath (Join-Path $IdeRoot "plugins") -Directory -Filter $PluginPattern |
+        Sort-Object Name -Descending |
+        Select-Object -First 1
+
+    if ($null -eq $plugin) {
+        throw "CubeIDE plugin not found: $PluginPattern"
+    }
+
+    return Join-Path $plugin.FullName "tools\bin"
 }
 
 function Invoke-ReleaseBuild {
     param(
-        [string]$BuildDir
+        [string]$BuildDir,
+        [string]$MakeTool
     )
 
     Push-Location $BuildDir
     try {
-        & $make "-j$Jobs" main-build
+        & $MakeTool "-j$Jobs" main-build
         if ($LASTEXITCODE -ne 0) {
             throw "Build failed in $BuildDir"
         }
-    }
-    finally {
+    } finally {
         Pop-Location
     }
 }
 
 function Assert-FsblTrustedLayout {
-    param(
-        [string]$TrustedImage
-    )
+    param([string]$TrustedImage)
 
     $bytes = [System.IO.File]::ReadAllBytes($TrustedImage)
     if ($bytes.Length -lt 0x408) {
@@ -74,24 +90,40 @@ function Assert-FsblTrustedLayout {
     }
 }
 
-$fsblHex = Join-Path $fsblBinaryDir "fsbl.hex"
+$CubeIdeRoot = Resolve-CubeIdeRoot -RequestedRoot $CubeIdeRoot
+New-Item -ItemType Directory -Path $flashImages -Force | Out-Null
 
 if ($FsblSource -eq "VendorPrebuilt") {
-    if (-not (Test-Path -LiteralPath $vendorPrebuiltFsbl)) {
+    if (-not (Test-Path -LiteralPath $vendorPrebuiltFsbl -PathType Leaf)) {
         throw "Vendor prebuilt FSBL was not found: $vendorPrebuiltFsbl"
     }
 
-    Write-Host "Using vendor prebuilt FSBL..."
-    Copy-Item -LiteralPath $vendorPrebuiltFsbl -Destination $fsblHex -Force
-}
-else {
+    Write-Host "Using the validated vendor prebuilt FSBL..."
+    $fsblHex = $vendorPrebuiltFsbl
+} else {
+    $gnuTools = Find-CubeIdeToolDirectory -IdeRoot $CubeIdeRoot -PluginPattern "com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32*.win32_*"
+    $makeTools = Find-CubeIdeToolDirectory -IdeRoot $CubeIdeRoot -PluginPattern "com.st.stm32cube.ide.mcu.externaltools.make.win32_*"
+    $make = Join-Path $makeTools "make.exe"
+    $objcopy = Join-Path $gnuTools "arm-none-eabi-objcopy.exe"
+    $signingTool = "C:\Program Files\STMicroelectronics\STM32Cube\STM32CubeProgrammer\bin\STM32_SigningTool_CLI.exe"
+
+    foreach ($tool in @($make, $objcopy, $signingTool)) {
+        if (-not (Test-Path -LiteralPath $tool -PathType Leaf)) {
+            throw "Required tool not found: $tool"
+        }
+    }
+
+    $env:Path = "$gnuTools;$makeTools;$env:Path"
+    New-Item -ItemType Directory -Path $fsblBinaryDir -Force | Out-Null
+
     Write-Host "Building FSBL Release..."
-    Invoke-ReleaseBuild -BuildDir $fsblRelease
+    Invoke-ReleaseBuild -BuildDir $fsblRelease -MakeTool $make
 
     $fsblBin = Join-Path $fsblRelease "MX25UM25645G_W958D8NBYA5I_Example_FSBL.bin"
     $fsblTrusted = Join-Path $fsblRelease "MX25UM25645G_W958D8NBYA5I_Example_FSBL-trusted.bin"
+    $fsblHex = Join-Path $fsblBinaryDir "fsbl.hex"
 
-    if (-not (Test-Path -LiteralPath $fsblBin)) {
+    if (-not (Test-Path -LiteralPath $fsblBin -PathType Leaf)) {
         throw "FSBL binary was not generated: $fsblBin"
     }
 
@@ -109,23 +141,18 @@ else {
     }
 }
 
-Write-Host "Building 01_LED Appli Release..."
-Invoke-ReleaseBuild -BuildDir $appRelease
-
-$appBin = Join-Path $appRelease "01_LED_Appli.bin"
-$appHex = Join-Path $appBinaryDir "appli.hex"
-
-if (-not (Test-Path -LiteralPath $appBin)) {
-    throw "Application binary was not generated: $appBin"
+Write-Host "Building the current NECCS_N647_App Release..."
+& $appBuildScript -Configuration Release -CubeIdeRoot $CubeIdeRoot
+if ($LASTEXITCODE -ne 0) {
+    throw "NECCS_N647_App Release build failed."
 }
 
-& $objcopy -I binary $appBin --change-addresses 0x70100400 -O ihex $appHex
-if ($LASTEXITCODE -ne 0) {
-    throw "Application HEX conversion failed."
+if (-not (Test-Path -LiteralPath $appHex -PathType Leaf)) {
+    throw "Application HEX was not generated: $appHex"
 }
 
 $flashFsbl = Join-Path $flashImages "fsbl.hex"
-$flashApp = Join-Path $flashImages "appli_01_LED.hex"
+$flashApp = Join-Path $flashImages "appli.hex"
 Copy-Item -LiteralPath $fsblHex -Destination $flashFsbl -Force
 Copy-Item -LiteralPath $appHex -Destination $flashApp -Force
 

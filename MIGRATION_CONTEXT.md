@@ -1038,3 +1038,4 @@ Next bring-up gate:
 
 - First rerun the existing cold-boot LCD/LED/HyperRAM test with the regenerated `appli.hex`.
 - After that passes, bring up the microphone control path and SAI DMA as a dedicated step: confirm PCMD3180 clock ownership, define TDM16 framing, bind GPDMA, and verify raw samples before migrating audio algorithms.
+- `tools\rebuild_n647_boot_images.ps1` now builds the current `NECCS_N647_App`, not the legacy vendor `01_LED` application, and stages validated images as `_flash_images\fsbl.hex` plus `_flash_images\appli.hex`.
