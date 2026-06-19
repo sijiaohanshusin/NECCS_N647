@@ -1010,3 +1010,31 @@ Regeneration checklist:
 - Generate code, then confirm APP code still does not contain `MX_XSPI2_Init()`.
 - Rebuild Debug and Release.
 - Verify LCD/LED/HyperRAM behavior first before enabling SAI, SDMMC2, CSI/DCMIPP, or USART startup calls.
+
+## 17. 2026-06-20 APP Build Recovery And SAI Baseline Audit
+
+Workspace/build recovery:
+
+- The active repository is `D:\Project\NECCS\N647_BaseBoard\firmware\NECCS_N647`; the old `Program\NECCS_N647` path is no longer the source of truth.
+- A stale CubeIDE workspace can retain generated makefiles with the previous absolute project path even though the tracked Eclipse links are relative.
+- Use `tools\build_n647_app.ps1` to import/refresh the project and clean-build both configurations from any repository location.
+- The script auto-detects the newest `C:\ST\STM32CubeIDE_*` installation. Set `STM32CUBEIDE_ROOT` or pass `-CubeIdeRoot` when CubeIDE is installed elsewhere.
+- The Debug linker script now emits separate RX and RW ELF load segments instead of one RWX segment.
+- Verified on 2026-06-20:
+  - Debug: `0 errors, 0 warnings`.
+  - Release: `0 errors, 0 warnings`.
+  - Release postbuild regenerated `NECCS_N647_App\Binary\appli.hex`.
+
+SAI baseline audit against the N657 IOC:
+
+- Confirmed equal: `PB0=SAI1_FS_A`, `PB6=SAI1_SCK_A`, `PB7=SAI1_SD_A`, `PE3=SAI1_SD_B`.
+- Confirmed equal: Block A and Block B are both configured as asynchronous slaves.
+- The N657 IOC contains only the SAI instance/virtual-mode selection. It does not define the final TDM16 data size, frame length, slot mask, clock edge, or DMA channel.
+- The computed SAI1 kernel clock differs because the complete board clock trees differ: N657 IOC reports `32 MHz`; the validated N647 display/HyperRAM clock tree reports `200 MHz`.
+- Do not replace the complete N647 clock tree merely to copy that computed value. Final SAI framing and DMA must be derived from the microphone-array electrical design and PCMD3180 timing requirements.
+- SAI/I2C/USART/SDMMC/DCMIPP init calls remain intentionally disabled in the APP startup path until each peripheral receives an isolated on-board smoke test.
+
+Next bring-up gate:
+
+- First rerun the existing cold-boot LCD/LED/HyperRAM test with the regenerated `appli.hex`.
+- After that passes, bring up the microphone control path and SAI DMA as a dedicated step: confirm PCMD3180 clock ownership, define TDM16 framing, bind GPDMA, and verify raw samples before migrating audio algorithms.

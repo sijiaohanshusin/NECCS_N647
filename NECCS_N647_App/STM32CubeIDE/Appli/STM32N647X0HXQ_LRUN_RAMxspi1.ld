@@ -48,6 +48,14 @@ MEMORY
   EXTRAM (rw)     : ORIGIN = 0x90000000,   LENGTH = 32M
 }
 
+/* Keep code and data in separate ELF segments even though both run from RAM. */
+PHDRS
+{
+  text   PT_LOAD FLAGS(5); /* Read + execute */
+  data   PT_LOAD FLAGS(6); /* Read + write */
+  extram PT_LOAD FLAGS(6); /* Read + write */
+}
+
 /* Sections */
 SECTIONS
 {
@@ -57,7 +65,7 @@ SECTIONS
     . = ALIGN(4);
     KEEP(*(.isr_vector)) /* Startup code */
     . = ALIGN(4);
-  } >RAM
+  } >RAM :text
 
   /* The program code and other data into "RAM" Ram type memory */
   .text :
@@ -76,7 +84,7 @@ SECTIONS
 
     . = ALIGN(4);
     _etext = .;        /* define a global symbols at end of code */
-  } >RAM
+  } >RAM :text
 
   /* Constant data into "RAM" Ram type memory */
   .rodata :
@@ -85,14 +93,14 @@ SECTIONS
     *(.rodata)         /* .rodata sections (constants, strings, etc.) */
     *(.rodata*)        /* .rodata* sections (constants, strings, etc.) */
     . = ALIGN(4);
-  } >RAM
+  } >RAM :text
 
   .ARM.extab   (READONLY) : /* The READONLY keyword is only supported in GCC11 and later, remove it if using GCC10 or earlier. */
   {
     . = ALIGN(4);
     *(.ARM.extab* .gnu.linkonce.armextab.*)
     . = ALIGN(4);
-  } >RAM
+  } >RAM :text
 
   .ARM   (READONLY) : /* The READONLY keyword is only supported in GCC11 and later, remove it if using GCC10 or earlier. */
   {
@@ -101,7 +109,7 @@ SECTIONS
     *(.ARM.exidx*)
     __exidx_end = .;
     . = ALIGN(4);
-  } >RAM
+  } >RAM :text
 
   .preinit_array   (READONLY) : /* The READONLY keyword is only supported in GCC11 and later, remove it if using GCC10 or earlier. */
   {
@@ -110,7 +118,7 @@ SECTIONS
     KEEP (*(.preinit_array*))
     PROVIDE_HIDDEN (__preinit_array_end = .);
     . = ALIGN(4);
-  } >RAM
+  } >RAM :text
 
   .init_array   (READONLY) : /* The READONLY keyword is only supported in GCC11 and later, remove it if using GCC10 or earlier. */
   {
@@ -120,7 +128,7 @@ SECTIONS
     KEEP (*(.init_array*))
     PROVIDE_HIDDEN (__init_array_end = .);
     . = ALIGN(4);
-  } >RAM
+  } >RAM :text
 
   .fini_array   (READONLY) : /* The READONLY keyword is only supported in GCC11 and later, remove it if using GCC10 or earlier. */
   {
@@ -130,7 +138,7 @@ SECTIONS
     KEEP (*(.fini_array*))
     PROVIDE_HIDDEN (__fini_array_end = .);
     . = ALIGN(4);
-  } >RAM
+  } >RAM :text
 
   /* Used by the startup to initialize data */
   _sidata = LOADADDR(.data);
@@ -146,7 +154,7 @@ SECTIONS
     . = ALIGN(4);
     _edata = .;        /* define a global symbol at data end */
 
-  } >RAM
+  } >RAM :data
 
   .noncacheable :
   {
@@ -155,14 +163,14 @@ SECTIONS
     KEEP(*(.noncacheable))
     . = ALIGN(8);
     __enoncacheable = .;  /* create symbol for end of section */
-  } > RAM
+  } > RAM :data
 
   .gnu.sgstubs :
   {
     . = ALIGN(4);
     *(.gnu.sgstubs*)   /* Secure Gateway stubs */
     . = ALIGN(4);
-  } >RAM
+  } >RAM :text
 
   /* Uninitialized data section into "RAM" Ram type memory */
   . = ALIGN(4);
@@ -178,7 +186,7 @@ SECTIONS
     . = ALIGN(4);
     _ebss = .;         /* define a global symbol at bss end */
     __bss_end__ = _ebss;
-  } >RAM
+  } >RAM :data
 
   /* User_heap_stack section, used to check that there is enough "RAM" Ram  type memory left */
   ._user_heap_stack :
@@ -189,7 +197,7 @@ SECTIONS
     . = . + _Min_Heap_Size;
     . = . + _Min_Stack_Size;
     . = ALIGN(8);
-  } >RAM
+  } >RAM :data
 
   /* External RAM */
   .EXTRAM (NOLOAD) :
@@ -197,7 +205,7 @@ SECTIONS
     . = ALIGN(8);
     *(.EXTRAM)
     . = ALIGN(8);
-  } >EXTRAM
+  } >EXTRAM :extram
 
   /* Remove information from the compiler libraries */
   /DISCARD/ :
