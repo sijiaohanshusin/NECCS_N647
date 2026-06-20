@@ -13,6 +13,8 @@ $projectDir = Join-Path $repoRoot "NECCS_N647_App\STM32CubeIDE\Appli"
 $workspaceDir = Join-Path $repoRoot "_cubeide_ws_build"
 $projectName = "NECCS_N647_App_Appli"
 $languageSettings = Join-Path $projectDir ".settings\language.settings.xml"
+$iocFile = Join-Path $repoRoot "NECCS_N647_App\NECCS_N647_App.ioc"
+$mspFile = Join-Path $repoRoot "NECCS_N647_App\Appli\Core\Src\stm32n6xx_hal_msp.c"
 
 if ([string]::IsNullOrWhiteSpace($CubeIdeRoot)) {
     $install = Get-ChildItem -LiteralPath "C:\ST" -Directory -Filter "STM32CubeIDE_*" -ErrorAction SilentlyContinue |
@@ -37,6 +39,19 @@ if (-not (Test-Path -LiteralPath $headlessBuild -PathType Leaf)) {
 
 if (-not (Test-Path -LiteralPath $projectDir -PathType Container)) {
     throw "APP CubeIDE project not found: $projectDir"
+}
+
+$boardConstraints = @(
+    @($iocFile, "PWR.PowerDomain2=PWR_VDDIO_RANGE_1V8"),
+    @($iocFile, "PWR.PowerDomain3=PWR_VDDIO_RANGE_1V8"),
+    @($mspFile, "HAL_PWREx_ConfigVddIORange(PWR_VDDIO2,PWR_VDDIO_RANGE_1V8);"),
+    @($mspFile, "HAL_PWREx_ConfigVddIORange(PWR_VDDIO3,PWR_VDDIO_RANGE_1V8);")
+)
+
+foreach ($constraint in $boardConstraints) {
+    if (-not (Select-String -LiteralPath $constraint[0] -SimpleMatch $constraint[1] -Quiet)) {
+        throw "ATK-CNN647B VDDIO constraint is missing from $($constraint[0]): $($constraint[1])"
+    }
 }
 
 $configurations = if ($Configuration -eq "All") {

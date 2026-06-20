@@ -1039,3 +1039,11 @@ Next bring-up gate:
 - First rerun the existing cold-boot LCD/LED/HyperRAM test with the regenerated `appli.hex`.
 - After that passes, bring up the microphone control path and SAI DMA as a dedicated step: confirm PCMD3180 clock ownership, define TDM16 framing, bind GPDMA, and verify raw samples before migrating audio algorithms.
 - `tools\rebuild_n647_boot_images.ps1` now builds the current `NECCS_N647_App`, not the legacy vendor `01_LED` application, and stages validated images as `_flash_images\fsbl.hex` plus `_flash_images\appli.hex`.
+
+### VDDIO3 must remain at 1.8 V across the FSBL to APP handoff
+
+- The validated ATK-CNN647B FSBL configures both `VDDIO2` and `VDDIO3` for 1.8 V operation.
+- The first full N657-to-N647 IOC migration only declared `VDDIO2=1.8 V`. CubeMX therefore generated an APP `HAL_MspInit()` that changed `VDDIO3` to 3.3 V.
+- During cold boot the APP executes directly from the XSPI2 NOR. Changing this I/O domain immediately after the FSBL handoff can break XIP instruction fetch before GPIO or LCD diagnostics become visible.
+- Debug builds run from internal RAM and reinitialize XSPI1, which masked the error and produced the misleading symptom "debug works, cold boot is blank".
+- N647 board rule: keep `PWR.PowerDomain2=PWR_VDDIO_RANGE_1V8` and `PWR.PowerDomain3=PWR_VDDIO_RANGE_1V8` in `NECCS_N647_App.ioc`. Recheck both values after every CubeMX regeneration.
