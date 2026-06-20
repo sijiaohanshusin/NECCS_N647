@@ -59,3 +59,11 @@ RemoteSystemsTempFiles/
 !_flash_images/*.hex
 !_vendor_fsbl_ref/Binary/
 !_vendor_fsbl_ref/Binary/*.hex
+
+# Local OCR knowledge exports. Keep the runner, index and compact report.
+docs/ocrkb/documents/
+docs/ocrkb/logs/
+docs/ocrkb/run_state.json
+docs/ocrkb/source_catalog.csv
+docs/ocrkb/unique_documents.json
+docs/ocrkb/reports/quality_report.json

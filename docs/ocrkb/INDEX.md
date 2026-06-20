@@ -1,0 +1,101 @@
+- [TI PCMD3180 datasheet](documents/Shared_References/ti-pcmd3180-1629184e-801fec58/result.md) - 117 pages; pages 114-116 use independent visual OCR.
+# NECCS OCR Knowledge Index
+
+This directory contains freshly generated OCRKB exports. Source PDFs remain in their original locations.
+
+- Unique documents: 88
+- Source catalog: [source_catalog.csv](source_catalog.csv)
+- Machine-readable source map: [unique_documents.json](unique_documents.json)
+- Run status: [run_state.json](run_state.json)
+- Quality report: [reports/quality_report.md](reports/quality_report.md)
+
+## Documents
+
+- [acoustic_imaging_report](documents/H7_Original/acoustic-imaging-report-b870ca2a-f87592e7/reviewed.md) - `H7_Original\firmware\NECCS\acoustic_imaging_report.pdf`
+- [STM32N647_Bottom](documents/N647_BaseBoard/stm32n647-bottom-6c7c3905-ab7ef6ad/reviewed.md) - `N647_BaseBoard\hardware\STM32N647_Bottom_Atk_V1.3\STM32N647_Bottom_Atk_V1.3\STM32N647_Bottom.pdf`
+- [Infrared_Camera_Array_Image_Super-Resolution_based_on_Zero-Shot_Learning](documents/N657_MainBoard/infrared-camera-array-image-super-resolution-based-on-zero-shot-learning-2454ee6f-345cf848/reviewed.md) - `N657_MainBoard\docs\docs\presentations\PPT\Infrared_Camera_Array_Image_Super-Resolution_based_on_Zero-Shot_Learning.pdf`
+- [分布式红外阵列相机的超分辨图像重建研究_谢一博](documents/N657_MainBoard/doc-3b41eb2b-21ff445f/reviewed.md) - `N657_MainBoard\docs\docs\presentations\PPT\分布式红外阵列相机的超分辨图像重建研究_谢一博.pdf`
+- [基于STM32N657与PCMD3180的32路手持式宽频声学成像设备双模式硬件架构可行性研究与优化方案](documents/N657_MainBoard/stm32n657pcmd318032-9bf4dcba-28088e2b/reviewed.md) - `N657_MainBoard\docs\docs\reports\研究报告\基于STM32N657与PCMD3180的32路手持式宽频声学成像设备双模式硬件架构可行性研究与优化方案.pdf`
+- [GT911数据手册](documents/Shared_References/gt911-a6fe9738-122f425a/reviewed.md) - `Shared_References\Common_Modules\RGB_LCD_7in\module_docs\3，模块芯片手册\GT911数据手册.pdf`
+- [NTW700T50X003A](documents/Shared_References/ntw700t50x003a-cbabdb7b-c2bd7d80/reviewed.md) - `Shared_References\Common_Modules\RGB_LCD_7in\module_docs\7寸液晶屏模块资料\NTW700T50X003A.pdf`
+- [7寸RGB模块原理图](documents/Shared_References/7rgb-3f462722-ce364f1a/reviewed.md) - `Shared_References\Common_Modules\RGB_LCD_7in\module_docs\原理图\7寸RGB模块原理图.pdf`
+- [STM32H743IIT6 Core Board V1.1_用户手册](documents/Shared_References/stm32h743iit6-core-board-v1-1-f3c8707a-9f2d87fe/reviewed.md) - `Shared_References\H7\official_board_docs\1. 用户手册\STM32H743IIT6 Core Board V1.1_用户手册.pdf`
+- [STM32H743IIT6 V1.1_SCH](documents/Shared_References/stm32h743iit6-v1-1-sch-54cf2232-9a423018/reviewed.md) - `Shared_References\H7\official_board_docs\2. 原理图\STM32H743IIT6 V1.1_SCH.pdf`
+- [STM32H743IIT6 V1.1_机械尺寸](documents/Shared_References/stm32h743iit6-v1-1-fff0690a-21b07eb6/reviewed.md) - `Shared_References\H7\official_board_docs\2. 原理图\STM32H743IIT6 V1.1_机械尺寸.PDF`
+- [STM32H743IIT6 V1.1背面位号图](documents/Shared_References/stm32h743iit6-v1-1-1c8f57f7-db052a82/reviewed.md) - `Shared_References\H7\official_board_docs\2. 原理图\STM32H743IIT6 V1.1背面位号图.pdf`
+- [STM32H743IIT6 V1.1正面位号图](documents/Shared_References/stm32h743iit6-v1-1-f41f8aad-a5d0acad/reviewed.md) - `Shared_References\H7\official_board_docs\2. 原理图\STM32H743IIT6 V1.1正面位号图.pdf`
+- [STM32H743IIT6 V1.1小系统板源码更新记录](documents/Shared_References/stm32h743iit6-v1-1-84b7c993-27e6c54a/reviewed.md) - `Shared_References\H7\official_board_docs\3. 程序源码\STM32H743IIT6 V1.1小系统板源码更新记录.pdf`
+- [CH340DS1](documents/Shared_References/ch340ds1-f49ef017-4d062d15/reviewed.md) - `Shared_References\H7\official_board_docs\5. 芯片资料\CH340DS1.PDF`
+- [CJA1117B-XXX](documents/Shared_References/cja1117b-xxx-7c3ec79d-64476ccc/reviewed.md) - `Shared_References\H7\official_board_docs\5. 芯片资料\CJA1117B-XXX.pdf`
+- [DS12110_STM32H743xI单片机数据手册](documents/Shared_References/ds12110-stm32h743xi-1123221d-a45b77ac/reviewed.md) - `Shared_References\H7\official_board_docs\5. 芯片资料\DS12110_STM32H743xI单片机数据手册.pdf`
+- [W25Q128JVSIQ](documents/Shared_References/w25q128jvsiq-81774e59-45d32d31/reviewed.md) - `Shared_References\H7\official_board_docs\5. 芯片资料\W25Q128JVSIQ.pdf`
+- [W9825G6KH](documents/Shared_References/w9825g6kh-4d87c14e-9ac481c8/reviewed.md) - `Shared_References\H7\official_board_docs\5. 芯片资料\W9825G6KH.pdf`
+- GT1151Q Datasheet_20180626_Rev.13 - failed - `Shared_References\H7\official_board_docs\6. RGB接口触摸显示屏资料\WKS43WV067-WCT产品资料\GT1151Q Datasheet_20180626_Rev.13.pdf`
+- [GT1151Q编程指南_20140717_Rev.01](documents/Shared_References/gt1151q-20140717-rev-01-a1e247bf-81e095aa/reviewed.md) - `Shared_References\H7\official_board_docs\6. RGB接口触摸显示屏资料\WKS43WV067-WCT产品资料\GT1151Q编程指南_20140717_Rev.01.pdf`
+- [HX8264-D03_DS_v03](documents/Shared_References/hx8264-d03-ds-v03-e25130e8-027b204b/reviewed.md) - `Shared_References\H7\official_board_docs\6. RGB接口触摸显示屏资料\WKS43WV067-WCT产品资料\HX8264-D03_DS_v03.pdf`
+- [HX8664-B_DS_v01_180207](documents/Shared_References/hx8664-b-ds-v01-180207-81365202-2080ac33/reviewed.md) - `Shared_References\H7\official_board_docs\6. RGB接口触摸显示屏资料\WKS43WV067-WCT产品资料\HX8664-B_DS_v01_180207.pdf`
+- [WKS43WV067-WCT_SPEC_V0.0](documents/Shared_References/wks43wv067-wct-spec-v0-0-d054f429-29891eb9/reviewed.md) - `Shared_References\H7\official_board_docs\6. RGB接口触摸显示屏资料\WKS43WV067-WCT产品资料\WKS43WV067-WCT_SPEC_V0.0.pdf`
+- [WKS43WV067-WCT_V0 Model (1)](documents/Shared_References/wks43wv067-wct-v0-model-1-245ab246-cd6f8cfa/reviewed.md) - `Shared_References\H7\official_board_docs\6. RGB接口触摸显示屏资料\WKS43WV067-WCT产品资料\WKS43WV067-WCT_V0 Model (1).pdf`
+- [ILI5960_SPEC_V003_20090625](documents/Shared_References/ili5960-spec-v003-20090625-7890e1ab-fa24a7f5/reviewed.md) - `Shared_References\H7\official_board_docs\6. RGB接口触摸显示屏资料\WKS50WV056-WCT产品资料\ILI5960_SPEC_V003_20090625.pdf`
+- [ILI6122_SPEC_V008_20100519](documents/Shared_References/ili6122-spec-v008-20100519-002979e5-b38b52b3/reviewed.md) - `Shared_References\H7\official_board_docs\6. RGB接口触摸显示屏资料\WKS50WV056-WCT产品资料\ILI6122_SPEC_V008_20100519.pdf`
+- [WKS50WV056-WCT_SPEC_V0.1](documents/Shared_References/wks50wv056-wct-spec-v0-1-ac3ee608-3652967e/reviewed.md) - `Shared_References\H7\official_board_docs\6. RGB接口触摸显示屏资料\WKS50WV056-WCT产品资料\WKS50WV056-WCT_SPEC_V0.1.pdf`
+- [WKS50WV056-WCT-V0 Model (1)](documents/Shared_References/wks50wv056-wct-v0-model-1-1c35bd2b-e1d92d60/reviewed.md) - `Shared_References\H7\official_board_docs\6. RGB接口触摸显示屏资料\WKS50WV056-WCT产品资料\WKS50WV056-WCT-V0 Model (1).pdf`
+- [电容触控芯片GT911 Datasheet_20130108](documents/Shared_References/gt911-datasheet-20130108-b200db02-73fb875b/reviewed.md) - `Shared_References\H7\official_board_docs\6. RGB接口触摸显示屏资料\WKS50WV056-WCT产品资料\电容触控芯片GT911 Datasheet_20130108.pdf`
+- [Application Note for CTPM_FocalTech](documents/Shared_References/application-note-for-ctpm-focaltech-1db950f0-fdcff827/reviewed.md) - `Shared_References\H7\official_board_docs\6. RGB接口触摸显示屏资料\WKS70WSV078-WCT产品资料\Application Note for CTPM_FocalTech.pdf`
+- [FT5446U-DataSheet-V0.01-Preliminary](documents/Shared_References/ft5446u-datasheet-v0-01-preliminary-19a0cbb0-a7ee678d/reviewed.md) - `Shared_References\H7\official_board_docs\6. RGB接口触摸显示屏资料\WKS70WSV078-WCT产品资料\FT5446U-DataSheet-V0.01-Preliminary.pdf`
+- [HX8282-A01_A_DS_v01(1)](documents/Shared_References/hx8282-a01-a-ds-v01-1-5ac6adbb-e5a191b7/reviewed.md) - `Shared_References\H7\official_board_docs\6. RGB接口触摸显示屏资料\WKS70WSV078-WCT产品资料\HX8282-A01_A_DS_v01(1).pdf`
+- [HX8696-A_DS_preliminary_v01(1)](documents/Shared_References/hx8696-a-ds-preliminary-v01-1-e7a310e4-eea1aa7f/reviewed.md) - `Shared_References\H7\official_board_docs\6. RGB接口触摸显示屏资料\WKS70WSV078-WCT产品资料\HX8696-A_DS_preliminary_v01(1).pdf`
+- [outline-WKS70WSV078-WCT_V0 Model (1)](documents/Shared_References/outline-wks70wsv078-wct-v0-model-1-c1774a23-571b85eb/reviewed.md) - `Shared_References\H7\official_board_docs\6. RGB接口触摸显示屏资料\WKS70WSV078-WCT产品资料\outline-WKS70WSV078-WCT_V0 Model (1).pdf`
+- [WKS70WSV078-WCT_SPEC_V0.0](documents/Shared_References/wks70wsv078-wct-spec-v0-0-a1031ca8-89865125/reviewed.md) - `Shared_References\H7\official_board_docs\6. RGB接口触摸显示屏资料\WKS70WSV078-WCT产品资料\WKS70WSV078-WCT_SPEC_V0.0.pdf`
+- [LT7680x-R_DS_V30_CH](documents/Shared_References/lt7680x-r-ds-v30-ch-9463392b-621c4ca8/reviewed.md) - `Shared_References\H7\official_board_docs\7. SPI接口触摸显示屏资料\WKS43WV046-WCT产品资料\LT7680x-R_DS_V30_CH.pdf`
+- [LT768x_AP-Note_V30_CH](documents/Shared_References/lt768x-ap-note-v30-ch-805cf3eb-c666ca70/reviewed.md) - `Shared_References\H7\official_board_docs\7. SPI接口触摸显示屏资料\WKS43WV046-WCT产品资料\LT768x_AP-Note_V30_CH.pdf`
+- [WKS43WV046-WCT_SPEC_V0.0](documents/Shared_References/wks43wv046-wct-spec-v0-0-aa35883b-714ac844/reviewed.md) - `Shared_References\H7\official_board_docs\7. SPI接口触摸显示屏资料\WKS43WV046-WCT产品资料\WKS43WV046-WCT_SPEC_V0.0.pdf`
+- [WKS43WV046-WCT-V0](documents/Shared_References/wks43wv046-wct-v0-0d46422d-2643c3d2/reviewed.md) - `Shared_References\H7\official_board_docs\7. SPI接口触摸显示屏资料\WKS43WV046-WCT产品资料\WKS43WV046-WCT-V0.PDF`
+- [WKS50WV048-WCT_SPEC_V0.0](documents/Shared_References/wks50wv048-wct-spec-v0-0-8fa6231b-430fcba5/reviewed.md) - `Shared_References\H7\official_board_docs\7. SPI接口触摸显示屏资料\WKS50WV048-WCT产品资料\WKS50WV048-WCT_SPEC_V0.0.pdf`
+- [WKS50WV048-WCT-V0](documents/Shared_References/wks50wv048-wct-v0-c887ef4a-9b44d7e0/reviewed.md) - `Shared_References\H7\official_board_docs\7. SPI接口触摸显示屏资料\WKS50WV048-WCT产品资料\WKS50WV048-WCT-V0.PDF`
+- [FT5x46 Firmware 外部寄存器 (20150316)](documents/Shared_References/ft5x46-firmware-20150316-d0395f9f-9bd6adce/reviewed.md) - `Shared_References\H7\official_board_docs\7. SPI接口触摸显示屏资料\WKS70WSV081-WCT产品资料\FT5x46 Firmware 外部寄存器 (20150316).pdf`
+- [WKS70WSV081-WCT_SPEC_V0.0](documents/Shared_References/wks70wsv081-wct-spec-v0-0-cf9fc474-a5f86c8f/reviewed.md) - `Shared_References\H7\official_board_docs\7. SPI接口触摸显示屏资料\WKS70WSV081-WCT产品资料\WKS70WSV081-WCT_SPEC_V0.0.pdf`
+- [WKS70WSV081-WCT_V0](documents/Shared_References/wks70wsv081-wct-v0-af0044e6-9be6f05f/reviewed.md) - `Shared_References\H7\official_board_docs\7. SPI接口触摸显示屏资料\WKS70WSV081-WCT产品资料\WKS70WSV081-WCT_V0.PDF`
+- [RM0433_STM32H7x3单片机参考手册(中文)](documents/Shared_References/rm0433-stm32h7x3-f708c839-4e06489b/reviewed.md) - `Shared_References\H7\official_board_docs\8. STM32参考资料\RM0433_STM32H7x3单片机参考手册(中文).pdf`
+- RM0433_STM32H7x3和STM32H750单片机参考手册 - failed - `Shared_References\H7\official_board_docs\8. STM32参考资料\RM0433_STM32H7x3和STM32H750单片机参考手册.pdf`
+- Selection_Guide - failed - `Shared_References\H7\official_board_docs\8. STM32参考资料\Selection_Guide.pdf`
+- 联系我们 - pending - `Shared_References\H7\official_board_docs\联系我们.pdf`
+- ATK-CNN647B V1.0 - pending - `Shared_References\N647\atk_vendor_disk\3，原理图\ATK-CNN647B V1.0.pdf`
+- ATK-DNN647 V1.0 - pending - `Shared_References\N647\atk_vendor_disk\3，原理图\ATK-DNN647 V1.0.pdf`
+- 0.8双槽板对板公母图纸（4.0-8.5） - pending - `Shared_References\N647\atk_vendor_disk\7，硬件资料\器件手册\0.8双槽板对板公母图纸（4.0-8.5）.pdf`
+- AP3216C - pending - `Shared_References\N647\atk_vendor_disk\7，硬件资料\器件手册\AP3216C.pdf`
+- AT24C02 - pending - `Shared_References\N647\atk_vendor_disk\7，硬件资料\器件手册\AT24C02.pdf`
+- CH340C - pending - `Shared_References\N647\atk_vendor_disk\7，硬件资料\器件手册\CH340C.pdf`
+- ES8388 - pending - `Shared_References\N647\atk_vendor_disk\7，硬件资料\器件手册\ES8388.pdf`
+- FLSD016GFTLT--SD NAND - pending - `Shared_References\N647\atk_vendor_disk\7，硬件资料\器件手册\FLSD016GFTLT--SD NAND.pdf`
+- LTK8002D - pending - `Shared_References\N647\atk_vendor_disk\7，硬件资料\器件手册\LTK8002D.pdf`
+- MKDV16GIL-STPA - pending - `Shared_References\N647\atk_vendor_disk\7，硬件资料\器件手册\MKDV16GIL-STPA.pdf`
+- MX25UM25645G - pending - `Shared_References\N647\atk_vendor_disk\7，硬件资料\器件手册\MX25UM25645G.pdf`
+- QMC6308 - pending - `Shared_References\N647\atk_vendor_disk\7，硬件资料\器件手册\QMC6308.pdf`
+- QMI8658A - pending - `Shared_References\N647\atk_vendor_disk\7，硬件资料\器件手册\QMI8658A.pdf`
+- stm32n647x0 - pending - `Shared_References\N647\atk_vendor_disk\7，硬件资料\器件手册\stm32n647x0.pdf`
+- W958D8NBYA5I - pending - `Shared_References\N647\atk_vendor_disk\7，硬件资料\器件手册\W958D8NBYA5I.pdf`
+- YT8512C - pending - `Shared_References\N647\atk_vendor_disk\7，硬件资料\器件手册\YT8512C.pdf`
+- an5967-getting-started-with-hardware-development-for-stm32n6-mcus-stmicroelectronics - pending - `Shared_References\N647\atk_vendor_disk\8，STM32参考资料\an5967-getting-started-with-hardware-development-for-stm32n6-mcus-stmicroelectronics.pdf`
+- es0620-stm32n6xxxx-device-errata-stmicroelectronics - pending - `Shared_References\N647\atk_vendor_disk\8，STM32参考资料\es0620-stm32n6xxxx-device-errata-stmicroelectronics.pdf`
+- rm0486-stm32n647657xx-armbased-32bit-mcus-stmicroelectronics - pending - `Shared_References\N647\atk_vendor_disk\8，STM32参考资料\rm0486-stm32n647657xx-armbased-32bit-mcus-stmicroelectronics.pdf`
+- um3234-how-to-proceed-with-boot-rom-on-stm32n6-mcus-stmicroelectronics - pending - `Shared_References\N647\atk_vendor_disk\8，STM32参考资料\um3234-how-to-proceed-with-boot-rom-on-stm32n6-mcus-stmicroelectronics.pdf`
+- um3249-getting-started-with-stm32cuben6-for-stm32n6-series-stmicroelectronics - pending - `Shared_References\N647\atk_vendor_disk\8，STM32参考资料\um3249-getting-started-with-stm32cuben6-for-stm32n6-series-stmicroelectronics.pdf`
+- 正点原子产品选型手册_20240826 - pending - `Shared_References\N647\atk_vendor_disk\9，增值资料\正点原子产品选型手册_20240826.pdf`
+- 6B923D18D88629AFD01E4A04A5BDFAEB - pending - `Shared_References\N657\board_design_docs\6B923D18D88629AFD01E4A04A5BDFAEB.pdf`
+- Belling-BL9315_V2.1_en - pending - `Shared_References\N657\board_design_docs\Belling-BL9315_V2.1_en.pdf`
+- DIOO-DIO6013 V1.5 - pending - `Shared_References\N657\board_design_docs\DIOO-DIO6013 V1.5.pdf`
+- MXIC-MX66U1G45G - pending - `Shared_References\N657\board_design_docs\MXIC-MX66U1G45G.pdf`
+- ST-ST1S31 - pending - `Shared_References\N657\board_design_docs\ST-ST1S31.pdf`
+- stm32n6570-dk - pending - `Shared_References\N657\stm32n6资料\stm32n6570-dk.pdf`
+- es0620-stm32n6xxxx-device-errata-stmicroelectronics - pending - `Shared_References\N657\stm32n6资料\stm32n6资料\es0620-stm32n6xxxx-device-errata-stmicroelectronics.pdf`
+- pm0273-stm32-cortexm55-mcus-programming-manual-stmicroelectronics - pending - `Shared_References\N657\stm32n6资料\stm32n6资料\pm0273-stm32-cortexm55-mcus-programming-manual-stmicroelectronics.pdf`
+- rm0486-stm32n647657xx-armbased-32bit-mcus-stmicroelectronics - pending - `Shared_References\N657\stm32n6资料\stm32n6资料\rm0486-stm32n647657xx-armbased-32bit-mcus-stmicroelectronics.pdf`
+- stm32n657x0 - pending - `Shared_References\N657\stm32n6资料\stm32n6资料\stm32n657x0.pdf`
+- mb1280-3v3-c01-schematic - pending - `Shared_References\N657\stm32n6资料\stm32n6资料\官方n6评估板\mb1280-3v3-c01-schematic.pdf`
+- mb1854-csi-b01-schematic - pending - `Shared_References\N657\stm32n6资料\stm32n6资料\官方n6评估板\mb1854-csi-b01-schematic.pdf`
+- mb1854-csi-b02-schematic - pending - `Shared_References\N657\stm32n6资料\stm32n6资料\官方n6评估板\mb1854-csi-b02-schematic.pdf`
+- mb1860-rk050hr18c-b01-schematic - pending - `Shared_References\N657\stm32n6资料\stm32n6资料\官方n6评估板\mb1860-rk050hr18c-b01-schematic.pdf`
+- mb1939-n6570-c02-schematic - pending - `Shared_References\N657\stm32n6资料\stm32n6资料\官方n6评估板\mb1939-n6570-c02-schematic.pdf`
+- um3300-discovery-kit-with-stm32n657x0-mcu-stmicroelectronics - pending - `Shared_References\N657\stm32n6资料\um3300-discovery-kit-with-stm32n657x0-mcu-stmicroelectronics.pdf`
+- TI-PCMD3180 - pending - `Shared_References\TI-PCMD3180.pdf`
