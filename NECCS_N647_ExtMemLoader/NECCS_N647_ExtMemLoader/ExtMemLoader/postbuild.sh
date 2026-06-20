@@ -1,94 +1,45 @@
 #!/bin/bash
-# set cubeprog variable check
-cubeprog=1
-# Getting the project path
-projectdir="$(dirname "$(readlink -f "$0")")"
-# Check the operating system
-if [[ "$OSTYPE" == "linux-gnu"* ]]; then
-    # Commands for Linux
-    export dest_dir=$STM32_PRG_PATH
-    # Commands for Ubuntu to extract STM32_PRG_PATH from /.bashrc
-    if [[ -z "${dest_dir}" ]]; then
-        dest_dir=$(grep "^export STM32_PRG_PATH=" ~/.bashrc | cut -d'=' -f2)
+
+# Always create the loader beside the ELF. Installing it into STM32 tools is
+# best-effort so a normal project build never depends on administrator rights.
+build_dir="$(pwd -P)"
+loader_elf="$(find "$build_dir" -maxdepth 1 -type f -name '*ExtMemLoader*.elf' -print -quit)"
+
+if [ -z "$loader_elf" ]; then
+    echo "error :: External loader ELF was not found in $build_dir"
+    exit 1
+fi
+
+loader_name="$(basename "${loader_elf%.elf}.stldr")"
+local_loader="$build_dir/$loader_name"
+
+if ! cp -f "$loader_elf" "$local_loader"; then
+    echo "error :: Failed to create $local_loader"
+    exit 1
+fi
+
+echo "External loader created: $local_loader"
+
+install_loader() {
+    destination="$1"
+    label="$2"
+
+    if [ -z "$destination" ] || [ ! -d "$destination" ]; then
+        echo "info :: $label loader directory is unavailable; installation skipped."
+        return
     fi
-elif [[ "$OSTYPE" == "darwin"* ]]; then
-    # Commands for macOS
-    export dest_dir=$STM32_PRG_PATH
-elif [[ "$(echo "$OS" | grep -Ei 'win(dows)?(_nt)?')" ]]; then
-    # Commands for Windows
-    export dest_dir=$STM32_PRG_PATH
-else
-    echo "Unknown operating system"
-fi
-# check if STM32Cubeprogrammer env variable exists or not
-if [[ -z "${dest_dir}" ]]; then
-    echo "warning :: the env variable STM32_PRG_PATH is undefined"
-    cubeprog=0
-fi
 
-dest_dir=$dest_dir/ExternalLoader
-cubeide_cubeprogrammer_path=$1
-new_ext=".stldr"
-keyword="ExtMemLoader"
-keyword_CUBEIDE="Debug"
-extension=".ewp"
-
-# check used IDE EWARM or STM32CubeIDE
-for j in $(find "$projectdir" -name "*$keyword*$extension" 2>/dev/null); do
-	EWARM=true
-done
-extension=".cproject"
-for j in $(find "$projectdir" -name "$extension" 2>/dev/null); do
-	STM32CUBE=true
-done
-
-if [ "$EWARM" = true ]; then
-    echo "EWARM IDE is found!"
-    extension=".out"
-    for j in $(find "$projectdir" -name "*$keyword*$extension" 2>/dev/null); do
-        projectCopy="$j"
-    done
-	if [ "$cubeprog" = 1 ]; then
-		for f in "$projectCopy"; do
-			cp "$f" "$dest_dir/$(basename "${f%.*}")$new_ext"
-		done
-		if [ $? -eq 0 ]; then
-			echo "File copied successfully"
-		else
-			echo "Error: File copy failed please check that the folder exists or you have the right permission to copy the ExtMemLoader"
-		fi
-	fi
-	exit 0
-fi
-if [ "$STM32CUBE" = true ]; then
-    echo "STM32CUBE IDE is found!"
-    extension=".elf"
-    for j in $(find "$projectdir" -name "*$keyword*$extension" 2>/dev/null); do
-        projectCopy="$j"
-    done
-
-	if [ "$cubeprog" = 1 ]; then
-	  for f in "$projectCopy"; do
-          cp -a "$f" "$dest_dir/$(basename "${f%.*}")$new_ext"
-      done
-	  if [ $? -eq 0 ]; then
-		  echo "File copied successfully under STM32CubeProgrammer."
-	  else
-		 echo "warning :: File copy failed under STM32CubeProgrammer please check that the folder exists or you have the right permission to copy the ExtMemLoader."
-	  fi
-	fi
-if [ -d "$cubeide_cubeprogrammer_path" ]; then
-    for f in "$projectCopy"; do
-		cp -a "$f" "$cubeide_cubeprogrammer_path/$(basename "${f%.*}")$new_ext"
-    done
-    if [ $? -eq 0 ]; then
-		echo "File copied successfully under STM32CubeIDE"
-	else
-		echo "warning :: File copy failed under STM32CubeIDE please check that you have the right permission to copy the ExtMemLoader."
+    if cp -f "$local_loader" "$destination/$loader_name" 2>/dev/null; then
+        echo "External loader installed for $label."
+    else
+        echo "info :: $label loader directory is not writable; installation skipped."
     fi
-else
-   echo "warning :: File copy failed under STM32CubeIDE please check that the folder exists."
+}
+
+if [ -n "$STM32_PRG_PATH" ]; then
+    install_loader "$STM32_PRG_PATH/ExternalLoader" "STM32CubeProgrammer"
 fi
 
-	exit 0
-fi
+install_loader "$1" "STM32CubeIDE"
+
+exit 0
