@@ -74,6 +74,8 @@ typedef struct
 #define APP_PCMD_MAX_SLOTS       16U
 #define APP_PCMD_BUS_COUNT       2U
 #define APP_PCMD_IRQ_PRIO        5U
+#define APP_PCMD_DEFAULT_MODE    PCMD3180_ARRAY_MODE_32CH_48K
+#define APP_PCMD_AUTO_MODE_SWITCH 0U
 
 /* USER CODE END PD */
 
@@ -151,6 +153,8 @@ static void App_PCMD_StartDma(void);
 static void App_PCMD_StopDma(void);
 static void App_PCMD_DecayLevels(void);
 static void App_PCMD_ShowMicActivity(uint16_t start_y);
+static const char *App_SAI_StateName(uint32_t state);
+static const char *App_SAI_ErrorName(uint32_t error_code);
 static HAL_StatusTypeDef App_SAI_ApplyModeConfig(const PCMD3180_ArrayModeConfigTypeDef *mode_config);
 
 /* USER CODE END PFP */
@@ -239,6 +243,8 @@ static const char *App_PCMD_StatusName(PCMD3180_StatusTypeDef status)
   {
     case PCMD3180_OK:
       return "OK";
+    case PCMD3180_ERROR:
+      return "ERR";
     case PCMD3180_INVALID_ARGUMENT:
       return "ARG";
     case PCMD3180_IO_ERROR:
@@ -250,6 +256,59 @@ static const char *App_PCMD_StatusName(PCMD3180_StatusTypeDef status)
     default:
       return "ERR";
   }
+}
+
+static const char *App_SAI_StateName(uint32_t state)
+{
+  switch (state)
+  {
+    case HAL_SAI_STATE_RESET:
+      return "RESET";
+    case HAL_SAI_STATE_READY:
+      return "READY";
+    case HAL_SAI_STATE_BUSY:
+      return "BUSY";
+    case HAL_SAI_STATE_BUSY_TX:
+      return "BUSY_TX";
+    case HAL_SAI_STATE_BUSY_RX:
+      return "BUSY_RX";
+    default:
+      return "UNK";
+  }
+}
+
+static const char *App_SAI_ErrorName(uint32_t error_code)
+{
+  if (error_code == HAL_SAI_ERROR_NONE)
+  {
+    return "NONE";
+  }
+  if ((error_code & HAL_SAI_ERROR_DMA) != 0U)
+  {
+    return "DMA";
+  }
+  if ((error_code & HAL_SAI_ERROR_WCKCFG) != 0U)
+  {
+    return "WCK";
+  }
+  if ((error_code & HAL_SAI_ERROR_LFSDET) != 0U)
+  {
+    return "LFS";
+  }
+  if ((error_code & HAL_SAI_ERROR_AFSDET) != 0U)
+  {
+    return "AFS";
+  }
+  if ((error_code & HAL_SAI_ERROR_OVR) != 0U)
+  {
+    return "OVR";
+  }
+  if ((error_code & HAL_SAI_ERROR_UDR) != 0U)
+  {
+    return "UDR";
+  }
+
+  return "ERR";
 }
 
 static uint32_t App_SAI_AudioFrequency(uint32_t sample_rate_hz)
@@ -454,6 +513,12 @@ static void App_PCMD_ConfigureMode(PCMD3180_ArrayModeTypeDef mode)
 
   memset(&mode_config, 0, sizeof(mode_config));
   memset(g_pcmd_devices, 0, sizeof(g_pcmd_devices));
+  for (uint32_t i = 0U; i < PCMD3180_ARRAY_DEVICE_COUNT; i++)
+  {
+    g_pcmd_devices[i].probe_status = PCMD3180_ERROR;
+    g_pcmd_devices[i].config_status = PCMD3180_ERROR;
+    g_pcmd_devices[i].status_status = PCMD3180_ERROR;
+  }
   for (uint32_t bus = 0U; bus < APP_PCMD_BUS_COUNT; bus++)
   {
     for (uint32_t slot = 0U; slot < APP_PCMD_MAX_SLOTS; slot++)
@@ -485,6 +550,8 @@ static void App_PCMD_ConfigureMode(PCMD3180_ArrayModeTypeDef mode)
     g_pcmd_devices[i].present = (pcmd_status == PCMD3180_OK) ? 1U : 0U;
     if (pcmd_status != PCMD3180_OK)
     {
+      g_pcmd_devices[i].config_status = pcmd_status;
+      g_pcmd_devices[i].status_status = pcmd_status;
       continue;
     }
 
@@ -527,7 +594,7 @@ static void App_PCMD_DebugInit(void)
   }
 
   g_pcmd_debug.initialized = 1U;
-  App_PCMD_ConfigureMode(PCMD3180_ARRAY_MODE_32CH_48K);
+  App_PCMD_ConfigureMode(APP_PCMD_DEFAULT_MODE);
 }
 
 static void App_PCMD_Task(void)
@@ -539,7 +606,8 @@ static void App_PCMD_Task(void)
     return;
   }
 
-  if ((now - g_pcmd_debug.mode_start_tick) >= APP_PCMD_MODE_STEP_MS)
+  if ((APP_PCMD_AUTO_MODE_SWITCH != 0U) &&
+      ((now - g_pcmd_debug.mode_start_tick) >= APP_PCMD_MODE_STEP_MS))
   {
     const PCMD3180_ArrayModeTypeDef next_mode =
         (g_pcmd_debug.mode == PCMD3180_ARRAY_MODE_32CH_48K) ?
@@ -647,8 +715,9 @@ static void App_PCMD_ShowDebugPage(void)
 
   snprintf(line,
            sizeof(line),
-           "Mode:%s  Fs:%lu  Slots:%u  BCLK:%lu",
+           "Mode:%s Auto:%s Fs:%lu Slots:%u BCLK:%lu",
            App_PCMD_ModeName(g_pcmd_debug.mode),
+           (APP_PCMD_AUTO_MODE_SWITCH != 0U) ? "ON" : "OFF",
            (unsigned long)g_pcmd_debug.mode_config.sample_rate_hz,
            g_pcmd_debug.mode_config.tdm_slots_per_bus,
            (unsigned long)g_pcmd_debug.mode_config.expected_bclk_hz);
@@ -702,28 +771,30 @@ static void App_PCMD_ShowDebugPage(void)
   y += 12U;
   snprintf(line,
            sizeof(line),
-           "SAI A: half=%lu full=%lu err=%lu last=0x%08lX state=%lu",
-           (unsigned long)g_pcmd_sai_a_half_count,
-           (unsigned long)g_pcmd_sai_a_full_count,
-           (unsigned long)g_pcmd_sai_a_error_count,
-           (unsigned long)g_pcmd_sai_a_last_error,
-           (unsigned long)HAL_SAI_GetState(&hsai_BlockA1));
+            "SAI A: half=%lu full=%lu err=%lu last=%s(0x%lX) state=%s",
+            (unsigned long)g_pcmd_sai_a_half_count,
+            (unsigned long)g_pcmd_sai_a_full_count,
+            (unsigned long)g_pcmd_sai_a_error_count,
+            App_SAI_ErrorName(g_pcmd_sai_a_last_error),
+            (unsigned long)g_pcmd_sai_a_last_error,
+            App_SAI_StateName(HAL_SAI_GetState(&hsai_BlockA1)));
   rgblcd_show_string(12, y, 920, 16, 16, line, WHITE);
   y += 22U;
 
   snprintf(line,
            sizeof(line),
-           "SAI B: half=%lu full=%lu err=%lu last=0x%08lX state=%lu",
-           (unsigned long)g_pcmd_sai_b_half_count,
-           (unsigned long)g_pcmd_sai_b_full_count,
-           (unsigned long)g_pcmd_sai_b_error_count,
-           (unsigned long)g_pcmd_sai_b_last_error,
-           (unsigned long)HAL_SAI_GetState(&hsai_BlockB1));
+            "SAI B: half=%lu full=%lu err=%lu last=%s(0x%lX) state=%s",
+            (unsigned long)g_pcmd_sai_b_half_count,
+            (unsigned long)g_pcmd_sai_b_full_count,
+            (unsigned long)g_pcmd_sai_b_error_count,
+            App_SAI_ErrorName(g_pcmd_sai_b_last_error),
+            (unsigned long)g_pcmd_sai_b_last_error,
+            App_SAI_StateName(HAL_SAI_GetState(&hsai_BlockB1)));
   rgblcd_show_string(12, y, 920, 16, 16, line, WHITE);
   y += 26U;
 
   rgblcd_show_string(12, y, 900, 16, 16,
-                      "Expected: U1-U4 OK, DMA counters increasing, mode toggles every 7s.",
+                      "Expected: U1-U4 OK, DMA counters increasing. Auto mode switch is OFF.",
                       LGRAY);
   y += 28U;
   App_PCMD_ShowMicActivity(y);
