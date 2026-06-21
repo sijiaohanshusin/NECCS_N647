@@ -67,10 +67,13 @@ typedef struct
 #define APP_HYPERRAM_TEST_BYTES  0x1000UL
 #define APP_PCMD_MODE_STEP_MS    7000U
 #define APP_PCMD_POLL_MS         500U
-#define APP_PCMD_DMA_WORDS       512U
+#define APP_PCMD_UI_REFRESH_MS   1000U
+#define APP_PCMD_MIC_PAGE_MS     3000U
+#define APP_PCMD_DMA_WORDS       4096U
 #define APP_PCMD_I2C_TIMEOUT_MS  100U
 #define APP_PCMD_MAX_SLOTS       16U
 #define APP_PCMD_BUS_COUNT       2U
+#define APP_PCMD_IRQ_PRIO        5U
 
 /* USER CODE END PD */
 
@@ -124,6 +127,7 @@ static volatile uint32_t g_pcmd_sai_b_error_count = 0;
 static volatile uint32_t g_pcmd_sai_a_last_error = 0;
 static volatile uint32_t g_pcmd_sai_b_last_error = 0;
 static volatile uint16_t g_pcmd_slot_peak[APP_PCMD_BUS_COUNT][APP_PCMD_MAX_SLOTS];
+static uint32_t g_pcmd_last_ui_tick = 0;
 static uint32_t g_sai1_client = 0;
 
 /* USER CODE END PV */
@@ -355,14 +359,14 @@ static void App_PCMD_StartDma(void)
 {
   if (HAL_SAI_GetState(&hsai_BlockB1) == HAL_SAI_STATE_READY)
   {
-    SCB_CleanInvalidateDCache_by_Addr(g_pcmd_sai_b_rx, sizeof(g_pcmd_sai_b_rx));
+    SCB_InvalidateDCache_by_Addr(g_pcmd_sai_b_rx, sizeof(g_pcmd_sai_b_rx));
     g_pcmd_debug.dma_b_status =
         HAL_SAI_Receive_DMA(&hsai_BlockB1, (uint8_t *)g_pcmd_sai_b_rx, APP_PCMD_DMA_WORDS);
   }
 
   if (HAL_SAI_GetState(&hsai_BlockA1) == HAL_SAI_STATE_READY)
   {
-    SCB_CleanInvalidateDCache_by_Addr(g_pcmd_sai_a_rx, sizeof(g_pcmd_sai_a_rx));
+    SCB_InvalidateDCache_by_Addr(g_pcmd_sai_a_rx, sizeof(g_pcmd_sai_a_rx));
     g_pcmd_debug.dma_a_status =
         HAL_SAI_Receive_DMA(&hsai_BlockA1, (uint8_t *)g_pcmd_sai_a_rx, APP_PCMD_DMA_WORDS);
   }
@@ -556,78 +560,78 @@ static void App_PCMD_Task(void)
 static void App_PCMD_ShowMicActivity(uint16_t start_y)
 {
   char label[16];
+  char line[96];
   PCMD3180_ArrayModeConfigTypeDef full_array_map;
   const uint16_t cell_width = 118U;
   const uint16_t bar_width = 70U;
+  const uint32_t device_index =
+      (HAL_GetTick() / APP_PCMD_MIC_PAGE_MS) % PCMD3180_ARRAY_DEVICE_COUNT;
+  const PCMD3180_ArrayDevicePlanTypeDef *plan =
+      &g_pcmd_debug.mode_config.devices[device_index];
+  const uint16_t row_y = (uint16_t)(start_y + 34U);
 
   memset(&full_array_map, 0, sizeof(full_array_map));
   (void)PCMD3180_GetArrayModeConfig(PCMD3180_ARRAY_MODE_32CH_48K, &full_array_map);
 
-  rgblcd_show_string(12, start_y, 980, 16, 16,
-                     "MIC peak: tap one microphone; its bar and percentage should jump.",
-                     CYAN);
-  start_y += 24U;
+  snprintf(line,
+           sizeof(line),
+           "MIC peak page: U%lu/4, rotates every %lus. Tap one microphone; its bar should jump.",
+           (unsigned long)(device_index + 1U),
+           (unsigned long)(APP_PCMD_MIC_PAGE_MS / 1000U));
+  rgblcd_show_string(12, start_y, 980, 16, 16, line, CYAN);
 
-  for (uint32_t device_index = 0U;
-       device_index < PCMD3180_ARRAY_DEVICE_COUNT;
-       device_index++)
+  snprintf(label, sizeof(label), "U%lu", (unsigned long)(device_index + 1U));
+  rgblcd_show_string(12, row_y + 8U, 42, 16, 16, label,
+                     (g_pcmd_devices[device_index].present != 0U) ? YELLOW : RED);
+
+  for (uint32_t channel = 0U; channel < PCMD3180_ARRAY_MAX_MICS_PER_DEV; channel++)
   {
-    const PCMD3180_ArrayDevicePlanTypeDef *plan =
-        &g_pcmd_debug.mode_config.devices[device_index];
-    const uint16_t row_y = (uint16_t)(start_y + device_index * 52U);
+    const uint16_t x = (uint16_t)(58U + channel * cell_width);
+    const uint8_t mic_id = full_array_map.devices[device_index].mic_id[channel];
+    const uint8_t channel_bit = (uint8_t)(PCMD3180_CHANNEL_1 >> channel);
+    const uint8_t active = ((channel < plan->mic_count) &&
+                            ((plan->output_channel_mask & channel_bit) != 0U)) ? 1U : 0U;
+    uint16_t color = GRAY;
+    uint32_t percent = 0U;
 
-    snprintf(label, sizeof(label), "U%lu", (unsigned long)(device_index + 1U));
-    rgblcd_show_string(12, row_y + 8U, 42, 16, 16, label,
-                       (g_pcmd_devices[device_index].present != 0U) ? YELLOW : RED);
-
-    for (uint32_t channel = 0U; channel < PCMD3180_ARRAY_MAX_MICS_PER_DEV; channel++)
+    if ((g_pcmd_devices[device_index].present == 0U) ||
+        (g_pcmd_devices[device_index].config_status != PCMD3180_OK))
     {
-      const uint16_t x = (uint16_t)(58U + channel * cell_width);
-      const uint8_t mic_id = full_array_map.devices[device_index].mic_id[channel];
-      const uint8_t channel_bit = (uint8_t)(PCMD3180_CHANNEL_1 >> channel);
-      const uint8_t active = ((channel < plan->mic_count) &&
-                              ((plan->output_channel_mask & channel_bit) != 0U)) ? 1U : 0U;
-      uint16_t color = GRAY;
-      uint32_t percent = 0U;
+      snprintf(label, sizeof(label), "M%02u ERR", mic_id);
+      color = RED;
+    }
+    else if (active == 0U)
+    {
+      snprintf(label, sizeof(label), "M%02u --", mic_id);
+    }
+    else
+    {
+      const uint32_t slot = (uint32_t)plan->start_slot + channel;
+      const uint16_t peak = ((plan->tdm_bus < APP_PCMD_BUS_COUNT) &&
+                             (slot < APP_PCMD_MAX_SLOTS)) ?
+                            g_pcmd_slot_peak[plan->tdm_bus][slot] : 0U;
 
-      if ((g_pcmd_devices[device_index].present == 0U) ||
-          (g_pcmd_devices[device_index].config_status != PCMD3180_OK))
+      percent = ((uint32_t)peak * 100U) / 32768U;
+      if (percent > 100U)
       {
-        snprintf(label, sizeof(label), "M%02u ERR", mic_id);
-        color = RED;
+        percent = 100U;
       }
-      else if (active == 0U)
-      {
-        snprintf(label, sizeof(label), "M%02u --", mic_id);
-      }
-      else
-      {
-        const uint32_t slot = (uint32_t)plan->start_slot + channel;
-        const uint16_t peak = (slot < APP_PCMD_MAX_SLOTS) ?
-                              g_pcmd_slot_peak[plan->tdm_bus][slot] : 0U;
+      color = (percent >= 2U) ? GREEN : ((percent > 0U) ? YELLOW : GRAY);
+      snprintf(label, sizeof(label), "M%02u %3lu", mic_id,
+               (unsigned long)percent);
+    }
 
-        percent = ((uint32_t)peak * 100U) / 32768U;
-        if (percent > 100U)
-        {
-          percent = 100U;
-        }
-        color = (percent >= 2U) ? GREEN : ((percent > 0U) ? YELLOW : GRAY);
-        snprintf(label, sizeof(label), "M%02u %3lu", mic_id,
-                 (unsigned long)percent);
-      }
-
-      rgblcd_show_string(x, row_y, 100, 12, 12, label, color);
-      rgblcd_draw_rectangle(x, row_y + 18U, x + bar_width, row_y + 31U, GRAYBLUE);
-      if ((active != 0U) && (percent > 0U) &&
-          (g_pcmd_devices[device_index].config_status == PCMD3180_OK))
-      {
-        const uint16_t fill_width = (uint16_t)((percent * (bar_width - 2U)) / 100U);
-        rgblcd_fill(x + 1U,
-                    row_y + 19U,
-                    x + 1U + fill_width,
-                    row_y + 30U,
-                    color);
-      }
+    rgblcd_show_string(x, row_y, 100, 12, 12, label, color);
+    rgblcd_draw_rectangle(x, row_y + 18U, x + bar_width, row_y + 31U, GRAYBLUE);
+    if ((active != 0U) && (percent > 0U) &&
+        (g_pcmd_devices[device_index].config_status == PCMD3180_OK))
+    {
+      const uint16_t fill_width = (uint16_t)((percent * (bar_width - 2U)) / 100U);
+      rgblcd_fill(x + 1U,
+                  row_y + 19U,
+                  x + 1U + fill_width,
+                  row_y + 30U,
+                  color);
     }
   }
 }
@@ -794,6 +798,7 @@ int main(void)
   led_init();
   rgblcd_init();
   App_PCMD_DebugInit();
+  g_pcmd_last_ui_tick = HAL_GetTick() - APP_PCMD_UI_REFRESH_MS;
 
   /* USER CODE END 2 */
 
@@ -801,11 +806,17 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+    const uint32_t now = HAL_GetTick();
+
     App_PCMD_Task();
-    App_PCMD_ShowDebugPage();
-    App_PCMD_DecayLevels();
-    LED0_TOGGLE();
-    HAL_Delay(250U);
+    if ((now - g_pcmd_last_ui_tick) >= APP_PCMD_UI_REFRESH_MS)
+    {
+      g_pcmd_last_ui_tick = now;
+      App_PCMD_ShowDebugPage();
+      App_PCMD_DecayLevels();
+      LED0_TOGGLE();
+    }
+    HAL_Delay(20U);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -1517,9 +1528,9 @@ void HAL_SAI_MspInit(SAI_HandleTypeDef *hsai)
     }
     __HAL_LINKDMA(hsai, hdmarx, handle_GPDMA1_Channel0);
 
-    HAL_NVIC_SetPriority(SAI1_A_IRQn, 0, 0);
+    HAL_NVIC_SetPriority(SAI1_A_IRQn, APP_PCMD_IRQ_PRIO, 0);
     HAL_NVIC_EnableIRQ(SAI1_A_IRQn);
-    HAL_NVIC_SetPriority(GPDMA1_Channel0_IRQn, 0, 0);
+    HAL_NVIC_SetPriority(GPDMA1_Channel0_IRQn, APP_PCMD_IRQ_PRIO, 0);
     HAL_NVIC_EnableIRQ(GPDMA1_Channel0_IRQn);
   }
   else
@@ -1559,9 +1570,9 @@ void HAL_SAI_MspInit(SAI_HandleTypeDef *hsai)
     }
     __HAL_LINKDMA(hsai, hdmarx, handle_GPDMA1_Channel1);
 
-    HAL_NVIC_SetPriority(SAI1_B_IRQn, 0, 0);
+    HAL_NVIC_SetPriority(SAI1_B_IRQn, APP_PCMD_IRQ_PRIO, 0);
     HAL_NVIC_EnableIRQ(SAI1_B_IRQn);
-    HAL_NVIC_SetPriority(GPDMA1_Channel1_IRQn, 0, 0);
+    HAL_NVIC_SetPriority(GPDMA1_Channel1_IRQn, APP_PCMD_IRQ_PRIO, 0);
     HAL_NVIC_EnableIRQ(GPDMA1_Channel1_IRQn);
   }
 }
@@ -1625,7 +1636,7 @@ void HAL_SAI_RxCpltCallback(SAI_HandleTypeDef *hsai)
                            APP_PCMD_DMA_WORDS,
                            g_pcmd_debug.mode_config.tdm_slots_per_bus,
                            g_pcmd_slot_peak[PCMD3180_TDM_BUS_A]);
-    SCB_CleanInvalidateDCache_by_Addr(g_pcmd_sai_a_rx, sizeof(g_pcmd_sai_a_rx));
+    SCB_InvalidateDCache_by_Addr(g_pcmd_sai_a_rx, sizeof(g_pcmd_sai_a_rx));
     g_pcmd_debug.dma_a_status =
         HAL_SAI_Receive_DMA(&hsai_BlockA1, (uint8_t *)g_pcmd_sai_a_rx, APP_PCMD_DMA_WORDS);
   }
@@ -1637,7 +1648,7 @@ void HAL_SAI_RxCpltCallback(SAI_HandleTypeDef *hsai)
                            APP_PCMD_DMA_WORDS,
                            g_pcmd_debug.mode_config.tdm_slots_per_bus,
                            g_pcmd_slot_peak[PCMD3180_TDM_BUS_B]);
-    SCB_CleanInvalidateDCache_by_Addr(g_pcmd_sai_b_rx, sizeof(g_pcmd_sai_b_rx));
+    SCB_InvalidateDCache_by_Addr(g_pcmd_sai_b_rx, sizeof(g_pcmd_sai_b_rx));
     g_pcmd_debug.dma_b_status =
         HAL_SAI_Receive_DMA(&hsai_BlockB1, (uint8_t *)g_pcmd_sai_b_rx, APP_PCMD_DMA_WORDS);
   }

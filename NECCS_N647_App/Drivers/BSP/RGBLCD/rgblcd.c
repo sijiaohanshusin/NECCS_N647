@@ -248,9 +248,19 @@ void rgblcd_fill(uint16_t sx, uint16_t sy, uint16_t ex, uint16_t ey, uint16_t co
 
     if ((rgblcddev.width == 0U) || (rgblcddev.height == 0U) ||
         (rgblcddev.pwidth == 0U) || (rgblcddev.pheight == 0U) ||
-        (sx > ex) || (sy > ey))
+        (sx > ex) || (sy > ey) ||
+        (sx >= rgblcddev.width) || (sy >= rgblcddev.height))
     {
         return;
+    }
+
+    if (ex >= rgblcddev.width)
+    {
+        ex = rgblcddev.width - 1U;
+    }
+    if (ey >= rgblcddev.height)
+    {
+        ey = rgblcddev.height - 1U;
     }
 
     if (rgblcddev.dir == 0)
@@ -266,6 +276,12 @@ void rgblcd_fill(uint16_t sx, uint16_t sy, uint16_t ex, uint16_t ey, uint16_t co
         psy = sy;
         pex = ex;
         pey = ey;
+    }
+
+    if ((psx > pex) || (psy > pey) ||
+        (pex >= rgblcddev.pwidth) || (pey >= rgblcddev.pheight))
+    {
+        return;
     }
 
     hdma2d.Init.Mode = DMA2D_R2M;
@@ -325,6 +341,11 @@ void rgblcd_draw_point(uint16_t x, uint16_t y, uint16_t color)
     uint16_t px;
     uint16_t py;
 
+    if ((x >= rgblcddev.width) || (y >= rgblcddev.height))
+    {
+        return;
+    }
+
     if (rgblcddev.dir == 0)
     {
         px = y;
@@ -334,6 +355,11 @@ void rgblcd_draw_point(uint16_t x, uint16_t y, uint16_t color)
     {
         px = x;
         py = y;
+    }
+
+    if ((px >= rgblcddev.pwidth) || (py >= rgblcddev.pheight))
+    {
+        return;
     }
 
     g_ltdc_lcd_framebuf[rgblcddev.pwidth * py + px] = color;
@@ -350,6 +376,11 @@ uint16_t rgblcd_read_point(uint16_t x, uint16_t y)
     uint16_t px;
     uint16_t py;
 
+    if ((x >= rgblcddev.width) || (y >= rgblcddev.height))
+    {
+        return 0U;
+    }
+
     if (rgblcddev.dir == 0)
     {
         px = y;
@@ -359,6 +390,11 @@ uint16_t rgblcd_read_point(uint16_t x, uint16_t y)
     {
         px = x;
         py = y;
+    }
+
+    if ((px >= rgblcddev.pwidth) || (py >= rgblcddev.pheight))
+    {
+        return 0U;
     }
 
     g_ltdc_lcd_framebuf[rgblcddev.pwidth * py + px] = g_ltdc_lcd_framebuf[rgblcddev.pwidth * py + px];
@@ -480,9 +516,14 @@ void rgblcd_draw_line(uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2, uint16
  */
 void rgblcd_draw_hline(uint16_t x, uint16_t y, uint16_t len, uint16_t color)
 {
-    if ((len == 0) || (x > rgblcddev.width) || (y > rgblcddev.height))
+    if ((len == 0) || (x >= rgblcddev.width) || (y >= rgblcddev.height))
     {
         return;
+    }
+
+    if ((uint32_t)x + len > rgblcddev.width)
+    {
+        len = rgblcddev.width - x;
     }
 
     rgblcd_fill(x, y, x + len - 1, y, color);
@@ -780,11 +821,29 @@ void rgblcd_show_xnum(uint16_t x, uint16_t y, uint32_t num, uint8_t len, uint8_t
  */
 void rgblcd_show_string(uint16_t x, uint16_t y, uint16_t width, uint16_t height, uint8_t size, char *p, uint16_t color)
 {
-    uint8_t x0;
+    uint16_t x0;
+    uint16_t end_x;
+    uint16_t end_y;
+
+    if ((p == NULL) || (size == 0U) ||
+        (x >= rgblcddev.width) || (y >= rgblcddev.height))
+    {
+        return;
+    }
 
     x0 = x;
-    width += x;
-    height += y;
+    end_x = x + width;
+    end_y = y + height;
+    if ((end_x < x) || (end_x > rgblcddev.width))
+    {
+        end_x = rgblcddev.width;
+    }
+    if ((end_y < y) || (end_y > rgblcddev.height))
+    {
+        end_y = rgblcddev.height;
+    }
+    width = end_x;
+    height = end_y;
     while ((*p <= '~') && (*p >= ' '))              /* 判断是否为非法字符 */
     {
         if (x >= width)                             /* 宽度越界 */
