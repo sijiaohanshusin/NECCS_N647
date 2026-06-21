@@ -26,8 +26,11 @@
 #include "./HyperRAM/hyperram.h"
 #endif
 #include "./LED/led.h"
+#include "./PCMD3180/pcmd3180.h"
+#include "./PCMD3180/pcmd3180_hal.h"
 #include "./RGBLCD/rgblcd.h"
 #include <stdio.h>
+#include <string.h>
 
 /* USER CODE END Includes */
 
@@ -35,9 +38,26 @@
 /* USER CODE BEGIN PTD */
 typedef struct
 {
-  uint16_t color;
-  const char *name;
-} AppColorStep_t;
+  uint8_t present;
+  PCMD3180_StatusTypeDef probe_status;
+  PCMD3180_StatusTypeDef config_status;
+  PCMD3180_StatusTypeDef status_status;
+  PCMD3180_StatusSnapshotTypeDef snapshot;
+} AppPcmdDeviceState_t;
+
+typedef struct
+{
+  PCMD3180_ArrayModeTypeDef mode;
+  PCMD3180_ArrayModeConfigTypeDef mode_config;
+  PCMD3180_StatusTypeDef mode_config_status;
+  HAL_StatusTypeDef sai_status;
+  HAL_StatusTypeDef dma_a_status;
+  HAL_StatusTypeDef dma_b_status;
+  uint32_t mode_start_tick;
+  uint32_t last_poll_tick;
+  uint32_t reconfigure_count;
+  uint8_t initialized;
+} AppPcmdDebugState_t;
 
 /* USER CODE END PTD */
 
@@ -45,7 +65,12 @@ typedef struct
 /* USER CODE BEGIN PD */
 #define APP_HYPERRAM_BASE        0x90000000UL
 #define APP_HYPERRAM_TEST_BYTES  0x1000UL
-#define APP_COLOR_STEP_MS        1000U
+#define APP_PCMD_MODE_STEP_MS    7000U
+#define APP_PCMD_POLL_MS         500U
+#define APP_PCMD_DMA_WORDS       512U
+#define APP_PCMD_I2C_TIMEOUT_MS  100U
+#define APP_PCMD_MAX_SLOTS       16U
+#define APP_PCMD_BUS_COUNT       2U
 
 /* USER CODE END PD */
 
@@ -58,9 +83,17 @@ typedef struct
 
 DMA2D_HandleTypeDef hdma2d;
 
+I2C_HandleTypeDef hi2c2;
+
 LTDC_HandleTypeDef hltdc;
 
+SAI_HandleTypeDef hsai_BlockA1;
+SAI_HandleTypeDef hsai_BlockB1;
+
 XSPI_HandleTypeDef hxspi1;
+
+DMA_HandleTypeDef handle_GPDMA1_Channel0;
+DMA_HandleTypeDef handle_GPDMA1_Channel1;
 
 /* USER CODE BEGIN PV */
 #ifdef DEBUG
@@ -75,18 +108,46 @@ volatile uint32_t g_app_tick_recover_vtor = 0;
 volatile uint32_t g_app_tick_recover_ctrl = 0;
 volatile uint32_t g_app_tick_recover_load = 0;
 volatile uint32_t g_app_tick_recover_primask = 0;
+static uint16_t g_pcmd_sai_a_rx[APP_PCMD_DMA_WORDS] __attribute__((aligned(32)));
+static uint16_t g_pcmd_sai_b_rx[APP_PCMD_DMA_WORDS] __attribute__((aligned(32)));
+static PCMD3180_BusTypeDef g_pcmd_bus;
+static PCMD3180_HAL_BusContextTypeDef g_pcmd_bus_context;
+static PCMD3180_HandleTypeDef g_pcmd_handles[PCMD3180_ARRAY_DEVICE_COUNT];
+static AppPcmdDeviceState_t g_pcmd_devices[PCMD3180_ARRAY_DEVICE_COUNT];
+static AppPcmdDebugState_t g_pcmd_debug;
+static volatile uint32_t g_pcmd_sai_a_half_count = 0;
+static volatile uint32_t g_pcmd_sai_a_full_count = 0;
+static volatile uint32_t g_pcmd_sai_a_error_count = 0;
+static volatile uint32_t g_pcmd_sai_b_half_count = 0;
+static volatile uint32_t g_pcmd_sai_b_full_count = 0;
+static volatile uint32_t g_pcmd_sai_b_error_count = 0;
+static volatile uint32_t g_pcmd_sai_a_last_error = 0;
+static volatile uint32_t g_pcmd_sai_b_last_error = 0;
+static volatile uint16_t g_pcmd_slot_peak[APP_PCMD_BUS_COUNT][APP_PCMD_MAX_SLOTS];
+static uint32_t g_sai1_client = 0;
 
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 static void MX_GPIO_Init(void);
 static void MX_DMA2D_Init(void);
+static void MX_I2C2_Init(void);
 static void MX_LTDC_Init(void);
+static void MX_SAI1_Init(void);
 static void SystemIsolation_Config(void);
 /* USER CODE BEGIN PFP */
 static uint32_t App_HyperRAM_SelfTest(void);
-static void App_ShowBringUpPage(uint16_t color, const char *color_name, const char *status_line);
 static void App_RecoverHalTick(void);
+static void App_PCMD_DebugInit(void);
+static void App_PCMD_Task(void);
+static void App_PCMD_ShowDebugPage(void);
+static void App_PCMD_ConfigureMode(PCMD3180_ArrayModeTypeDef mode);
+static void App_PCMD_PollStatus(void);
+static void App_PCMD_StartDma(void);
+static void App_PCMD_StopDma(void);
+static void App_PCMD_DecayLevels(void);
+static void App_PCMD_ShowMicActivity(uint16_t start_y);
+static HAL_StatusTypeDef App_SAI_ApplyModeConfig(const PCMD3180_ArrayModeConfigTypeDef *mode_config);
 
 /* USER CODE END PFP */
 
@@ -155,17 +216,513 @@ static uint32_t App_HyperRAM_SelfTest(void)
   return 1;
 }
 
-static void App_ShowBringUpPage(uint16_t color, const char *color_name, const char *status_line)
+static const char *App_PCMD_ModeName(PCMD3180_ArrayModeTypeDef mode)
 {
-  const uint16_t text_color = ((color == WHITE) || (color == YELLOW) ||
-                               (color == CYAN) || (color == LGRAY)) ? RED : WHITE;
+  switch (mode)
+  {
+    case PCMD3180_ARRAY_MODE_32CH_48K:
+      return "32CH 48K";
+    case PCMD3180_ARRAY_MODE_CORE16_192K:
+      return "CORE16 192K";
+    default:
+      return "UNKNOWN";
+  }
+}
 
-  rgblcd_clear(color);
-  rgblcd_show_string(10, 32, 300, 32, 32, "NECCS N647 APP", text_color);
-  rgblcd_show_string(10, 76, 300, 24, 24, "HyperRAM + RGBLCD", text_color);
-  rgblcd_show_string(10, 110, 360, 16, 16, (char *)status_line, text_color);
-  rgblcd_show_string(10, 132, 240, 16, 16, "Color:", text_color);
-  rgblcd_show_string(80, 132, 240, 16, 16, (char *)color_name, text_color);
+static const char *App_PCMD_StatusName(PCMD3180_StatusTypeDef status)
+{
+  switch (status)
+  {
+    case PCMD3180_OK:
+      return "OK";
+    case PCMD3180_INVALID_ARGUMENT:
+      return "ARG";
+    case PCMD3180_IO_ERROR:
+      return "IO";
+    case PCMD3180_VERIFY_ERROR:
+      return "VERIFY";
+    case PCMD3180_TIMEOUT:
+      return "TIMEOUT";
+    default:
+      return "ERR";
+  }
+}
+
+static uint32_t App_SAI_AudioFrequency(uint32_t sample_rate_hz)
+{
+  if (sample_rate_hz == PCMD3180_SAMPLE_RATE_192K)
+  {
+    return SAI_AUDIO_FREQUENCY_192K;
+  }
+
+  return SAI_AUDIO_FREQUENCY_48K;
+}
+
+static uint32_t App_SAI_SlotActiveMask(uint8_t slot_count)
+{
+  if (slot_count >= 16U)
+  {
+    return SAI_SLOTACTIVE_ALL;
+  }
+
+  return (1UL << slot_count) - 1UL;
+}
+
+static void App_SAI_FillBlock(SAI_HandleTypeDef *hsai,
+                              SAI_Block_TypeDef *instance,
+                              uint32_t audio_mode,
+                              uint32_t synchro,
+                              const PCMD3180_ArrayModeConfigTypeDef *mode_config)
+{
+  const uint32_t slot_width_bits = PCMD3180_GetSlotWidthBits(mode_config->slot_width);
+  const uint32_t frame_length = mode_config->tdm_slots_per_bus * slot_width_bits;
+
+  hsai->Instance = instance;
+  hsai->Init.Protocol = SAI_FREE_PROTOCOL;
+  hsai->Init.AudioMode = audio_mode;
+  hsai->Init.DataSize = SAI_DATASIZE_16;
+  hsai->Init.FirstBit = SAI_FIRSTBIT_MSB;
+  hsai->Init.ClockStrobing = SAI_CLOCKSTROBING_FALLINGEDGE;
+  hsai->Init.Synchro = synchro;
+  hsai->Init.SynchroExt = SAI_SYNCEXT_DISABLE;
+  hsai->Init.MckOutput = SAI_MCK_OUTPUT_DISABLE;
+  hsai->Init.OutputDrive = SAI_OUTPUTDRIVE_DISABLE;
+  hsai->Init.NoDivider = SAI_MASTERDIVIDER_ENABLE;
+  hsai->Init.FIFOThreshold = SAI_FIFOTHRESHOLD_1QF;
+  hsai->Init.AudioFrequency = App_SAI_AudioFrequency(mode_config->sample_rate_hz);
+  hsai->Init.Mckdiv = 0;
+  hsai->Init.MckOverSampling = SAI_MCK_OVERSAMPLING_DISABLE;
+  hsai->Init.MonoStereoMode = SAI_STEREOMODE;
+  hsai->Init.CompandingMode = SAI_NOCOMPANDING;
+  hsai->Init.TriState = SAI_OUTPUT_NOTRELEASED;
+  hsai->Init.PdmInit.Activation = DISABLE;
+  hsai->Init.PdmInit.MicPairsNbr = 1;
+  hsai->Init.PdmInit.ClockEnable = 0;
+  hsai->FrameInit.FrameLength = frame_length;
+  hsai->FrameInit.ActiveFrameLength = 1;
+  hsai->FrameInit.FSDefinition = SAI_FS_STARTFRAME;
+  hsai->FrameInit.FSPolarity = SAI_FS_ACTIVE_HIGH;
+  hsai->FrameInit.FSOffset = SAI_FS_BEFOREFIRSTBIT;
+  hsai->SlotInit.FirstBitOffset = 0;
+  hsai->SlotInit.SlotSize = SAI_SLOTSIZE_16B;
+  hsai->SlotInit.SlotNumber = mode_config->tdm_slots_per_bus;
+  hsai->SlotInit.SlotActive = App_SAI_SlotActiveMask(mode_config->tdm_slots_per_bus);
+}
+
+static HAL_StatusTypeDef App_SAI_ApplyModeConfig(const PCMD3180_ArrayModeConfigTypeDef *mode_config)
+{
+  HAL_StatusTypeDef status;
+
+  if (mode_config == NULL)
+  {
+    return HAL_ERROR;
+  }
+
+  App_PCMD_StopDma();
+
+  if (hsai_BlockA1.State != HAL_SAI_STATE_RESET)
+  {
+    (void)HAL_SAI_DeInit(&hsai_BlockA1);
+  }
+  if (hsai_BlockB1.State != HAL_SAI_STATE_RESET)
+  {
+    (void)HAL_SAI_DeInit(&hsai_BlockB1);
+  }
+
+  memset(&hsai_BlockA1, 0, sizeof(hsai_BlockA1));
+  memset(&hsai_BlockB1, 0, sizeof(hsai_BlockB1));
+
+  App_SAI_FillBlock(&hsai_BlockA1,
+                    SAI1_Block_A,
+                    SAI_MODEMASTER_RX,
+                    SAI_ASYNCHRONOUS,
+                    mode_config);
+  status = HAL_SAI_Init(&hsai_BlockA1);
+  if (status != HAL_OK)
+  {
+    return status;
+  }
+
+  App_SAI_FillBlock(&hsai_BlockB1,
+                    SAI1_Block_B,
+                    SAI_MODESLAVE_RX,
+                    SAI_SYNCHRONOUS,
+                    mode_config);
+  return HAL_SAI_Init(&hsai_BlockB1);
+}
+
+static void App_PCMD_StartDma(void)
+{
+  if (HAL_SAI_GetState(&hsai_BlockB1) == HAL_SAI_STATE_READY)
+  {
+    SCB_CleanInvalidateDCache_by_Addr(g_pcmd_sai_b_rx, sizeof(g_pcmd_sai_b_rx));
+    g_pcmd_debug.dma_b_status =
+        HAL_SAI_Receive_DMA(&hsai_BlockB1, (uint8_t *)g_pcmd_sai_b_rx, APP_PCMD_DMA_WORDS);
+  }
+
+  if (HAL_SAI_GetState(&hsai_BlockA1) == HAL_SAI_STATE_READY)
+  {
+    SCB_CleanInvalidateDCache_by_Addr(g_pcmd_sai_a_rx, sizeof(g_pcmd_sai_a_rx));
+    g_pcmd_debug.dma_a_status =
+        HAL_SAI_Receive_DMA(&hsai_BlockA1, (uint8_t *)g_pcmd_sai_a_rx, APP_PCMD_DMA_WORDS);
+  }
+}
+
+static void App_PCMD_StopDma(void)
+{
+  if (HAL_SAI_GetState(&hsai_BlockA1) == HAL_SAI_STATE_BUSY_RX)
+  {
+    (void)HAL_SAI_DMAStop(&hsai_BlockA1);
+  }
+  if (HAL_SAI_GetState(&hsai_BlockB1) == HAL_SAI_STATE_BUSY_RX)
+  {
+    (void)HAL_SAI_DMAStop(&hsai_BlockB1);
+  }
+}
+
+static void App_PCMD_ProcessBuffer(const uint16_t *buffer,
+                                   uint32_t word_count,
+                                   uint8_t slot_count,
+                                   volatile uint16_t *peak_hold)
+{
+  uint16_t instant_peak[APP_PCMD_MAX_SLOTS] = {0U};
+
+  if ((buffer == NULL) || (peak_hold == NULL) ||
+      (slot_count == 0U) || (slot_count > APP_PCMD_MAX_SLOTS))
+  {
+    return;
+  }
+
+  for (uint32_t word = 0U; word < word_count; word++)
+  {
+    const int32_t sample = (int16_t)buffer[word];
+    const uint32_t magnitude = (sample < 0) ? (uint32_t)(-sample) : (uint32_t)sample;
+    const uint32_t slot = word % slot_count;
+
+    if (magnitude > instant_peak[slot])
+    {
+      instant_peak[slot] = (uint16_t)magnitude;
+    }
+  }
+
+  for (uint32_t slot = 0U; slot < APP_PCMD_MAX_SLOTS; slot++)
+  {
+    if (slot >= slot_count)
+    {
+      peak_hold[slot] = 0U;
+    }
+    else if (instant_peak[slot] >= peak_hold[slot])
+    {
+      peak_hold[slot] = instant_peak[slot];
+    }
+  }
+}
+
+static void App_PCMD_DecayLevels(void)
+{
+  for (uint32_t bus = 0U; bus < APP_PCMD_BUS_COUNT; bus++)
+  {
+    for (uint32_t slot = 0U; slot < APP_PCMD_MAX_SLOTS; slot++)
+    {
+      /* Decay once per UI refresh, not once per sub-millisecond DMA block. */
+      g_pcmd_slot_peak[bus][slot] =
+          (uint16_t)(((uint32_t)g_pcmd_slot_peak[bus][slot] * 3U) / 4U);
+    }
+  }
+}
+
+static void App_PCMD_PollStatus(void)
+{
+  for (uint32_t i = 0; i < PCMD3180_ARRAY_DEVICE_COUNT; i++)
+  {
+    if (g_pcmd_devices[i].present != 0U)
+    {
+      g_pcmd_devices[i].status_status =
+          PCMD3180_ReadStatus(&g_pcmd_handles[i], &g_pcmd_devices[i].snapshot);
+    }
+  }
+}
+
+static void App_PCMD_ConfigureMode(PCMD3180_ArrayModeTypeDef mode)
+{
+  PCMD3180_ArrayModeConfigTypeDef mode_config;
+  PCMD3180_StatusTypeDef pcmd_status;
+
+  memset(&mode_config, 0, sizeof(mode_config));
+  memset(g_pcmd_devices, 0, sizeof(g_pcmd_devices));
+  for (uint32_t bus = 0U; bus < APP_PCMD_BUS_COUNT; bus++)
+  {
+    for (uint32_t slot = 0U; slot < APP_PCMD_MAX_SLOTS; slot++)
+    {
+      g_pcmd_slot_peak[bus][slot] = 0U;
+    }
+  }
+
+  g_pcmd_debug.mode = mode;
+  g_pcmd_debug.mode_config_status = PCMD3180_GetArrayModeConfig(mode, &mode_config);
+  if (g_pcmd_debug.mode_config_status != PCMD3180_OK)
+  {
+    g_pcmd_debug.mode_start_tick = HAL_GetTick();
+    return;
+  }
+
+  g_pcmd_debug.mode_config = mode_config;
+  g_pcmd_debug.sai_status = App_SAI_ApplyModeConfig(&mode_config);
+
+  for (uint32_t i = 0; i < PCMD3180_ARRAY_DEVICE_COUNT; i++)
+  {
+    PCMD3180_ConfigTypeDef device_config;
+    const uint8_t address7 = mode_config.devices[i].address7;
+
+    (void)PCMD3180_Init(&g_pcmd_handles[i], &g_pcmd_bus, address7);
+
+    pcmd_status = PCMD3180_Probe(&g_pcmd_handles[i]);
+    g_pcmd_devices[i].probe_status = pcmd_status;
+    g_pcmd_devices[i].present = (pcmd_status == PCMD3180_OK) ? 1U : 0U;
+    if (pcmd_status != PCMD3180_OK)
+    {
+      continue;
+    }
+
+    pcmd_status = PCMD3180_BuildDeviceConfig(&mode_config, i, &device_config);
+    if (pcmd_status == PCMD3180_OK)
+    {
+      pcmd_status = PCMD3180_Configure(&g_pcmd_handles[i], &device_config);
+    }
+    g_pcmd_devices[i].config_status = pcmd_status;
+    if (pcmd_status == PCMD3180_OK)
+    {
+      g_pcmd_devices[i].status_status =
+          PCMD3180_ReadStatus(&g_pcmd_handles[i], &g_pcmd_devices[i].snapshot);
+    }
+  }
+
+  g_pcmd_debug.mode_start_tick = HAL_GetTick();
+  g_pcmd_debug.last_poll_tick = 0U;
+  g_pcmd_debug.reconfigure_count++;
+  App_PCMD_StartDma();
+}
+
+static void App_PCMD_DebugInit(void)
+{
+  memset(&g_pcmd_debug, 0, sizeof(g_pcmd_debug));
+  memset(g_pcmd_devices, 0, sizeof(g_pcmd_devices));
+
+  g_pcmd_bus_context.hi2c = &hi2c2;
+  g_pcmd_bus_context.shutdown_port = MIC_SHDNZ_GPIO_Port;
+  g_pcmd_bus_context.shutdown_pin = MIC_SHDNZ_Pin;
+  g_pcmd_bus_context.timeout_ms = APP_PCMD_I2C_TIMEOUT_MS;
+  PCMD3180_HAL_BusInit(&g_pcmd_bus, &g_pcmd_bus_context);
+
+  if (g_pcmd_bus.set_shutdown != NULL)
+  {
+    g_pcmd_bus.set_shutdown(g_pcmd_bus.context, 1U);
+    HAL_Delay(5U);
+    g_pcmd_bus.set_shutdown(g_pcmd_bus.context, 0U);
+    HAL_Delay(25U);
+  }
+
+  g_pcmd_debug.initialized = 1U;
+  App_PCMD_ConfigureMode(PCMD3180_ARRAY_MODE_32CH_48K);
+}
+
+static void App_PCMD_Task(void)
+{
+  const uint32_t now = HAL_GetTick();
+
+  if (g_pcmd_debug.initialized == 0U)
+  {
+    return;
+  }
+
+  if ((now - g_pcmd_debug.mode_start_tick) >= APP_PCMD_MODE_STEP_MS)
+  {
+    const PCMD3180_ArrayModeTypeDef next_mode =
+        (g_pcmd_debug.mode == PCMD3180_ARRAY_MODE_32CH_48K) ?
+        PCMD3180_ARRAY_MODE_CORE16_192K :
+        PCMD3180_ARRAY_MODE_32CH_48K;
+
+    App_PCMD_ConfigureMode(next_mode);
+  }
+
+  if ((now - g_pcmd_debug.last_poll_tick) >= APP_PCMD_POLL_MS)
+  {
+    g_pcmd_debug.last_poll_tick = now;
+    App_PCMD_PollStatus();
+    App_PCMD_StartDma();
+  }
+}
+
+static void App_PCMD_ShowMicActivity(uint16_t start_y)
+{
+  char label[16];
+  PCMD3180_ArrayModeConfigTypeDef full_array_map;
+  const uint16_t cell_width = 118U;
+  const uint16_t bar_width = 70U;
+
+  memset(&full_array_map, 0, sizeof(full_array_map));
+  (void)PCMD3180_GetArrayModeConfig(PCMD3180_ARRAY_MODE_32CH_48K, &full_array_map);
+
+  rgblcd_show_string(12, start_y, 980, 16, 16,
+                     "MIC peak: tap one microphone; its bar and percentage should jump.",
+                     CYAN);
+  start_y += 24U;
+
+  for (uint32_t device_index = 0U;
+       device_index < PCMD3180_ARRAY_DEVICE_COUNT;
+       device_index++)
+  {
+    const PCMD3180_ArrayDevicePlanTypeDef *plan =
+        &g_pcmd_debug.mode_config.devices[device_index];
+    const uint16_t row_y = (uint16_t)(start_y + device_index * 52U);
+
+    snprintf(label, sizeof(label), "U%lu", (unsigned long)(device_index + 1U));
+    rgblcd_show_string(12, row_y + 8U, 42, 16, 16, label,
+                       (g_pcmd_devices[device_index].present != 0U) ? YELLOW : RED);
+
+    for (uint32_t channel = 0U; channel < PCMD3180_ARRAY_MAX_MICS_PER_DEV; channel++)
+    {
+      const uint16_t x = (uint16_t)(58U + channel * cell_width);
+      const uint8_t mic_id = full_array_map.devices[device_index].mic_id[channel];
+      const uint8_t channel_bit = (uint8_t)(PCMD3180_CHANNEL_1 >> channel);
+      const uint8_t active = ((channel < plan->mic_count) &&
+                              ((plan->output_channel_mask & channel_bit) != 0U)) ? 1U : 0U;
+      uint16_t color = GRAY;
+      uint32_t percent = 0U;
+
+      if ((g_pcmd_devices[device_index].present == 0U) ||
+          (g_pcmd_devices[device_index].config_status != PCMD3180_OK))
+      {
+        snprintf(label, sizeof(label), "M%02u ERR", mic_id);
+        color = RED;
+      }
+      else if (active == 0U)
+      {
+        snprintf(label, sizeof(label), "M%02u --", mic_id);
+      }
+      else
+      {
+        const uint32_t slot = (uint32_t)plan->start_slot + channel;
+        const uint16_t peak = (slot < APP_PCMD_MAX_SLOTS) ?
+                              g_pcmd_slot_peak[plan->tdm_bus][slot] : 0U;
+
+        percent = ((uint32_t)peak * 100U) / 32768U;
+        if (percent > 100U)
+        {
+          percent = 100U;
+        }
+        color = (percent >= 2U) ? GREEN : ((percent > 0U) ? YELLOW : GRAY);
+        snprintf(label, sizeof(label), "M%02u %3lu", mic_id,
+                 (unsigned long)percent);
+      }
+
+      rgblcd_show_string(x, row_y, 100, 12, 12, label, color);
+      rgblcd_draw_rectangle(x, row_y + 18U, x + bar_width, row_y + 31U, GRAYBLUE);
+      if ((active != 0U) && (percent > 0U) &&
+          (g_pcmd_devices[device_index].config_status == PCMD3180_OK))
+      {
+        const uint16_t fill_width = (uint16_t)((percent * (bar_width - 2U)) / 100U);
+        rgblcd_fill(x + 1U,
+                    row_y + 19U,
+                    x + 1U + fill_width,
+                    row_y + 30U,
+                    color);
+      }
+    }
+  }
+}
+
+static void App_PCMD_ShowDebugPage(void)
+{
+  char line[96];
+  uint16_t y = 18;
+
+  rgblcd_clear(BLACK);
+  rgblcd_show_string(12, y, 560, 24, 24, "NECCS N647 PCMD3180 DEBUG", CYAN);
+  y += 34U;
+
+  snprintf(line,
+           sizeof(line),
+           "Mode:%s  Fs:%lu  Slots:%u  BCLK:%lu",
+           App_PCMD_ModeName(g_pcmd_debug.mode),
+           (unsigned long)g_pcmd_debug.mode_config.sample_rate_hz,
+           g_pcmd_debug.mode_config.tdm_slots_per_bus,
+           (unsigned long)g_pcmd_debug.mode_config.expected_bclk_hz);
+  rgblcd_show_string(12, y, 760, 16, 16, line, WHITE);
+  y += 22U;
+
+  snprintf(line,
+           sizeof(line),
+           "LCD:%04X RAM:%lu Cfg:%s SAI:%ld DMAA:%ld DMAB:%ld ReCfg:%lu",
+           rgblcddev.id,
+           (unsigned long)g_app_hyperram_test_ok,
+           App_PCMD_StatusName(g_pcmd_debug.mode_config_status),
+           (long)g_pcmd_debug.sai_status,
+           (long)g_pcmd_debug.dma_a_status,
+           (long)g_pcmd_debug.dma_b_status,
+           (unsigned long)g_pcmd_debug.reconfigure_count);
+  rgblcd_show_string(12, y, 900, 16, 16, line, WHITE);
+  y += 28U;
+
+  rgblcd_show_string(12, y, 920, 16, 16,
+                     "Addr Probe Config Status PWR DEV0 DEV1 ASI INT0 INT1 GPI",
+                     YELLOW);
+  y += 22U;
+
+  for (uint32_t i = 0; i < PCMD3180_ARRAY_DEVICE_COUNT; i++)
+  {
+    const AppPcmdDeviceState_t *device = &g_pcmd_devices[i];
+    const uint16_t color = (device->present != 0U) ?
+                           ((device->config_status == PCMD3180_OK) ? GREEN : YELLOW) :
+                           RED;
+
+    snprintf(line,
+             sizeof(line),
+             "U%lu 0x%02X %-6s %-6s %-6s %02X  %02X   %02X   %02X  %02X   %02X   %02X",
+             (unsigned long)(i + 1U),
+             (unsigned int)(PCMD3180_I2C_ADDR_0 + i),
+             App_PCMD_StatusName(device->probe_status),
+             App_PCMD_StatusName(device->config_status),
+             App_PCMD_StatusName(device->status_status),
+             device->snapshot.pwr_cfg,
+             device->snapshot.dev_sts0,
+             device->snapshot.dev_sts1,
+             device->snapshot.asi_sts,
+             device->snapshot.int_latch0,
+             device->snapshot.int_latch1,
+             device->snapshot.gpi_mon);
+    rgblcd_show_string(12, y, 920, 16, 16, line, color);
+    y += 22U;
+  }
+
+  y += 12U;
+  snprintf(line,
+           sizeof(line),
+           "SAI A: half=%lu full=%lu err=%lu last=0x%08lX state=%lu",
+           (unsigned long)g_pcmd_sai_a_half_count,
+           (unsigned long)g_pcmd_sai_a_full_count,
+           (unsigned long)g_pcmd_sai_a_error_count,
+           (unsigned long)g_pcmd_sai_a_last_error,
+           (unsigned long)HAL_SAI_GetState(&hsai_BlockA1));
+  rgblcd_show_string(12, y, 920, 16, 16, line, WHITE);
+  y += 22U;
+
+  snprintf(line,
+           sizeof(line),
+           "SAI B: half=%lu full=%lu err=%lu last=0x%08lX state=%lu",
+           (unsigned long)g_pcmd_sai_b_half_count,
+           (unsigned long)g_pcmd_sai_b_full_count,
+           (unsigned long)g_pcmd_sai_b_error_count,
+           (unsigned long)g_pcmd_sai_b_last_error,
+           (unsigned long)HAL_SAI_GetState(&hsai_BlockB1));
+  rgblcd_show_string(12, y, 920, 16, 16, line, WHITE);
+  y += 26U;
+
+  rgblcd_show_string(12, y, 900, 16, 16,
+                      "Expected: U1-U4 OK, DMA counters increasing, mode toggles every 7s.",
+                      LGRAY);
+  y += 28U;
+  App_PCMD_ShowMicActivity(y);
 }
 
 /* USER CODE END 0 */
@@ -178,16 +735,6 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-  uint32_t color_index = 0;
-  char status_line[48];
-  static const AppColorStep_t color_steps[] =
-  {
-    { RED,   "RED"   },
-    { GREEN, "GREEN" },
-    { BLUE,  "BLUE"  },
-    { WHITE, "WHITE" },
-    { BLACK, "BLACK" },
-  };
 
   /* USER CODE END 1 */
 
@@ -238,13 +785,15 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  SystemIsolation_Config();
   MX_DMA2D_Init();
   MX_LTDC_Init();
-  SystemIsolation_Config();
+  MX_I2C2_Init();
+  MX_SAI1_Init();
   /* USER CODE BEGIN 2 */
   led_init();
   rgblcd_init();
-  snprintf(status_line, sizeof(status_line), "RAM OK, LCD ID: %04X", rgblcddev.id);
+  App_PCMD_DebugInit();
 
   /* USER CODE END 2 */
 
@@ -252,18 +801,11 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    App_ShowBringUpPage(color_steps[color_index].color,
-                        color_steps[color_index].name,
-                        status_line);
-
-    color_index++;
-    if (color_index >= (sizeof(color_steps) / sizeof(color_steps[0])))
-    {
-      color_index = 0;
-    }
-
+    App_PCMD_Task();
+    App_PCMD_ShowDebugPage();
+    App_PCMD_DecayLevels();
     LED0_TOGGLE();
-    HAL_Delay(APP_COLOR_STEP_MS);
+    HAL_Delay(250U);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -305,6 +847,50 @@ static void MX_DMA2D_Init(void)
   /* USER CODE BEGIN DMA2D_Init 2 */
 
   /* USER CODE END DMA2D_Init 2 */
+
+}
+
+/**
+  * @brief I2C2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_I2C2_Init(void)
+{
+
+  /* USER CODE BEGIN I2C2_Init 0 */
+
+  /* USER CODE END I2C2_Init 0 */
+
+  /* USER CODE BEGIN I2C2_Init 1 */
+
+  /* USER CODE END I2C2_Init 1 */
+  hi2c2.Instance = I2C2;
+  hi2c2.Init.Timing = 0x10707DBC;
+  hi2c2.Init.OwnAddress1 = 0;
+  hi2c2.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
+  hi2c2.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
+  hi2c2.Init.OwnAddress2 = 0;
+  hi2c2.Init.OwnAddress2Masks = I2C_OA2_NOMASK;
+  hi2c2.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
+  hi2c2.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+  if (HAL_I2C_Init(&hi2c2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  if (HAL_I2CEx_ConfigAnalogFilter(&hi2c2, I2C_ANALOGFILTER_ENABLE) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  if (HAL_I2CEx_ConfigDigitalFilter(&hi2c2, 0) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN I2C2_Init 2 */
+
+  /* USER CODE END I2C2_Init 2 */
 
 }
 
@@ -371,6 +957,38 @@ static void MX_LTDC_Init(void)
 }
 
 /**
+  * @brief SAI1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_SAI1_Init(void)
+{
+  PCMD3180_ArrayModeConfigTypeDef default_mode_config;
+
+  /* USER CODE BEGIN SAI1_Init 0 */
+
+  /* USER CODE END SAI1_Init 0 */
+
+  /* USER CODE BEGIN SAI1_Init 1 */
+
+  /* USER CODE END SAI1_Init 1 */
+  if (PCMD3180_GetArrayModeConfig(PCMD3180_ARRAY_MODE_32CH_48K,
+                                  &default_mode_config) != PCMD3180_OK)
+  {
+    Error_Handler();
+  }
+
+  if (App_SAI_ApplyModeConfig(&default_mode_config) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN SAI1_Init 2 */
+
+  /* USER CODE END SAI1_Init 2 */
+
+}
+
+/**
   * @brief RIF Initialization Function
   * @param None
   * @retval None
@@ -399,9 +1017,12 @@ static void MX_LTDC_Init(void)
 
   /*RISUP configuration*/
   HAL_RIF_RISC_SetSlaveSecureAttributes(RIF_RISC_PERIPH_INDEX_SDMMC2 , RIF_ATTRIBUTE_SEC | RIF_ATTRIBUTE_PRIV);
+  HAL_RIF_RISC_SetSlaveSecureAttributes(RIF_RISC_PERIPH_INDEX_SAI1 , RIF_ATTRIBUTE_SEC | RIF_ATTRIBUTE_PRIV);
+  HAL_RIF_RISC_SetSlaveSecureAttributes(RIF_RISC_PERIPH_INDEX_I2C2 , RIF_ATTRIBUTE_SEC | RIF_ATTRIBUTE_PRIV);
   HAL_RIF_RISC_SetSlaveSecureAttributes(RIF_RISC_PERIPH_INDEX_DCMIPP , RIF_ATTRIBUTE_SEC | RIF_ATTRIBUTE_PRIV);
   HAL_RIF_RISC_SetSlaveSecureAttributes(RIF_RISC_PERIPH_INDEX_DMA2D , RIF_ATTRIBUTE_SEC | RIF_ATTRIBUTE_PRIV);
   HAL_RIF_RISC_SetSlaveSecureAttributes(RIF_RISC_PERIPH_INDEX_LTDCL1 , RIF_ATTRIBUTE_SEC | RIF_ATTRIBUTE_PRIV);
+  HAL_RIF_RISC_SetSlaveSecureAttributes(RIF_RCC_PERIPH_INDEX_GPDMA1 , RIF_ATTRIBUTE_SEC | RIF_ATTRIBUTE_PRIV);
 
   /* RIF-Aware IPs Config */
 
@@ -799,6 +1420,262 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+void HAL_I2C_MspInit(I2C_HandleTypeDef *hi2c)
+{
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
+  RCC_PeriphCLKInitTypeDef PeriphClkInitStruct = {0};
+
+  if (hi2c->Instance == I2C2)
+  {
+    PeriphClkInitStruct.PeriphClockSelection = RCC_PERIPHCLK_I2C2;
+    PeriphClkInitStruct.I2c2ClockSelection = RCC_I2C2CLKSOURCE_CLKP;
+    if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInitStruct) != HAL_OK)
+    {
+      Error_Handler();
+    }
+
+    __HAL_RCC_GPIOD_CLK_ENABLE();
+    GPIO_InitStruct.Pin = GPIO_PIN_4 | GPIO_PIN_14;
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_OD;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+    GPIO_InitStruct.Alternate = GPIO_AF4_I2C2;
+    HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+
+    __HAL_RCC_I2C2_CLK_ENABLE();
+  }
+}
+
+void HAL_I2C_MspDeInit(I2C_HandleTypeDef *hi2c)
+{
+  if (hi2c->Instance == I2C2)
+  {
+    __HAL_RCC_I2C2_CLK_DISABLE();
+    HAL_GPIO_DeInit(GPIOD, GPIO_PIN_4 | GPIO_PIN_14);
+  }
+}
+
+void HAL_SAI_MspInit(SAI_HandleTypeDef *hsai)
+{
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
+  RCC_PeriphCLKInitTypeDef PeriphClkInitStruct = {0};
+
+  if ((hsai->Instance != SAI1_Block_A) && (hsai->Instance != SAI1_Block_B))
+  {
+    return;
+  }
+
+  PeriphClkInitStruct.PeriphClockSelection = RCC_PERIPHCLK_SAI1;
+  PeriphClkInitStruct.Sai1ClockSelection = RCC_SAI1CLKSOURCE_PCLK2;
+  if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInitStruct) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  if (g_sai1_client == 0U)
+  {
+    __HAL_RCC_SAI1_CLK_ENABLE();
+  }
+  g_sai1_client++;
+
+  __HAL_RCC_GPDMA1_CLK_ENABLE();
+
+  if (hsai->Instance == SAI1_Block_A)
+  {
+    __HAL_RCC_GPIOB_CLK_ENABLE();
+    GPIO_InitStruct.Pin = GPIO_PIN_0 | GPIO_PIN_6 | GPIO_PIN_7;
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+    GPIO_InitStruct.Alternate = GPIO_AF6_SAI1;
+    HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+    handle_GPDMA1_Channel0.Instance = GPDMA1_Channel0;
+    handle_GPDMA1_Channel0.Init.Request = GPDMA1_REQUEST_SAI1_A;
+    handle_GPDMA1_Channel0.Init.BlkHWRequest = DMA_BREQ_SINGLE_BURST;
+    handle_GPDMA1_Channel0.Init.Direction = DMA_PERIPH_TO_MEMORY;
+    handle_GPDMA1_Channel0.Init.SrcInc = DMA_SINC_FIXED;
+    handle_GPDMA1_Channel0.Init.DestInc = DMA_DINC_INCREMENTED;
+    handle_GPDMA1_Channel0.Init.SrcDataWidth = DMA_SRC_DATAWIDTH_HALFWORD;
+    handle_GPDMA1_Channel0.Init.DestDataWidth = DMA_DEST_DATAWIDTH_HALFWORD;
+    handle_GPDMA1_Channel0.Init.Priority = DMA_LOW_PRIORITY_HIGH_WEIGHT;
+    handle_GPDMA1_Channel0.Init.SrcBurstLength = 1;
+    handle_GPDMA1_Channel0.Init.DestBurstLength = 1;
+    handle_GPDMA1_Channel0.Init.TransferAllocatedPort =
+        DMA_SRC_ALLOCATED_PORT0 | DMA_DEST_ALLOCATED_PORT1;
+    handle_GPDMA1_Channel0.Init.TransferEventMode = DMA_TCEM_BLOCK_TRANSFER;
+    handle_GPDMA1_Channel0.Init.Mode = DMA_NORMAL;
+    if (HAL_DMA_Init(&handle_GPDMA1_Channel0) != HAL_OK)
+    {
+      Error_Handler();
+    }
+    if (HAL_DMA_ConfigChannelAttributes(&handle_GPDMA1_Channel0,
+                                        DMA_CHANNEL_PRIV | DMA_CHANNEL_SEC |
+                                        DMA_CHANNEL_SRC_SEC | DMA_CHANNEL_DEST_SEC) != HAL_OK)
+    {
+      Error_Handler();
+    }
+    __HAL_LINKDMA(hsai, hdmarx, handle_GPDMA1_Channel0);
+
+    HAL_NVIC_SetPriority(SAI1_A_IRQn, 0, 0);
+    HAL_NVIC_EnableIRQ(SAI1_A_IRQn);
+    HAL_NVIC_SetPriority(GPDMA1_Channel0_IRQn, 0, 0);
+    HAL_NVIC_EnableIRQ(GPDMA1_Channel0_IRQn);
+  }
+  else
+  {
+    __HAL_RCC_GPIOE_CLK_ENABLE();
+    GPIO_InitStruct.Pin = GPIO_PIN_3;
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+    GPIO_InitStruct.Alternate = GPIO_AF6_SAI1;
+    HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
+
+    handle_GPDMA1_Channel1.Instance = GPDMA1_Channel1;
+    handle_GPDMA1_Channel1.Init.Request = GPDMA1_REQUEST_SAI1_B;
+    handle_GPDMA1_Channel1.Init.BlkHWRequest = DMA_BREQ_SINGLE_BURST;
+    handle_GPDMA1_Channel1.Init.Direction = DMA_PERIPH_TO_MEMORY;
+    handle_GPDMA1_Channel1.Init.SrcInc = DMA_SINC_FIXED;
+    handle_GPDMA1_Channel1.Init.DestInc = DMA_DINC_INCREMENTED;
+    handle_GPDMA1_Channel1.Init.SrcDataWidth = DMA_SRC_DATAWIDTH_HALFWORD;
+    handle_GPDMA1_Channel1.Init.DestDataWidth = DMA_DEST_DATAWIDTH_HALFWORD;
+    handle_GPDMA1_Channel1.Init.Priority = DMA_LOW_PRIORITY_HIGH_WEIGHT;
+    handle_GPDMA1_Channel1.Init.SrcBurstLength = 1;
+    handle_GPDMA1_Channel1.Init.DestBurstLength = 1;
+    handle_GPDMA1_Channel1.Init.TransferAllocatedPort =
+        DMA_SRC_ALLOCATED_PORT0 | DMA_DEST_ALLOCATED_PORT1;
+    handle_GPDMA1_Channel1.Init.TransferEventMode = DMA_TCEM_BLOCK_TRANSFER;
+    handle_GPDMA1_Channel1.Init.Mode = DMA_NORMAL;
+    if (HAL_DMA_Init(&handle_GPDMA1_Channel1) != HAL_OK)
+    {
+      Error_Handler();
+    }
+    if (HAL_DMA_ConfigChannelAttributes(&handle_GPDMA1_Channel1,
+                                        DMA_CHANNEL_PRIV | DMA_CHANNEL_SEC |
+                                        DMA_CHANNEL_SRC_SEC | DMA_CHANNEL_DEST_SEC) != HAL_OK)
+    {
+      Error_Handler();
+    }
+    __HAL_LINKDMA(hsai, hdmarx, handle_GPDMA1_Channel1);
+
+    HAL_NVIC_SetPriority(SAI1_B_IRQn, 0, 0);
+    HAL_NVIC_EnableIRQ(SAI1_B_IRQn);
+    HAL_NVIC_SetPriority(GPDMA1_Channel1_IRQn, 0, 0);
+    HAL_NVIC_EnableIRQ(GPDMA1_Channel1_IRQn);
+  }
+}
+
+void HAL_SAI_MspDeInit(SAI_HandleTypeDef *hsai)
+{
+  if (hsai->Instance == SAI1_Block_A)
+  {
+    HAL_NVIC_DisableIRQ(SAI1_A_IRQn);
+    HAL_NVIC_DisableIRQ(GPDMA1_Channel0_IRQn);
+    HAL_GPIO_DeInit(GPIOB, GPIO_PIN_0 | GPIO_PIN_6 | GPIO_PIN_7);
+    if (hsai->hdmarx != NULL)
+    {
+      (void)HAL_DMA_DeInit(hsai->hdmarx);
+    }
+  }
+  else if (hsai->Instance == SAI1_Block_B)
+  {
+    HAL_NVIC_DisableIRQ(SAI1_B_IRQn);
+    HAL_NVIC_DisableIRQ(GPDMA1_Channel1_IRQn);
+    HAL_GPIO_DeInit(GPIOE, GPIO_PIN_3);
+    if (hsai->hdmarx != NULL)
+    {
+      (void)HAL_DMA_DeInit(hsai->hdmarx);
+    }
+  }
+  else
+  {
+    return;
+  }
+
+  if (g_sai1_client > 0U)
+  {
+    g_sai1_client--;
+    if (g_sai1_client == 0U)
+    {
+      __HAL_RCC_SAI1_CLK_DISABLE();
+    }
+  }
+}
+
+void HAL_SAI_RxHalfCpltCallback(SAI_HandleTypeDef *hsai)
+{
+  if (hsai->Instance == SAI1_Block_A)
+  {
+    g_pcmd_sai_a_half_count++;
+  }
+  else if (hsai->Instance == SAI1_Block_B)
+  {
+    g_pcmd_sai_b_half_count++;
+  }
+}
+
+void HAL_SAI_RxCpltCallback(SAI_HandleTypeDef *hsai)
+{
+  if (hsai->Instance == SAI1_Block_A)
+  {
+    g_pcmd_sai_a_full_count++;
+    SCB_InvalidateDCache_by_Addr(g_pcmd_sai_a_rx, sizeof(g_pcmd_sai_a_rx));
+    App_PCMD_ProcessBuffer(g_pcmd_sai_a_rx,
+                           APP_PCMD_DMA_WORDS,
+                           g_pcmd_debug.mode_config.tdm_slots_per_bus,
+                           g_pcmd_slot_peak[PCMD3180_TDM_BUS_A]);
+    SCB_CleanInvalidateDCache_by_Addr(g_pcmd_sai_a_rx, sizeof(g_pcmd_sai_a_rx));
+    g_pcmd_debug.dma_a_status =
+        HAL_SAI_Receive_DMA(&hsai_BlockA1, (uint8_t *)g_pcmd_sai_a_rx, APP_PCMD_DMA_WORDS);
+  }
+  else if (hsai->Instance == SAI1_Block_B)
+  {
+    g_pcmd_sai_b_full_count++;
+    SCB_InvalidateDCache_by_Addr(g_pcmd_sai_b_rx, sizeof(g_pcmd_sai_b_rx));
+    App_PCMD_ProcessBuffer(g_pcmd_sai_b_rx,
+                           APP_PCMD_DMA_WORDS,
+                           g_pcmd_debug.mode_config.tdm_slots_per_bus,
+                           g_pcmd_slot_peak[PCMD3180_TDM_BUS_B]);
+    SCB_CleanInvalidateDCache_by_Addr(g_pcmd_sai_b_rx, sizeof(g_pcmd_sai_b_rx));
+    g_pcmd_debug.dma_b_status =
+        HAL_SAI_Receive_DMA(&hsai_BlockB1, (uint8_t *)g_pcmd_sai_b_rx, APP_PCMD_DMA_WORDS);
+  }
+}
+
+void HAL_SAI_ErrorCallback(SAI_HandleTypeDef *hsai)
+{
+  if (hsai->Instance == SAI1_Block_A)
+  {
+    g_pcmd_sai_a_error_count++;
+    g_pcmd_sai_a_last_error = HAL_SAI_GetError(hsai);
+  }
+  else if (hsai->Instance == SAI1_Block_B)
+  {
+    g_pcmd_sai_b_error_count++;
+    g_pcmd_sai_b_last_error = HAL_SAI_GetError(hsai);
+  }
+}
+
+void SAI1_A_IRQHandler(void)
+{
+  HAL_SAI_IRQHandler(&hsai_BlockA1);
+}
+
+void SAI1_B_IRQHandler(void)
+{
+  HAL_SAI_IRQHandler(&hsai_BlockB1);
+}
+
+void GPDMA1_Channel0_IRQHandler(void)
+{
+  HAL_DMA_IRQHandler(&handle_GPDMA1_Channel0);
+}
+
+void GPDMA1_Channel1_IRQHandler(void)
+{
+  HAL_DMA_IRQHandler(&handle_GPDMA1_Channel1);
+}
 
 /* USER CODE END 4 */
 

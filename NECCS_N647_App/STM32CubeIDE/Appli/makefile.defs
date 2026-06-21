@@ -1,0 +1,41 @@
+# CubeIDE keeps linked-resource state in the workspace. An already imported
+# workspace can therefore miss HAL sources added to .project later, even though
+# a fresh import builds correctly. Supply only the objects absent from OBJS so
+# stale and refreshed workspaces both produce the same firmware.
+
+HAL_AUDIO_SRC_DIR := C:/Users/xiazhiyuan/STM32Cube/Repository/STM32Cube_FW_N6_V1.3.0/Drivers/STM32N6xx_HAL_Driver/Src
+HAL_AUDIO_OBJ_DIR := ./Drivers/STM32N6xx_HAL_Driver
+
+HAL_AUDIO_REQUIRED_OBJS := \
+$(HAL_AUDIO_OBJ_DIR)/stm32n6xx_hal_i2c.o \
+$(HAL_AUDIO_OBJ_DIR)/stm32n6xx_hal_i2c_ex.o \
+$(HAL_AUDIO_OBJ_DIR)/stm32n6xx_hal_sai.o \
+$(HAL_AUDIO_OBJ_DIR)/stm32n6xx_hal_sai_ex.o
+
+HAL_AUDIO_MISSING_OBJS := $(filter-out $(OBJS),$(HAL_AUDIO_REQUIRED_OBJS))
+
+ifneq ($(strip $(HAL_AUDIO_MISSING_OBJS)),)
+USER_OBJS += $(HAL_AUDIO_MISSING_OBJS)
+
+ifneq ($(findstring /Debug,$(CURDIR)),)
+HAL_AUDIO_BUILD_FLAGS := -O0 -g3 -DDEBUG
+else
+HAL_AUDIO_BUILD_FLAGS := -Os
+endif
+
+HAL_AUDIO_INCLUDE_FLAGS := \
+-I../../../Appli/Core/Inc \
+-I../../../Secure_nsclib \
+-I"D:/Project/NECCS/Program/NECCS_N647/NECCS_N647_App/Drivers/BSP" \
+-IC:/Users/xiazhiyuan/STM32Cube/Repository/STM32Cube_FW_N6_V1.3.0/Drivers/STM32N6xx_HAL_Driver/Inc \
+-IC:/Users/xiazhiyuan/STM32Cube/Repository/STM32Cube_FW_N6_V1.3.0/Drivers/CMSIS/Device/ST/STM32N6xx/Include \
+-IC:/Users/xiazhiyuan/STM32Cube/Repository/STM32Cube_FW_N6_V1.3.0/Drivers/STM32N6xx_HAL_Driver/Inc/Legacy \
+-IC:/Users/xiazhiyuan/STM32Cube/Repository/STM32Cube_FW_N6_V1.3.0/Drivers/CMSIS/Include
+
+$(HAL_AUDIO_OBJ_DIR)/%.o: $(HAL_AUDIO_SRC_DIR)/%.c
+	@mkdir -p "$(@D)"
+	arm-none-eabi-gcc "$<" -mcpu=cortex-m55 -std=gnu11 \
+		-DUSE_HAL_DRIVER -DSTM32N647xx -c $(HAL_AUDIO_INCLUDE_FLAGS) \
+		$(HAL_AUDIO_BUILD_FLAGS) -ffunction-sections -fdata-sections -Wall \
+		--specs=nano.specs -mfpu=fpv5-d16 -mfloat-abi=hard -mthumb -o "$@"
+endif

@@ -378,6 +378,8 @@ void rgblcd_clear(uint16_t color)
         return;
     }
 
+    /* Non-overlay text rendering fills glyph backgrounds with this color. */
+    g_back_color = color;
     rgblcd_fill(0, 0, rgblcddev.width - 1, rgblcddev.height - 1, color);
 }
 

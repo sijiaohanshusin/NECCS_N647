@@ -10,7 +10,14 @@ $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $projectDir = Join-Path $repoRoot "NECCS_N647_App\STM32CubeIDE\Appli"
-$workspaceDir = Join-Path $repoRoot "_cubeide_ws_build"
+$sha1 = [System.Security.Cryptography.SHA1]::Create()
+try {
+    $workspaceBytes = [System.Text.Encoding]::UTF8.GetBytes($repoRoot.ToLowerInvariant())
+    $workspaceKey = ([System.BitConverter]::ToString($sha1.ComputeHash($workspaceBytes))).Replace("-", "").Substring(0, 8).ToLowerInvariant()
+} finally {
+    $sha1.Dispose()
+}
+$workspaceDir = Join-Path $repoRoot "_cubeide_ws_build_app_$workspaceKey"
 $projectName = "NECCS_N647_App_Appli"
 $languageSettings = Join-Path $projectDir ".settings\language.settings.xml"
 $iocFile = Join-Path $repoRoot "NECCS_N647_App\NECCS_N647_App.ioc"
@@ -70,10 +77,14 @@ try {
     foreach ($config in $configurations) {
         Write-Host "Building $projectName/$config ..."
 
-        & $headlessBuild `
-            -data $workspaceDir `
-            -import $projectDir `
-            -cleanBuild "$projectName/$config"
+        $projectMetadata = Join-Path $workspaceDir ".metadata\.plugins\org.eclipse.core.resources\.projects\$projectName"
+        $headlessArgs = @("-data", $workspaceDir)
+        if (-not (Test-Path -LiteralPath $projectMetadata -PathType Container)) {
+            $headlessArgs += @("-import", $projectDir)
+        }
+        $headlessArgs += @("-cleanBuild", "$projectName/$config")
+
+        & $headlessBuild @headlessArgs
 
         if ($LASTEXITCODE -ne 0) {
             throw "STM32CubeIDE build failed for $config (exit code $LASTEXITCODE)."
