@@ -266,7 +266,7 @@ void PCMD3180_GetDefaultConfig(PCMD3180_ConfigTypeDef *config)
     config->invert_fsync = 0U;
     config->pdmclk_divider = PCMD3180_PDMCLK_DIV_64FS;
     config->pdmin_edge_mask = 0U;
-    config->hpf_select = PCMD3180_HPF_12HZ_AT_48K;
+    config->hpf_select = PCMD3180_HPF_96HZ_AT_48K;
     config->enable_micbias = 0U;
     config->verify_writes = 1U;
 }
@@ -858,11 +858,8 @@ PCMD3180_StatusTypeDef PCMD3180_ReadStatus(PCMD3180_HandleTypeDef *handle,
         return status;
     }
 
-    status = PCMD3180_ReadRegister(handle, PCMD3180_REG_INT_LTCH1, &status_snapshot->int_latch1);
-    if (status != PCMD3180_OK)
-    {
-        return status;
-    }
+    status_snapshot->int_latch1 = 0U;
+    (void)PCMD3180_ReadRegister(handle, PCMD3180_REG_INT_LTCH1, &status_snapshot->int_latch1);
 
     status = PCMD3180_ReadRegister(handle, PCMD3180_REG_PWR_CFG, &status_snapshot->pwr_cfg);
     if (status != PCMD3180_OK)
