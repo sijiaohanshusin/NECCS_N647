@@ -198,6 +198,10 @@ typedef struct
     uint8_t address7;
     uint8_t current_page;
     uint8_t configured;
+    PCMD3180_StatusTypeDef last_status;
+    uint8_t last_reg;
+    uint8_t last_write_value;
+    uint8_t last_read_value;
     PCMD3180_BusTypeDef bus;
 } PCMD3180_HandleTypeDef;
 
@@ -254,6 +258,16 @@ typedef struct
     uint8_t dev_sts0;
     uint8_t dev_sts1;
     uint8_t asi_sts;
+    uint8_t pdmclk_cfg;
+    uint8_t pdmin_cfg;
+    uint8_t gpo_cfg0;
+    uint8_t gpo_cfg1;
+    uint8_t gpo_cfg2;
+    uint8_t gpo_cfg3;
+    uint8_t gpi_cfg0;
+    uint8_t gpi_cfg1;
+    uint8_t in_ch_en;
+    uint8_t asi_out_ch_en;
     uint8_t int_latch0;
     uint8_t int_latch1;
     uint8_t pwr_cfg;

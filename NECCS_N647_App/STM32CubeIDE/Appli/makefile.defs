@@ -26,7 +26,7 @@ endif
 HAL_AUDIO_INCLUDE_FLAGS := \
 -I../../../Appli/Core/Inc \
 -I../../../Secure_nsclib \
--I"D:/Project/NECCS/Program/NECCS_N647/NECCS_N647_App/Drivers/BSP" \
+-I../../../Drivers/BSP \
 -IC:/Users/xiazhiyuan/STM32Cube/Repository/STM32Cube_FW_N6_V1.3.0/Drivers/STM32N6xx_HAL_Driver/Inc \
 -IC:/Users/xiazhiyuan/STM32Cube/Repository/STM32Cube_FW_N6_V1.3.0/Drivers/CMSIS/Device/ST/STM32N6xx/Include \
 -IC:/Users/xiazhiyuan/STM32Cube/Repository/STM32Cube_FW_N6_V1.3.0/Drivers/STM32N6xx_HAL_Driver/Inc/Legacy \

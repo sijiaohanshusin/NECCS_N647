@@ -4,6 +4,8 @@
 #define PCMD3180_MAX_TDM_SLOT                63U
 #define PCMD3180_ASI_CFG0_TDM_MODE           0x00U
 #define PCMD3180_ASI_CFG0_TX_HIGH_Z          0x01U
+#define PCMD3180_WRITE_VERIFY_RETRY_COUNT    4U
+#define PCMD3180_WRITE_VERIFY_DELAY_MS       1U
 
 static const uint8_t PCMD3180_V2_MIC_MAP[PCMD3180_ARRAY_DEVICE_COUNT][PCMD3180_ARRAY_MAX_MICS_PER_DEV] =
 {
@@ -43,26 +45,47 @@ static PCMD3180_StatusTypeDef PCMD3180_WriteChecked(PCMD3180_HandleTypeDef *hand
                                                     uint8_t verify)
 {
     uint8_t readback = 0U;
-    PCMD3180_StatusTypeDef status;
+    PCMD3180_StatusTypeDef status = PCMD3180_ERROR;
 
-    status = PCMD3180_WriteRegister(handle, reg, value);
-    if ((status != PCMD3180_OK) || (verify == 0U))
+    if (handle == NULL)
     {
-        return status;
+        return PCMD3180_INVALID_ARGUMENT;
     }
 
-    status = PCMD3180_ReadRegister(handle, reg, &readback);
-    if (status != PCMD3180_OK)
+    handle->last_reg = reg;
+    handle->last_write_value = value;
+    handle->last_read_value = 0U;
+
+    for (uint32_t attempt = 0U; attempt < PCMD3180_WRITE_VERIFY_RETRY_COUNT; attempt++)
     {
-        return status;
+        status = PCMD3180_WriteRegister(handle, reg, value);
+        if (status != PCMD3180_OK)
+        {
+            handle->last_status = status;
+            PCMD3180_Delay(handle, PCMD3180_WRITE_VERIFY_DELAY_MS);
+            continue;
+        }
+
+        if (verify == 0U)
+        {
+            handle->last_status = PCMD3180_OK;
+            return PCMD3180_OK;
+        }
+
+        PCMD3180_Delay(handle, PCMD3180_WRITE_VERIFY_DELAY_MS);
+        status = PCMD3180_ReadRegister(handle, reg, &readback);
+        handle->last_read_value = readback;
+        if ((status == PCMD3180_OK) && (readback == value))
+        {
+            handle->last_status = PCMD3180_OK;
+            return PCMD3180_OK;
+        }
+
+        handle->last_status = (status == PCMD3180_OK) ? PCMD3180_VERIFY_ERROR : status;
+        PCMD3180_Delay(handle, PCMD3180_WRITE_VERIFY_DELAY_MS);
     }
 
-    if (readback != value)
-    {
-        return PCMD3180_VERIFY_ERROR;
-    }
-
-    return PCMD3180_OK;
+    return handle->last_status;
 }
 
 static PCMD3180_StatusTypeDef PCMD3180_WriteChannelSlots(PCMD3180_HandleTypeDef *handle,
@@ -239,6 +262,10 @@ PCMD3180_StatusTypeDef PCMD3180_Init(PCMD3180_HandleTypeDef *handle,
     handle->address7 = address7;
     handle->current_page = 0U;
     handle->configured = 0U;
+    handle->last_status = PCMD3180_OK;
+    handle->last_reg = 0U;
+    handle->last_write_value = 0U;
+    handle->last_read_value = 0U;
     handle->bus = *bus;
 
     return PCMD3180_OK;
@@ -268,7 +295,13 @@ void PCMD3180_GetDefaultConfig(PCMD3180_ConfigTypeDef *config)
     config->pdmin_edge_mask = 0U;
     config->hpf_select = PCMD3180_HPF_96HZ_AT_48K;
     config->enable_micbias = 0U;
-    config->verify_writes = 1U;
+    /*
+     * Match the H7-proven bring-up path: configure by write sequence first,
+     * then use status snapshots for diagnosis. Immediate readback verification
+     * makes the shared I2C bus much noisier and can fail while the device clock
+     * domain is still settling.
+     */
+    config->verify_writes = 0U;
 }
 
 PCMD3180_StatusTypeDef PCMD3180_GetArrayModeConfig(PCMD3180_ArrayModeTypeDef mode,
@@ -505,13 +538,30 @@ PCMD3180_StatusTypeDef PCMD3180_Configure(PCMD3180_HandleTypeDef *handle,
         return status;
     }
 
+    /*
+     * Match the proven H7 bring-up flow: reset each PCMD3180 before applying
+     * the register table so a previous partial I2C transaction cannot leave
+     * the device in a half-configured state.
+     */
+    status = PCMD3180_SoftwareReset(handle);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    status = PCMD3180_SelectPage(handle, 0U);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
     status = PCMD3180_WriteChecked(handle, PCMD3180_REG_SLEEP_CFG, PCMD3180_SLEEP_CFG_WAKE, verify);
     if (status != PCMD3180_OK)
     {
         return status;
     }
 
-    PCMD3180_Delay(handle, 1U);
+    PCMD3180_Delay(handle, 10U);
 
     asi_cfg0 = PCMD3180_ASI_CFG0_TDM_MODE |
                (uint8_t)(((uint8_t)config->slot_width & 0x03U) << 4) |
@@ -847,6 +897,66 @@ PCMD3180_StatusTypeDef PCMD3180_ReadStatus(PCMD3180_HandleTypeDef *handle,
     }
 
     status = PCMD3180_ReadRegister(handle, PCMD3180_REG_ASI_STS, &status_snapshot->asi_sts);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    status = PCMD3180_ReadRegister(handle, PCMD3180_REG_PDMCLK_CFG, &status_snapshot->pdmclk_cfg);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    status = PCMD3180_ReadRegister(handle, PCMD3180_REG_PDMIN_CFG, &status_snapshot->pdmin_cfg);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    status = PCMD3180_ReadRegister(handle, PCMD3180_REG_GPO_CFG0, &status_snapshot->gpo_cfg0);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    status = PCMD3180_ReadRegister(handle, PCMD3180_REG_GPO_CFG1, &status_snapshot->gpo_cfg1);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    status = PCMD3180_ReadRegister(handle, PCMD3180_REG_GPO_CFG2, &status_snapshot->gpo_cfg2);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    status = PCMD3180_ReadRegister(handle, PCMD3180_REG_GPO_CFG3, &status_snapshot->gpo_cfg3);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    status = PCMD3180_ReadRegister(handle, PCMD3180_REG_GPI_CFG0, &status_snapshot->gpi_cfg0);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    status = PCMD3180_ReadRegister(handle, PCMD3180_REG_GPI_CFG1, &status_snapshot->gpi_cfg1);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    status = PCMD3180_ReadRegister(handle, PCMD3180_REG_IN_CH_EN, &status_snapshot->in_ch_en);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    status = PCMD3180_ReadRegister(handle, PCMD3180_REG_ASI_OUT_CH_EN, &status_snapshot->asi_out_ch_en);
     if (status != PCMD3180_OK)
     {
         return status;

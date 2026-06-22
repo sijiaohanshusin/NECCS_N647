@@ -56,6 +56,16 @@ typedef struct
   uint32_t mode_start_tick;
   uint32_t last_poll_tick;
   uint32_t reconfigure_count;
+  uint8_t early_address_ack_count[PCMD3180_ARRAY_DEVICE_COUNT];
+  uint8_t early_address_scan_rounds;
+  uint8_t early_address_scan_ok;
+  uint8_t early_scl_idle_high;
+  uint8_t early_sda_idle_high;
+  uint8_t address_ack_count[PCMD3180_ARRAY_DEVICE_COUNT];
+  uint8_t address_scan_rounds;
+  uint8_t address_scan_ok;
+  uint8_t scl_idle_high;
+  uint8_t sda_idle_high;
   uint8_t initialized;
 } AppPcmdDebugState_t;
 
@@ -66,7 +76,7 @@ typedef struct
 #define APP_HYPERRAM_BASE        0x90000000UL
 #define APP_HYPERRAM_TEST_BYTES  0x1000UL
 #define APP_PCMD_MODE_STEP_MS    7000U
-#define APP_PCMD_POLL_MS         500U
+#define APP_PCMD_POLL_MS         0U
 #define APP_PCMD_UI_REFRESH_MS   1000U
 #define APP_PCMD_MIC_PAGE_MS     3000U
 #define APP_PCMD_DMA_WORDS       4096U
@@ -76,6 +86,10 @@ typedef struct
 #define APP_PCMD_IRQ_PRIO        5U
 #define APP_PCMD_DEFAULT_MODE    PCMD3180_ARRAY_MODE_32CH_48K
 #define APP_PCMD_AUTO_MODE_SWITCH 0U
+#define APP_PCMD_RESET_LOW_MS    100U
+#define APP_PCMD_RESET_SETTLE_MS 10U
+#define APP_PCMD_ADDR_SCAN_ROUNDS 16U
+#define APP_I2C2_TIMING_25KHZ_64MHZ 0x702177C7U
 #define APP_PCMD_UI_X            8U
 #define APP_PCMD_UI_W            584U
 #define APP_PCMD_SAI1_IC_DIVIDER_48K  20U
@@ -175,6 +189,13 @@ static void App_PCMD_StartDma(void);
 static void App_PCMD_StopDma(void);
 static void App_PCMD_DecayLevels(void);
 static void App_PCMD_ShowMicActivity(uint16_t start_y);
+static void App_PCMD_PrepareBus(uint8_t reset_device);
+static void App_PCMD_EarlyI2CTest(void);
+static uint8_t App_PCMD_RunAddressScan(uint8_t *ack_count,
+                                       uint8_t *scan_rounds,
+                                       uint8_t *scl_idle_high,
+                                       uint8_t *sda_idle_high);
+static uint8_t App_PCMD_CheckAddressMap(void);
 static const char *App_SAI_StateName(uint32_t state);
 static const char *App_SAI_ErrorName(uint32_t error_code);
 static HAL_StatusTypeDef App_PCMD_ConfigSaiPll2(void);
@@ -314,6 +335,55 @@ static const char *App_PCMD_StatusName(PCMD3180_StatusTypeDef status)
     default:
       return "ERR";
   }
+}
+
+static uint8_t App_PCMD_IsRoutingSnapshotOk(uint32_t device_index,
+                                            const PCMD3180_StatusSnapshotTypeDef *snapshot)
+{
+  uint8_t expected_mask = PCMD3180_CHANNEL_ALL;
+
+  if (snapshot == NULL)
+  {
+    return 0U;
+  }
+
+  if (device_index < PCMD3180_ARRAY_DEVICE_COUNT)
+  {
+    expected_mask = g_pcmd_debug.mode_config.devices[device_index].input_channel_mask;
+  }
+
+  if (snapshot->pdmclk_cfg != (PCMD3180_PDMCLK_CFG_RESET_MASK |
+                               (uint8_t)PCMD3180_PDMCLK_DIV_64FS))
+  {
+    return 0U;
+  }
+  if (snapshot->pdmin_cfg != 0U)
+  {
+    return 0U;
+  }
+  if ((snapshot->gpo_cfg0 != PCMD3180_GPO_CFG_PDMCLK_OUTPUT) ||
+      (snapshot->gpo_cfg1 != PCMD3180_GPO_CFG_PDMCLK_OUTPUT) ||
+      (snapshot->gpo_cfg2 != PCMD3180_GPO_CFG_PDMCLK_OUTPUT) ||
+      (snapshot->gpo_cfg3 != PCMD3180_GPO_CFG_PDMCLK_OUTPUT))
+  {
+    return 0U;
+  }
+  if ((snapshot->gpi_cfg0 != PCMD3180_GPI_CFG0_DEFAULT) ||
+      (snapshot->gpi_cfg1 != PCMD3180_GPI_CFG1_DEFAULT))
+  {
+    return 0U;
+  }
+  if ((snapshot->in_ch_en != expected_mask) ||
+      (snapshot->asi_out_ch_en != expected_mask))
+  {
+    return 0U;
+  }
+  if ((snapshot->pwr_cfg & PCMD3180_PWR_PDM_AND_PLL) != PCMD3180_PWR_PDM_AND_PLL)
+  {
+    return 0U;
+  }
+
+  return 1U;
 }
 
 static const char *App_SAI_StateName(uint32_t state)
@@ -721,6 +791,71 @@ static void App_PCMD_PollStatus(void)
   }
 }
 
+static uint8_t App_PCMD_RunAddressScan(uint8_t *ack_count,
+                                       uint8_t *scan_rounds,
+                                       uint8_t *scl_idle_high,
+                                       uint8_t *sda_idle_high)
+{
+  uint8_t all_stable = 1U;
+  uint8_t local_scl_idle_high = 0U;
+  uint8_t local_sda_idle_high = 0U;
+
+  if ((ack_count == NULL) || (scan_rounds == NULL) ||
+      (scl_idle_high == NULL) || (sda_idle_high == NULL))
+  {
+    return 0U;
+  }
+
+  memset(ack_count, 0, PCMD3180_ARRAY_DEVICE_COUNT * sizeof(ack_count[0]));
+  *scan_rounds = APP_PCMD_ADDR_SCAN_ROUNDS;
+
+  for (uint32_t round = 0U; round < APP_PCMD_ADDR_SCAN_ROUNDS; round++)
+  {
+    for (uint32_t device = 0U;
+         device < PCMD3180_ARRAY_DEVICE_COUNT;
+         device++)
+    {
+      if (PCMD3180_HAL_ProbeAddress(&g_pcmd_bus_context,
+                                    (uint8_t)(PCMD3180_I2C_ADDR_0 + device)) == PCMD3180_OK)
+      {
+        ack_count[device]++;
+      }
+    }
+    HAL_Delay(1U);
+  }
+
+  PCMD3180_HAL_GetLineLevels(&g_pcmd_bus_context,
+                             &local_scl_idle_high,
+                             &local_sda_idle_high);
+  *scl_idle_high = local_scl_idle_high;
+  *sda_idle_high = local_sda_idle_high;
+  for (uint32_t device = 0U;
+       device < PCMD3180_ARRAY_DEVICE_COUNT;
+       device++)
+  {
+    if (ack_count[device] != APP_PCMD_ADDR_SCAN_ROUNDS)
+    {
+      all_stable = 0U;
+    }
+  }
+
+  if ((local_scl_idle_high == 0U) ||
+      (local_sda_idle_high == 0U))
+  {
+    all_stable = 0U;
+  }
+
+  return all_stable;
+}
+
+static uint8_t App_PCMD_CheckAddressMap(void)
+{
+  return App_PCMD_RunAddressScan(g_pcmd_debug.address_ack_count,
+                                 &g_pcmd_debug.address_scan_rounds,
+                                 &g_pcmd_debug.scl_idle_high,
+                                 &g_pcmd_debug.sda_idle_high);
+}
+
 static void App_PCMD_ConfigureMode(PCMD3180_ArrayModeTypeDef mode)
 {
   PCMD3180_ArrayModeConfigTypeDef mode_config;
@@ -753,7 +888,28 @@ static void App_PCMD_ConfigureMode(PCMD3180_ArrayModeTypeDef mode)
 
   g_pcmd_debug.mode_config = mode_config;
   g_pcmd_debug.sai_status = App_SAI_ApplyModeConfig(&mode_config);
+  if (g_pcmd_debug.sai_status != HAL_OK)
+  {
+    g_pcmd_debug.mode_start_tick = HAL_GetTick();
+    g_pcmd_debug.last_poll_tick = 0U;
+    g_pcmd_debug.reconfigure_count++;
+    return;
+  }
 
+  g_pcmd_debug.address_scan_ok = App_PCMD_CheckAddressMap();
+  if (g_pcmd_debug.address_scan_ok == 0U)
+  {
+    g_pcmd_debug.mode_start_tick = HAL_GetTick();
+    g_pcmd_debug.last_poll_tick = 0U;
+    g_pcmd_debug.reconfigure_count++;
+    return;
+  }
+
+  /*
+   * Keep all PCMD3180 I2C traffic before SAI starts. This board has already
+   * shown unreliable I2C once SAI is running, so the status below is a cached
+   * pre-SAI readback used to prove the codec configuration was written.
+   */
   for (uint32_t i = 0; i < PCMD3180_ARRAY_DEVICE_COUNT; i++)
   {
     PCMD3180_ConfigTypeDef device_config;
@@ -787,31 +943,59 @@ static void App_PCMD_ConfigureMode(PCMD3180_ArrayModeTypeDef mode)
   g_pcmd_debug.mode_start_tick = HAL_GetTick();
   g_pcmd_debug.last_poll_tick = 0U;
   g_pcmd_debug.reconfigure_count++;
-  App_PCMD_StartDma();
   g_pcmd_sai_rate_tick = HAL_GetTick();
   g_pcmd_sai_a_rate_last_count = g_pcmd_sai_a_full_count;
   g_pcmd_sai_b_rate_last_count = g_pcmd_sai_b_full_count;
   g_pcmd_sai_a_full_rate = 0U;
   g_pcmd_sai_b_full_rate = 0U;
+  App_PCMD_StartDma();
+}
+
+static void App_PCMD_PrepareBus(uint8_t reset_device)
+{
+  memset(&g_pcmd_bus_context, 0, sizeof(g_pcmd_bus_context));
+
+  g_pcmd_bus_context.hi2c = &hi2c2;
+  g_pcmd_bus_context.scl_port = GPIOD;
+  g_pcmd_bus_context.scl_pin = GPIO_PIN_14;
+  g_pcmd_bus_context.sda_port = GPIOD;
+  g_pcmd_bus_context.sda_pin = GPIO_PIN_4;
+  g_pcmd_bus_context.shutdown_port = MIC_SHDNZ_GPIO_Port;
+  g_pcmd_bus_context.shutdown_pin = MIC_SHDNZ_Pin;
+  g_pcmd_bus_context.timeout_ms = APP_PCMD_I2C_TIMEOUT_MS;
+  PCMD3180_HAL_BusInitSoftwareI2C(&g_pcmd_bus, &g_pcmd_bus_context);
+
+  if ((reset_device != 0U) && (g_pcmd_bus.set_shutdown != NULL))
+  {
+    g_pcmd_bus.set_shutdown(g_pcmd_bus.context, 1U);
+    /* TI requires a complete shutdown before release; 100 ms also covers warm reset. */
+    HAL_Delay(APP_PCMD_RESET_LOW_MS);
+    g_pcmd_bus.set_shutdown(g_pcmd_bus.context, 0U);
+    HAL_Delay(APP_PCMD_RESET_SETTLE_MS);
+  }
+}
+
+static void App_PCMD_EarlyI2CTest(void)
+{
+  App_PCMD_PrepareBus(1U);
+  g_pcmd_debug.early_address_scan_ok =
+      App_PCMD_RunAddressScan(g_pcmd_debug.early_address_ack_count,
+                              &g_pcmd_debug.early_address_scan_rounds,
+                              &g_pcmd_debug.early_scl_idle_high,
+                              &g_pcmd_debug.early_sda_idle_high);
 }
 
 static void App_PCMD_DebugInit(void)
 {
-  memset(&g_pcmd_debug, 0, sizeof(g_pcmd_debug));
   memset(g_pcmd_devices, 0, sizeof(g_pcmd_devices));
 
-  g_pcmd_bus_context.hi2c = &hi2c2;
-  g_pcmd_bus_context.shutdown_port = MIC_SHDNZ_GPIO_Port;
-  g_pcmd_bus_context.shutdown_pin = MIC_SHDNZ_Pin;
-  g_pcmd_bus_context.timeout_ms = APP_PCMD_I2C_TIMEOUT_MS;
-  PCMD3180_HAL_BusInit(&g_pcmd_bus, &g_pcmd_bus_context);
-
-  if (g_pcmd_bus.set_shutdown != NULL)
+  if (g_pcmd_debug.early_address_scan_rounds == 0U)
   {
-    g_pcmd_bus.set_shutdown(g_pcmd_bus.context, 1U);
-    HAL_Delay(5U);
-    g_pcmd_bus.set_shutdown(g_pcmd_bus.context, 0U);
-    HAL_Delay(25U);
+    App_PCMD_PrepareBus(1U);
+  }
+  else
+  {
+    App_PCMD_PrepareBus(0U);
   }
 
   g_pcmd_debug.initialized = 1U;
@@ -838,7 +1022,8 @@ static void App_PCMD_Task(void)
     App_PCMD_ConfigureMode(next_mode);
   }
 
-  if ((now - g_pcmd_debug.last_poll_tick) >= APP_PCMD_POLL_MS)
+  if ((APP_PCMD_POLL_MS != 0U) &&
+      ((now - g_pcmd_debug.last_poll_tick) >= APP_PCMD_POLL_MS))
   {
     g_pcmd_debug.last_poll_tick = now;
     App_PCMD_PollStatus();
@@ -859,7 +1044,10 @@ static void App_PCMD_Task(void)
     g_pcmd_sai_rate_tick = now;
   }
 
-  App_PCMD_StartDma();
+  if (g_pcmd_debug.address_scan_ok != 0U)
+  {
+    App_PCMD_StartDma();
+  }
 }
 
 static void App_PCMD_ShowMicActivity(uint16_t start_y)
@@ -961,7 +1149,7 @@ static void App_PCMD_ShowMicActivity(uint16_t start_y)
 
 static void App_PCMD_ShowDebugPage(void)
 {
-  char line[96];
+  char line[128];
   uint16_t y = 18;
 
   rgblcd_clear(BLACK);
@@ -1021,33 +1209,124 @@ static void App_PCMD_ShowDebugPage(void)
   rgblcd_show_string(APP_PCMD_UI_X, y, APP_PCMD_UI_W, 12, 12, line, CYAN);
   y += 20U;
 
+  snprintf(line,
+           sizeof(line),
+           "PDMCLK exp:%luHz  pre-SAI cfg: PD40 G41414141 GI4567",
+           (unsigned long)(g_pcmd_debug.mode_config.sample_rate_hz * 64U));
+  rgblcd_show_string(APP_PCMD_UI_X, y, APP_PCMD_UI_W, 12, 12, line, CYAN);
+  y += 16U;
+
+  snprintf(line,
+           sizeof(line),
+           "EADDR/%u 4C:%u 4D:%u 4E:%u 4F:%u BUS:%u%u %s",
+           g_pcmd_debug.early_address_scan_rounds,
+           g_pcmd_debug.early_address_ack_count[0],
+           g_pcmd_debug.early_address_ack_count[1],
+           g_pcmd_debug.early_address_ack_count[2],
+           g_pcmd_debug.early_address_ack_count[3],
+           g_pcmd_debug.early_scl_idle_high,
+           g_pcmd_debug.early_sda_idle_high,
+           (g_pcmd_debug.early_address_scan_ok != 0U) ? "OK" : "BAD");
+  rgblcd_show_string(APP_PCMD_UI_X, y, APP_PCMD_UI_W, 12, 12, line,
+                     (g_pcmd_debug.early_address_scan_ok != 0U) ? GREEN : RED);
+  y += 16U;
+
+  snprintf(line,
+           sizeof(line),
+           "ADDR/%u 4C:%u 4D:%u 4E:%u 4F:%u BUS:%u%u %s",
+           g_pcmd_debug.address_scan_rounds,
+           g_pcmd_debug.address_ack_count[0],
+           g_pcmd_debug.address_ack_count[1],
+           g_pcmd_debug.address_ack_count[2],
+           g_pcmd_debug.address_ack_count[3],
+           g_pcmd_debug.scl_idle_high,
+           g_pcmd_debug.sda_idle_high,
+           (g_pcmd_debug.address_scan_ok != 0U) ? "OK" : "BAD");
+  rgblcd_show_string(APP_PCMD_UI_X, y, APP_PCMD_UI_W, 12, 12, line,
+                     (g_pcmd_debug.address_scan_ok != 0U) ? GREEN : RED);
+  y += 16U;
+
+  uint32_t failed_device = PCMD3180_ARRAY_DEVICE_COUNT;
+  for (uint32_t i = 0; i < PCMD3180_ARRAY_DEVICE_COUNT; i++)
+  {
+    if ((g_pcmd_devices[i].present != 0U) &&
+        (g_pcmd_devices[i].config_status != PCMD3180_OK))
+    {
+      failed_device = i;
+      break;
+    }
+  }
+
+  if (failed_device < PCMD3180_ARRAY_DEVICE_COUNT)
+  {
+    const PCMD3180_HandleTypeDef *handle = &g_pcmd_handles[failed_device];
+    snprintf(line,
+             sizeof(line),
+             "Fail U%lu %s reg:%02X wr:%02X rd:%02X",
+             (unsigned long)(failed_device + 1U),
+             App_PCMD_StatusName(g_pcmd_devices[failed_device].config_status),
+             handle->last_reg,
+             handle->last_write_value,
+             handle->last_read_value);
+  }
+  else
+  {
+    snprintf(line, sizeof(line), "Fail none");
+  }
+  rgblcd_show_string(APP_PCMD_UI_X, y, APP_PCMD_UI_W, 12, 12, line,
+                     (failed_device < PCMD3180_ARRAY_DEVICE_COUNT) ? YELLOW : GREEN);
+  y += 16U;
+
+  snprintf(line,
+           sizeof(line),
+           "I2C rec:%lu %c %02X:%02X val:%02X h:%lu e:%lX",
+           (unsigned long)g_pcmd_bus_context.recover_count,
+           (g_pcmd_bus_context.last_is_read != 0U) ? 'R' : 'W',
+           g_pcmd_bus_context.last_address7,
+           g_pcmd_bus_context.last_reg,
+           g_pcmd_bus_context.last_value,
+           (unsigned long)g_pcmd_bus_context.last_hal_status,
+           (unsigned long)g_pcmd_bus_context.last_hal_error);
+  rgblcd_show_string(APP_PCMD_UI_X, y, APP_PCMD_UI_W, 12, 12, line, CYAN);
+  y += 20U;
+
   rgblcd_show_string(APP_PCMD_UI_X, y, APP_PCMD_UI_W, 12, 12,
-                     "Dev Adr Prb Cfg St PWR D0 D1 ASI I0 I1 GPI",
+                     "Dev Adr P C S PWR ASI D0/D1 PD PI GPOs GI EN/AO",
                      YELLOW);
   y += 16U;
 
   for (uint32_t i = 0; i < PCMD3180_ARRAY_DEVICE_COUNT; i++)
   {
     const AppPcmdDeviceState_t *device = &g_pcmd_devices[i];
+    const uint8_t routing_ok = App_PCMD_IsRoutingSnapshotOk(i, &device->snapshot);
     const uint16_t color = (device->present != 0U) ?
-                           ((device->config_status == PCMD3180_OK) ? GREEN : YELLOW) :
+                           (((device->config_status == PCMD3180_OK) &&
+                             (device->status_status == PCMD3180_OK)) ?
+                            ((routing_ok != 0U) ? GREEN : RED) : YELLOW) :
                            RED;
 
     snprintf(line,
              sizeof(line),
-             "U%lu %02X %-3s %-3s %-3s %02X %02X %02X %02X %02X %02X %02X",
+             "U%lu %02X %-2s %-2s %-2s P%02X A%02X D%02X/%02X PD%02X PI%02X G%02X%02X%02X%02X GI%02X/%02X E%02X/O%02X",
              (unsigned long)(i + 1U),
              (unsigned int)(PCMD3180_I2C_ADDR_0 + i),
              App_PCMD_StatusName(device->probe_status),
              App_PCMD_StatusName(device->config_status),
              App_PCMD_StatusName(device->status_status),
              device->snapshot.pwr_cfg,
+             device->snapshot.asi_sts,
              device->snapshot.dev_sts0,
              device->snapshot.dev_sts1,
-             device->snapshot.asi_sts,
-             device->snapshot.int_latch0,
-             device->snapshot.int_latch1,
-             device->snapshot.gpi_mon);
+             device->snapshot.pdmclk_cfg,
+             device->snapshot.pdmin_cfg,
+             device->snapshot.gpo_cfg0,
+             device->snapshot.gpo_cfg1,
+             device->snapshot.gpo_cfg2,
+             device->snapshot.gpo_cfg3,
+             device->snapshot.gpi_cfg0,
+             device->snapshot.gpi_cfg1,
+             device->snapshot.in_ch_en,
+             device->snapshot.asi_out_ch_en);
     rgblcd_show_string(APP_PCMD_UI_X, y, APP_PCMD_UI_W, 12, 12, line, color);
     y += 16U;
   }
@@ -1149,9 +1428,10 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   SystemIsolation_Config();
+  MX_I2C2_Init();
+  App_PCMD_EarlyI2CTest();
   MX_DMA2D_Init();
   MX_LTDC_Init();
-  MX_I2C2_Init();
   MX_SAI1_Init();
   /* USER CODE BEGIN 2 */
   led_init();
@@ -1236,7 +1516,7 @@ static void MX_I2C2_Init(void)
 
   /* USER CODE END I2C2_Init 1 */
   hi2c2.Instance = I2C2;
-  hi2c2.Init.Timing = 0x10707DBC;
+  hi2c2.Init.Timing = APP_I2C2_TIMING_25KHZ_64MHZ;
   hi2c2.Init.OwnAddress1 = 0;
   hi2c2.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
   hi2c2.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
