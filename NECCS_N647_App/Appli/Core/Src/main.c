@@ -88,6 +88,7 @@ typedef struct
 #define APP_PCMD_AUTO_MODE_SWITCH 0U
 #define APP_PCMD_RESET_LOW_MS    100U
 #define APP_PCMD_RESET_SETTLE_MS 10U
+#define APP_PCMD_CLOCK_SETTLE_MS 1000U
 #define APP_PCMD_ADDR_SCAN_ROUNDS 16U
 #define APP_I2C2_TIMING_25KHZ_64MHZ 0x702177C7U
 #define APP_PCMD_UI_X            8U
@@ -688,22 +689,28 @@ static HAL_StatusTypeDef App_SAI_ApplyModeConfig(const PCMD3180_ArrayModeConfigT
 
 static void App_PCMD_StartDma(void)
 {
+  if (HAL_SAI_GetState(&hsai_BlockA1) == HAL_SAI_STATE_READY)
+  {
+    g_pcmd_debug.dma_a_status =
+        HAL_SAI_Receive_DMA(&hsai_BlockA1, (uint8_t *)g_pcmd_sai_a_rx, APP_PCMD_DMA_WORDS);
+    if (g_pcmd_debug.dma_a_status != HAL_OK)
+    {
+      return;
+    }
+
+    /* Block A is the clock master; let BCLK/FSYNC start before enabling B. */
+    HAL_Delay(2U);
+  }
+
   if (HAL_SAI_GetState(&hsai_BlockB1) == HAL_SAI_STATE_READY)
   {
     g_pcmd_debug.dma_b_status =
         HAL_SAI_Receive_DMA(&hsai_BlockB1, (uint8_t *)g_pcmd_sai_b_rx, APP_PCMD_DMA_WORDS);
     if (g_pcmd_debug.dma_b_status == HAL_OK)
     {
-      /* Block B waits for Block A's internally synchronized first frame. */
       __HAL_SAI_CLEAR_FLAG(&hsai_BlockB1, SAI_FLAG_AFSDET | SAI_FLAG_LFSDET);
       __HAL_SAI_DISABLE_IT(&hsai_BlockB1, SAI_IT_AFSDET | SAI_IT_LFSDET);
     }
-  }
-
-  if (HAL_SAI_GetState(&hsai_BlockA1) == HAL_SAI_STATE_READY)
-  {
-    g_pcmd_debug.dma_a_status =
-        HAL_SAI_Receive_DMA(&hsai_BlockA1, (uint8_t *)g_pcmd_sai_a_rx, APP_PCMD_DMA_WORDS);
   }
 }
 
@@ -896,7 +903,27 @@ static void App_PCMD_ConfigureMode(PCMD3180_ArrayModeTypeDef mode)
     return;
   }
 
-  g_pcmd_debug.address_scan_ok = App_PCMD_CheckAddressMap();
+  /*
+   * PCMD3180 needs valid BCLK/FSYNC when its PLL/PDM converter is powered.
+   * The H7-proven flow starts SAI DMA first, waits for stable clocks, then
+   * writes the PCMD register table. Keep address probing before SAI starts,
+   * because this board's shared I2C bus is noisy once the audio clocks run.
+   */
+  if (g_pcmd_debug.early_address_scan_rounds != 0U)
+  {
+    memcpy(g_pcmd_debug.address_ack_count,
+           g_pcmd_debug.early_address_ack_count,
+           sizeof(g_pcmd_debug.address_ack_count));
+    g_pcmd_debug.address_scan_rounds = g_pcmd_debug.early_address_scan_rounds;
+    g_pcmd_debug.address_scan_ok = g_pcmd_debug.early_address_scan_ok;
+    g_pcmd_debug.scl_idle_high = g_pcmd_debug.early_scl_idle_high;
+    g_pcmd_debug.sda_idle_high = g_pcmd_debug.early_sda_idle_high;
+  }
+  else
+  {
+    g_pcmd_debug.address_scan_ok = App_PCMD_CheckAddressMap();
+  }
+
   if (g_pcmd_debug.address_scan_ok == 0U)
   {
     g_pcmd_debug.mode_start_tick = HAL_GetTick();
@@ -905,11 +932,9 @@ static void App_PCMD_ConfigureMode(PCMD3180_ArrayModeTypeDef mode)
     return;
   }
 
-  /*
-   * Keep all PCMD3180 I2C traffic before SAI starts. This board has already
-   * shown unreliable I2C once SAI is running, so the status below is a cached
-   * pre-SAI readback used to prove the codec configuration was written.
-   */
+  App_PCMD_StartDma();
+  HAL_Delay(APP_PCMD_CLOCK_SETTLE_MS);
+
   for (uint32_t i = 0; i < PCMD3180_ARRAY_DEVICE_COUNT; i++)
   {
     PCMD3180_ConfigTypeDef device_config;
@@ -948,7 +973,6 @@ static void App_PCMD_ConfigureMode(PCMD3180_ArrayModeTypeDef mode)
   g_pcmd_sai_b_rate_last_count = g_pcmd_sai_b_full_count;
   g_pcmd_sai_a_full_rate = 0U;
   g_pcmd_sai_b_full_rate = 0U;
-  App_PCMD_StartDma();
 }
 
 static void App_PCMD_PrepareBus(uint8_t reset_device)
@@ -1211,7 +1235,7 @@ static void App_PCMD_ShowDebugPage(void)
 
   snprintf(line,
            sizeof(line),
-           "PDMCLK exp:%luHz  pre-SAI cfg: PD40 G41414141 GI4567",
+           "PDMCLK exp:%luHz  cfg after SAI clocks",
            (unsigned long)(g_pcmd_debug.mode_config.sample_rate_hz * 64U));
   rgblcd_show_string(APP_PCMD_UI_X, y, APP_PCMD_UI_W, 12, 12, line, CYAN);
   y += 16U;
