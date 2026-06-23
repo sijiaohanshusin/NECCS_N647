@@ -361,19 +361,26 @@ PCMD3180_StatusTypeDef PCMD3180_HAL_WriteReg(void *context,
     if (hal_context->use_software_i2c != 0U)
     {
         PCMD3180_StatusTypeDef sw_status;
-        const uint32_t primask = PCMD3180_HAL_SwI2CLock();
 
-        sw_status = PCMD3180_HAL_SwWriteRegOnce(hal_context, address7, reg, value);
-        PCMD3180_HAL_SwI2CUnlock(primask);
-
-        if (sw_status == PCMD3180_OK)
+        for (attempt = 0U; attempt < PCMD3180_HAL_I2C_RETRY_COUNT; attempt++)
         {
-            hal_context->last_hal_status = 0U;
-            hal_context->last_hal_error = 0U;
-            return PCMD3180_OK;
+            const uint32_t primask = PCMD3180_HAL_SwI2CLock();
+
+            sw_status = PCMD3180_HAL_SwWriteRegOnce(hal_context, address7, reg, value);
+            PCMD3180_HAL_SwI2CUnlock(primask);
+
+            if (sw_status == PCMD3180_OK)
+            {
+                hal_context->last_hal_status = 0U;
+                hal_context->last_hal_error = 0U;
+                return PCMD3180_OK;
+            }
+
+            hal_context->recover_count++;
+            PCMD3180_HAL_BusClear(hal_context);
+            HAL_Delay(PCMD3180_HAL_I2C_RETRY_DELAY_MS);
         }
 
-        hal_context->recover_count++;
         hal_context->last_hal_status = 1U;
         hal_context->last_hal_error = 0xA0U;
         return PCMD3180_IO_ERROR;
@@ -429,20 +436,27 @@ PCMD3180_StatusTypeDef PCMD3180_HAL_ReadReg(void *context,
     if (hal_context->use_software_i2c != 0U)
     {
         PCMD3180_StatusTypeDef sw_status;
-        const uint32_t primask = PCMD3180_HAL_SwI2CLock();
 
-        sw_status = PCMD3180_HAL_SwReadRegOnce(hal_context, address7, reg, value);
-        PCMD3180_HAL_SwI2CUnlock(primask);
-
-        if (sw_status == PCMD3180_OK)
+        for (attempt = 0U; attempt < PCMD3180_HAL_I2C_RETRY_COUNT; attempt++)
         {
-            hal_context->last_value = *value;
-            hal_context->last_hal_status = 0U;
-            hal_context->last_hal_error = 0U;
-            return PCMD3180_OK;
+            const uint32_t primask = PCMD3180_HAL_SwI2CLock();
+
+            sw_status = PCMD3180_HAL_SwReadRegOnce(hal_context, address7, reg, value);
+            PCMD3180_HAL_SwI2CUnlock(primask);
+
+            if (sw_status == PCMD3180_OK)
+            {
+                hal_context->last_value = *value;
+                hal_context->last_hal_status = 0U;
+                hal_context->last_hal_error = 0U;
+                return PCMD3180_OK;
+            }
+
+            hal_context->recover_count++;
+            PCMD3180_HAL_BusClear(hal_context);
+            HAL_Delay(PCMD3180_HAL_I2C_RETRY_DELAY_MS);
         }
 
-        hal_context->recover_count++;
         hal_context->last_hal_status = 1U;
         hal_context->last_hal_error = 0xA1U;
         return PCMD3180_IO_ERROR;

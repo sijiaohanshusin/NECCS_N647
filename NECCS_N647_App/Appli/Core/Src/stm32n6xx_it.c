@@ -58,6 +58,10 @@ volatile uint32_t g_app_systick_irq_count = 0;
 /* External variables --------------------------------------------------------*/
 
 /* USER CODE BEGIN EV */
+extern DMA_HandleTypeDef handle_GPDMA1_Channel0;
+extern DMA_HandleTypeDef handle_GPDMA1_Channel1;
+extern SAI_HandleTypeDef hsai_BlockA1;
+extern SAI_HandleTypeDef hsai_BlockB1;
 
 /* USER CODE END EV */
 
@@ -229,5 +233,24 @@ void USART1_IRQHandler(void)
 }
 
 /* USER CODE BEGIN 1 */
+void SAI1_A_IRQHandler(void)
+{
+  HAL_SAI_IRQHandler(&hsai_BlockA1);
+}
+
+void SAI1_B_IRQHandler(void)
+{
+  HAL_SAI_IRQHandler(&hsai_BlockB1);
+}
+
+void GPDMA1_Channel0_IRQHandler(void)
+{
+  HAL_DMA_IRQHandler(&handle_GPDMA1_Channel0);
+}
+
+void GPDMA1_Channel1_IRQHandler(void)
+{
+  HAL_DMA_IRQHandler(&handle_GPDMA1_Channel1);
+}
 
 /* USER CODE END 1 */

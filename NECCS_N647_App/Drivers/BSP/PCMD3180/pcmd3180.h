@@ -97,6 +97,7 @@ extern "C" {
 #define PCMD3180_REG_INT_LTCH0           0x36U
 #define PCMD3180_REG_INT_LTCH1           0x37U
 
+#define PCMD3180_SLEEP_CFG_SLEEP         0x80U
 #define PCMD3180_SLEEP_CFG_WAKE          0x81U
 #define PCMD3180_SW_RESET_ASSERT         0x01U
 #define PCMD3180_PDMCLK_CFG_RESET_MASK   0x40U
@@ -223,6 +224,7 @@ typedef struct
     PCMD3180_HighPassFilterTypeDef hpf_select;
     uint8_t enable_micbias;
     uint8_t verify_writes;
+    uint8_t defer_power_up;
 } PCMD3180_ConfigTypeDef;
 
 typedef struct
@@ -297,6 +299,9 @@ PCMD3180_StatusTypeDef PCMD3180_Probe(PCMD3180_HandleTypeDef *handle);
 
 PCMD3180_StatusTypeDef PCMD3180_Configure(PCMD3180_HandleTypeDef *handle,
                                           const PCMD3180_ConfigTypeDef *config);
+
+PCMD3180_StatusTypeDef PCMD3180_Activate(PCMD3180_HandleTypeDef *handle,
+                                         const PCMD3180_ConfigTypeDef *config);
 
 PCMD3180_StatusTypeDef PCMD3180_ConfigureTdmChain(PCMD3180_HandleTypeDef *handles,
                                                   const uint8_t *addresses,

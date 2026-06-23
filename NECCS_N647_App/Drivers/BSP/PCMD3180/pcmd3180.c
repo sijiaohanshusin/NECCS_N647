@@ -302,6 +302,7 @@ void PCMD3180_GetDefaultConfig(PCMD3180_ConfigTypeDef *config)
      * domain is still settling.
      */
     config->verify_writes = 0U;
+    config->defer_power_up = 0U;
 }
 
 PCMD3180_StatusTypeDef PCMD3180_GetArrayModeConfig(PCMD3180_ArrayModeTypeDef mode,
@@ -512,6 +513,7 @@ PCMD3180_StatusTypeDef PCMD3180_Configure(PCMD3180_HandleTypeDef *handle,
     uint8_t asi_cfg0;
     uint8_t pwr_cfg;
     uint8_t verify;
+    uint8_t defer_power_up;
     PCMD3180_StatusTypeDef status;
 
     status = PCMD3180_CheckHandle(handle);
@@ -531,6 +533,7 @@ PCMD3180_StatusTypeDef PCMD3180_Configure(PCMD3180_HandleTypeDef *handle,
     }
 
     verify = (config->verify_writes == 0U) ? 0U : 1U;
+    defer_power_up = (config->defer_power_up == 0U) ? 0U : 1U;
 
     status = PCMD3180_SelectPage(handle, 0U);
     if (status != PCMD3180_OK)
@@ -555,13 +558,20 @@ PCMD3180_StatusTypeDef PCMD3180_Configure(PCMD3180_HandleTypeDef *handle,
         return status;
     }
 
-    status = PCMD3180_WriteChecked(handle, PCMD3180_REG_SLEEP_CFG, PCMD3180_SLEEP_CFG_WAKE, verify);
+    status = PCMD3180_WriteChecked(handle,
+                                   PCMD3180_REG_SLEEP_CFG,
+                                   (defer_power_up == 0U) ?
+                                   PCMD3180_SLEEP_CFG_WAKE : PCMD3180_SLEEP_CFG_SLEEP,
+                                   verify);
     if (status != PCMD3180_OK)
     {
         return status;
     }
 
-    PCMD3180_Delay(handle, 10U);
+    if (defer_power_up == 0U)
+    {
+        PCMD3180_Delay(handle, 10U);
+    }
 
     asi_cfg0 = PCMD3180_ASI_CFG0_TDM_MODE |
                (uint8_t)(((uint8_t)config->slot_width & 0x03U) << 4) |
@@ -700,8 +710,10 @@ PCMD3180_StatusTypeDef PCMD3180_Configure(PCMD3180_HandleTypeDef *handle,
         return status;
     }
 
-    pwr_cfg = PCMD3180_PWR_PDM_AND_PLL |
-              (uint8_t)((config->enable_micbias == 0U) ? 0U : PCMD3180_PWR_MICBIAS);
+    pwr_cfg = (defer_power_up == 0U) ?
+              (PCMD3180_PWR_PDM_AND_PLL |
+               (uint8_t)((config->enable_micbias == 0U) ? 0U : PCMD3180_PWR_MICBIAS)) :
+              0U;
 
     status = PCMD3180_WriteChecked(handle, PCMD3180_REG_PWR_CFG, pwr_cfg, verify);
     if (status != PCMD3180_OK)
@@ -711,6 +723,50 @@ PCMD3180_StatusTypeDef PCMD3180_Configure(PCMD3180_HandleTypeDef *handle,
 
     handle->configured = 1U;
 
+    return PCMD3180_OK;
+}
+
+PCMD3180_StatusTypeDef PCMD3180_Activate(PCMD3180_HandleTypeDef *handle,
+                                         const PCMD3180_ConfigTypeDef *config)
+{
+    uint8_t pwr_cfg;
+    uint8_t verify;
+    PCMD3180_StatusTypeDef status;
+
+    status = PCMD3180_CheckHandle(handle);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+    if (config == NULL)
+    {
+        return PCMD3180_INVALID_ARGUMENT;
+    }
+
+    verify = (config->verify_writes == 0U) ? 0U : 1U;
+
+    status = PCMD3180_SelectPage(handle, 0U);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    status = PCMD3180_WriteChecked(handle, PCMD3180_REG_SLEEP_CFG, PCMD3180_SLEEP_CFG_WAKE, verify);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+    PCMD3180_Delay(handle, 10U);
+
+    pwr_cfg = PCMD3180_PWR_PDM_AND_PLL |
+              (uint8_t)((config->enable_micbias == 0U) ? 0U : PCMD3180_PWR_MICBIAS);
+    status = PCMD3180_WriteChecked(handle, PCMD3180_REG_PWR_CFG, pwr_cfg, verify);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    handle->configured = 1U;
     return PCMD3180_OK;
 }
 
