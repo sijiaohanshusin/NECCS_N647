@@ -196,6 +196,11 @@
 			<location>C:/Users/xiazhiyuan/STM32Cube/Repository/STM32Cube_FW_N6_V1.3.0/Drivers/STM32N6xx_HAL_Driver/Src/stm32n6xx_ll_sdmmc.c</location>
 		</link>
 		<link>
+			<name>Application/User/Core/app_pcmd_bus.c</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/Appli/Core/Src/app_pcmd_bus.c</locationURI>
+		</link>
+		<link>
 			<name>Application/User/Core/main.c</name>
 			<type>1</type>
 			<locationURI>PARENT-2-PROJECT_LOC/Appli/Core/Src/main.c</locationURI>

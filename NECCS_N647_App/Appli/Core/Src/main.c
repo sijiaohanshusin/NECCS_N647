@@ -26,8 +26,8 @@
 #include "./HyperRAM/hyperram.h"
 #endif
 #include "./LED/led.h"
+#include "app_pcmd_bus.h"
 #include "./PCMD3180/pcmd3180.h"
-#include "./PCMD3180/pcmd3180_hal.h"
 #include "./RGBLCD/rgblcd.h"
 #include <stdio.h>
 #include <string.h>
@@ -133,8 +133,6 @@ static uint16_t g_pcmd_sai_a_rx[APP_PCMD_DMA_WORDS]
     __attribute__((section(".noncacheable"), aligned(32)));
 static uint16_t g_pcmd_sai_b_rx[APP_PCMD_DMA_WORDS]
     __attribute__((section(".noncacheable"), aligned(32)));
-static PCMD3180_BusTypeDef g_pcmd_bus;
-static PCMD3180_HAL_BusContextTypeDef g_pcmd_bus_context;
 static PCMD3180_HandleTypeDef g_pcmd_handles[PCMD3180_ARRAY_DEVICE_COUNT];
 static AppPcmdDeviceState_t g_pcmd_devices[PCMD3180_ARRAY_DEVICE_COUNT];
 static AppPcmdDebugState_t g_pcmd_debug;
@@ -178,12 +176,7 @@ static void App_PCMD_StartDma(void);
 static void App_PCMD_StopDma(void);
 static void App_PCMD_DecayLevels(void);
 static void App_PCMD_ShowMicActivity(uint16_t start_y);
-static void App_PCMD_PrepareBus(uint8_t reset_device);
 static void App_PCMD_EarlyI2CTest(void) __attribute__((unused));
-static uint8_t App_PCMD_RunAddressScan(uint8_t *ack_count,
-                                       uint8_t *scan_rounds,
-                                       uint8_t *scl_idle_high,
-                                       uint8_t *sda_idle_high);
 static uint8_t App_PCMD_CheckAddressMap(void);
 static const char *App_SAI_StateName(uint32_t state);
 static const char *App_SAI_ErrorName(uint32_t error_code);
@@ -699,69 +692,13 @@ static void App_PCMD_PollStatus(void)
   }
 }
 
-static uint8_t App_PCMD_RunAddressScan(uint8_t *ack_count,
-                                       uint8_t *scan_rounds,
-                                       uint8_t *scl_idle_high,
-                                       uint8_t *sda_idle_high)
-{
-  uint8_t all_stable = 1U;
-  uint8_t local_scl_idle_high = 0U;
-  uint8_t local_sda_idle_high = 0U;
-
-  if ((ack_count == NULL) || (scan_rounds == NULL) ||
-      (scl_idle_high == NULL) || (sda_idle_high == NULL))
-  {
-    return 0U;
-  }
-
-  memset(ack_count, 0, PCMD3180_ARRAY_DEVICE_COUNT * sizeof(ack_count[0]));
-  *scan_rounds = APP_PCMD_ADDR_SCAN_ROUNDS;
-
-  for (uint32_t round = 0U; round < APP_PCMD_ADDR_SCAN_ROUNDS; round++)
-  {
-    for (uint32_t device = 0U;
-         device < PCMD3180_ARRAY_DEVICE_COUNT;
-         device++)
-    {
-      if (PCMD3180_HAL_ProbeAddress(&g_pcmd_bus_context,
-                                    (uint8_t)(PCMD3180_I2C_ADDR_0 + device)) == PCMD3180_OK)
-      {
-        ack_count[device]++;
-      }
-    }
-    HAL_Delay(1U);
-  }
-
-  PCMD3180_HAL_GetLineLevels(&g_pcmd_bus_context,
-                             &local_scl_idle_high,
-                             &local_sda_idle_high);
-  *scl_idle_high = local_scl_idle_high;
-  *sda_idle_high = local_sda_idle_high;
-  for (uint32_t device = 0U;
-       device < PCMD3180_ARRAY_DEVICE_COUNT;
-       device++)
-  {
-    if (ack_count[device] != APP_PCMD_ADDR_SCAN_ROUNDS)
-    {
-      all_stable = 0U;
-    }
-  }
-
-  if ((local_scl_idle_high == 0U) ||
-      (local_sda_idle_high == 0U))
-  {
-    all_stable = 0U;
-  }
-
-  return all_stable;
-}
-
 static uint8_t App_PCMD_CheckAddressMap(void)
 {
-  return App_PCMD_RunAddressScan(g_pcmd_debug.address_ack_count,
-                                 &g_pcmd_debug.address_scan_rounds,
-                                 &g_pcmd_debug.scl_idle_high,
-                                 &g_pcmd_debug.sda_idle_high);
+  return App_PCMD_BusRunAddressScan(g_pcmd_debug.address_ack_count,
+                                    &g_pcmd_debug.address_scan_rounds,
+                                    &g_pcmd_debug.scl_idle_high,
+                                    &g_pcmd_debug.sda_idle_high,
+                                    APP_PCMD_ADDR_SCAN_ROUNDS);
 }
 
 static void App_PCMD_SetExpectedSnapshot(uint32_t device_index,
@@ -865,7 +802,7 @@ static void App_PCMD_ConfigureMode(PCMD3180_ArrayModeTypeDef mode)
   {
     const uint8_t address7 = mode_config.devices[i].address7;
 
-    (void)PCMD3180_Init(&g_pcmd_handles[i], &g_pcmd_bus, address7);
+    (void)PCMD3180_Init(&g_pcmd_handles[i], App_PCMD_BusGet(), address7);
 
     pcmd_status = PCMD3180_Probe(&g_pcmd_handles[i]);
     g_pcmd_devices[i].probe_status = pcmd_status;
@@ -921,43 +858,15 @@ static void App_PCMD_ConfigureMode(PCMD3180_ArrayModeTypeDef mode)
   g_pcmd_sai_b_full_rate = 0U;
 }
 
-static void App_PCMD_PrepareBus(uint8_t reset_device)
-{
-  memset(&g_pcmd_bus_context, 0, sizeof(g_pcmd_bus_context));
-
-  g_pcmd_bus_context.hi2c = &hi2c2;
-  g_pcmd_bus_context.scl_port = GPIOD;
-  g_pcmd_bus_context.scl_pin = GPIO_PIN_14;
-  g_pcmd_bus_context.sda_port = GPIOD;
-  g_pcmd_bus_context.sda_pin = GPIO_PIN_4;
-  g_pcmd_bus_context.shutdown_port = MIC_SHDNZ_GPIO_Port;
-  g_pcmd_bus_context.shutdown_pin = MIC_SHDNZ_Pin;
-  g_pcmd_bus_context.timeout_ms = APP_PCMD_I2C_TIMEOUT_MS;
-  /*
-   * Use CubeMX-generated hardware I2C2 for PCMD3180.
-   * The software-I2C fallback bit-bangs PD14/PD4 and disables I2C2, so its
-   * edge timing becomes fragile once SAI/DMA/LCD interrupts are active.
-   */
-  PCMD3180_HAL_BusInit(&g_pcmd_bus, &g_pcmd_bus_context);
-
-  if ((reset_device != 0U) && (g_pcmd_bus.set_shutdown != NULL))
-  {
-    g_pcmd_bus.set_shutdown(g_pcmd_bus.context, 1U);
-    /* TI requires a complete shutdown before release; 100 ms also covers warm reset. */
-    HAL_Delay(APP_PCMD_RESET_LOW_MS);
-    g_pcmd_bus.set_shutdown(g_pcmd_bus.context, 0U);
-    HAL_Delay(APP_PCMD_RESET_SETTLE_MS);
-  }
-}
-
 static void App_PCMD_EarlyI2CTest(void)
 {
-  App_PCMD_PrepareBus(1U);
+  App_PCMD_BusPrepare(1U, APP_PCMD_RESET_LOW_MS, APP_PCMD_RESET_SETTLE_MS);
   g_pcmd_debug.early_address_scan_ok =
-      App_PCMD_RunAddressScan(g_pcmd_debug.early_address_ack_count,
-                              &g_pcmd_debug.early_address_scan_rounds,
-                              &g_pcmd_debug.early_scl_idle_high,
-                              &g_pcmd_debug.early_sda_idle_high);
+      App_PCMD_BusRunAddressScan(g_pcmd_debug.early_address_ack_count,
+                                 &g_pcmd_debug.early_address_scan_rounds,
+                                 &g_pcmd_debug.early_scl_idle_high,
+                                 &g_pcmd_debug.early_sda_idle_high,
+                                 APP_PCMD_ADDR_SCAN_ROUNDS);
 }
 
 static void App_PCMD_DebugInit(void)
@@ -966,11 +875,11 @@ static void App_PCMD_DebugInit(void)
 
   if (g_pcmd_debug.early_address_scan_rounds == 0U)
   {
-    App_PCMD_PrepareBus(1U);
+    App_PCMD_BusPrepare(1U, APP_PCMD_RESET_LOW_MS, APP_PCMD_RESET_SETTLE_MS);
   }
   else
   {
-    App_PCMD_PrepareBus(0U);
+    App_PCMD_BusPrepare(0U, APP_PCMD_RESET_LOW_MS, APP_PCMD_RESET_SETTLE_MS);
   }
 
   g_pcmd_debug.initialized = 1U;
@@ -1124,6 +1033,7 @@ static void App_PCMD_ShowMicActivity(uint16_t start_y)
 
 static void App_PCMD_ShowDebugPage(void)
 {
+  const PCMD3180_HAL_BusContextTypeDef *bus_context = App_PCMD_BusGetContext();
   char line[128];
   uint16_t y = 18;
 
@@ -1255,14 +1165,14 @@ static void App_PCMD_ShowDebugPage(void)
   snprintf(line,
            sizeof(line),
            "I2C:%s rec:%lu %c %02X:%02X val:%02X h:%lu e:%lX",
-           (g_pcmd_bus_context.use_software_i2c != 0U) ? "SW" : "HW",
-           (unsigned long)g_pcmd_bus_context.recover_count,
-           (g_pcmd_bus_context.last_is_read != 0U) ? 'R' : 'W',
-           g_pcmd_bus_context.last_address7,
-           g_pcmd_bus_context.last_reg,
-           g_pcmd_bus_context.last_value,
-           (unsigned long)g_pcmd_bus_context.last_hal_status,
-           (unsigned long)g_pcmd_bus_context.last_hal_error);
+           (bus_context->use_software_i2c != 0U) ? "SW" : "HW",
+           (unsigned long)bus_context->recover_count,
+           (bus_context->last_is_read != 0U) ? 'R' : 'W',
+           bus_context->last_address7,
+           bus_context->last_reg,
+           bus_context->last_value,
+           (unsigned long)bus_context->last_hal_status,
+           (unsigned long)bus_context->last_hal_error);
   rgblcd_show_string(APP_PCMD_UI_X, y, APP_PCMD_UI_W, 12, 12, line, CYAN);
   y += 20U;
 
@@ -1410,6 +1320,14 @@ int main(void)
   /* USER CODE BEGIN 2 */
   led_init();
   rgblcd_init();
+  App_PCMD_BusInit(&hi2c2,
+                   GPIOD,
+                   GPIO_PIN_14,
+                   GPIOD,
+                   GPIO_PIN_4,
+                   MIC_SHDNZ_GPIO_Port,
+                   MIC_SHDNZ_Pin,
+                   APP_PCMD_I2C_TIMEOUT_MS);
   App_PCMD_DebugInit();
   g_pcmd_last_ui_tick = HAL_GetTick() - APP_PCMD_UI_REFRESH_MS;
 
