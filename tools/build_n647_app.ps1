@@ -19,6 +19,7 @@ $projectDir = Join-Path $repoRoot "NECCS_N647_App\STM32CubeIDE\Appli"
 $projectName = "NECCS_N647_App_Appli"
 $iocFile = Join-Path $repoRoot "NECCS_N647_App\NECCS_N647_App.ioc"
 $mspFile = Join-Path $repoRoot "NECCS_N647_App\Appli\Core\Src\stm32n6xx_hal_msp.c"
+$coreSourceDir = Join-Path $repoRoot "NECCS_N647_App\Appli\Core\Src"
 $artifactRows = New-Object System.Collections.Generic.List[object]
 
 function Resolve-CubeIdeRoot {
@@ -68,6 +69,16 @@ function Assert-ContainsText {
     }
 }
 
+function Write-TextFileNoBom {
+    param(
+        [string]$Path,
+        [string]$Text
+    )
+
+    $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($Path, $Text, $utf8NoBom)
+}
+
 function Invoke-Make {
     param(
         [string]$ConfigDir,
@@ -83,6 +94,113 @@ function Invoke-Make {
         }
     } finally {
         Pop-Location
+    }
+}
+
+function Repair-GeneratedCoreSourceList {
+    param([string]$ConfigDir)
+
+    $subdirMk = Join-Path $ConfigDir "Application\User\Core\subdir.mk"
+    $objectsList = Join-Path $ConfigDir "objects.list"
+
+    if (-not (Test-Path -LiteralPath $subdirMk -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $objectsList -PathType Leaf)) {
+        return
+    }
+
+    $subdirText = Get-Content -LiteralPath $subdirMk -Raw
+    $objectsText = Get-Content -LiteralPath $objectsList -Raw
+    $repairBlockPattern = "(?ms)\r?\n?# Added by tools/build_n647_app\.ps1 when CubeIDE omits local user sources\.\r?\nC_SRCS \+= \\\r?\n[^\r\n]+\r?\n\r?\nOBJS \+= \\\r?\n[^\r\n]+\r?\n\r?\nC_DEPS \+= \\\r?\n[^\r\n]+(?:\r?\n\r?\nApplication/User/Core/[^\r\n]+\.o: [^\r\n]+\r?\n\t[^\r\n]+)?"
+    $subdirText = [regex]::Replace($subdirText, $repairBlockPattern, "")
+
+    $mainCompileLine = $null
+    if ($subdirText -match "(?m)^Application/User/Core/main\.o:.*\r?\n(\tarm-none-eabi-gcc .*)$") {
+        $mainCompileLine = $Matches[1]
+    } else {
+        throw "Cannot locate main.c compile rule in generated makefile: $subdirMk"
+    }
+
+    $allSubdirText = $subdirText
+    foreach ($otherSubdirMk in Get-ChildItem -LiteralPath $ConfigDir -Recurse -Filter "subdir.mk" -File) {
+        if ($otherSubdirMk.FullName -ne $subdirMk) {
+            $allSubdirText += "`n" + (Get-Content -LiteralPath $otherSubdirMk.FullName -Raw)
+        }
+    }
+
+    $newBlocks = New-Object System.Collections.Generic.List[string]
+    $objectLines = New-Object System.Collections.Generic.List[string]
+
+    foreach ($source in Get-ChildItem -LiteralPath $coreSourceDir -Filter "*.c" -File) {
+        $baseName = [System.IO.Path]::GetFileNameWithoutExtension($source.Name)
+        $sourceForMake = $source.FullName -replace "\\", "/"
+        $objectForMake = "./Application/User/Core/$baseName.o"
+        $dependencyForMake = "./Application/User/Core/$baseName.d"
+        $targetForMake = "Application/User/Core/$baseName.o"
+        $sourceAlreadyInUserCore = $subdirText -match [regex]::Escape($source.Name)
+        $sourceAlreadyGeneratedElsewhere = $allSubdirText -match [regex]::Escape($source.Name)
+
+        if (-not $sourceAlreadyInUserCore -and -not $sourceAlreadyGeneratedElsewhere) {
+            $newBlock = @"
+
+# Added by tools/build_n647_app.ps1 when CubeIDE omits local user sources.
+C_SRCS += \
+$sourceForMake
+
+OBJS += \
+$objectForMake
+
+C_DEPS += \
+$dependencyForMake
+
+$targetForMake`: $sourceForMake Application/User/Core/subdir.mk
+$mainCompileLine
+"@
+            $newBlocks.Add($newBlock) | Out-Null
+            $objectLines.Add("`"$objectForMake`"") | Out-Null
+
+            foreach ($suffix in @(".o", ".d", ".su", ".cyclo")) {
+                Remove-Item -LiteralPath (Join-Path $ConfigDir "Application\User\Core\$baseName$suffix") -ErrorAction SilentlyContinue
+            }
+        }
+
+        if ($sourceAlreadyInUserCore -and $objectsText -match [regex]::Escape($objectForMake)) {
+            $objectLines.Add("`"$objectForMake`"") | Out-Null
+        }
+    }
+
+    if ($newBlocks.Count -gt 0 -or $subdirText -ne (Get-Content -LiteralPath $subdirMk -Raw)) {
+        $subdirText = $subdirText.TrimEnd() + "`r`n" + ($newBlocks -join "`r`n") + "`r`n"
+        Write-TextFileNoBom -Path $subdirMk -Text $subdirText
+        if ($newBlocks.Count -gt 0) {
+            Write-Host ("Repaired generated Core source list for {0}: {1} file(s)." -f (Split-Path -Leaf $ConfigDir), $newBlocks.Count)
+        }
+    }
+
+    $cleanObjectLines = New-Object System.Collections.Generic.List[string]
+    foreach ($line in (Get-Content -LiteralPath $objectsList)) {
+        if ($line -notmatch '^\s*"\./Application/User/Core/.+\.o"\s*$') {
+            $cleanObjectLines.Add($line) | Out-Null
+            continue
+        }
+
+        if ($line -match '^\s*"\./Application/User/Core/([^/]+)\.o"\s*$') {
+            $baseName = $Matches[1]
+            if ($subdirText -match [regex]::Escape("$baseName.o")) {
+                $cleanObjectLines.Add($line) | Out-Null
+            }
+        }
+    }
+
+    foreach ($line in $objectLines) {
+        if (-not ($cleanObjectLines -contains $line)) {
+            $cleanObjectLines.Add($line) | Out-Null
+        }
+    }
+
+    $newObjectsText = ($cleanObjectLines -join "`r`n") + "`r`n"
+    if ($newObjectsText -ne $objectsText) {
+        Write-TextFileNoBom -Path $objectsList -Text $newObjectsText
+        Write-Host ("Repaired objects.list for {0}." -f (Split-Path -Leaf $ConfigDir))
     }
 }
 
@@ -143,6 +261,8 @@ try {
         if (-not (Test-Path -LiteralPath $makefile -PathType Leaf)) {
             throw "$config makefile not found. Generate/build the CubeIDE project once first: $makefile"
         }
+
+        Repair-GeneratedCoreSourceList -ConfigDir $configDir
 
         Write-Host "Building $projectName/$config with direct make..."
         if (-not $NoClean) {
