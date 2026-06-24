@@ -1,63 +1,129 @@
 [CmdletBinding()]
 param(
     [ValidateSet("Debug", "Release", "All")]
-    [string]$Configuration = "All",
+    [string]$Configuration = "Release",
 
-    [string]$CubeIdeRoot = $env:STM32CUBEIDE_ROOT
+    [int]$Jobs = [Environment]::ProcessorCount,
+
+    [string]$CubeIdeRoot = $env:STM32CUBEIDE_ROOT,
+
+    [switch]$NoClean,
+
+    [switch]$CopyToFlashImages
 )
 
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $projectDir = Join-Path $repoRoot "NECCS_N647_App\STM32CubeIDE\Appli"
-$sha1 = [System.Security.Cryptography.SHA1]::Create()
-try {
-    $workspaceBytes = [System.Text.Encoding]::UTF8.GetBytes($repoRoot.ToLowerInvariant())
-    $workspaceKey = ([System.BitConverter]::ToString($sha1.ComputeHash($workspaceBytes))).Replace("-", "").Substring(0, 8).ToLowerInvariant()
-} finally {
-    $sha1.Dispose()
-}
-$workspaceDir = Join-Path $repoRoot "_cubeide_ws_build_app_$workspaceKey"
 $projectName = "NECCS_N647_App_Appli"
-$languageSettings = Join-Path $projectDir ".settings\language.settings.xml"
 $iocFile = Join-Path $repoRoot "NECCS_N647_App\NECCS_N647_App.ioc"
 $mspFile = Join-Path $repoRoot "NECCS_N647_App\Appli\Core\Src\stm32n6xx_hal_msp.c"
+$artifactRows = New-Object System.Collections.Generic.List[object]
 
-if ([string]::IsNullOrWhiteSpace($CubeIdeRoot)) {
+function Resolve-CubeIdeRoot {
+    param([string]$RequestedRoot)
+
+    if (-not [string]::IsNullOrWhiteSpace($RequestedRoot)) {
+        return $RequestedRoot
+    }
+
     $install = Get-ChildItem -LiteralPath "C:\ST" -Directory -Filter "STM32CubeIDE_*" -ErrorAction SilentlyContinue |
         Sort-Object Name -Descending |
-        Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName "STM32CubeIDE\headless-build.bat") } |
+        Where-Object { Test-Path -LiteralPath (Join-Path $_.FullName "STM32CubeIDE\plugins") } |
         Select-Object -First 1
 
-    if ($null -ne $install) {
-        $CubeIdeRoot = Join-Path $install.FullName "STM32CubeIDE"
+    if ($null -eq $install) {
+        throw "STM32CubeIDE not found. Set STM32CUBEIDE_ROOT or pass -CubeIdeRoot."
+    }
+
+    return Join-Path $install.FullName "STM32CubeIDE"
+}
+
+function Find-CubeIdeToolDirectory {
+    param(
+        [string]$IdeRoot,
+        [string]$PluginPattern
+    )
+
+    $plugin = Get-ChildItem -LiteralPath (Join-Path $IdeRoot "plugins") -Directory -Filter $PluginPattern |
+        Sort-Object Name -Descending |
+        Select-Object -First 1
+
+    if ($null -eq $plugin) {
+        throw "CubeIDE plugin not found: $PluginPattern"
+    }
+
+    return Join-Path $plugin.FullName "tools\bin"
+}
+
+function Assert-ContainsText {
+    param(
+        [string]$Path,
+        [string]$Text
+    )
+
+    if (-not (Select-String -LiteralPath $Path -SimpleMatch $Text -Quiet)) {
+        throw "Required project constraint is missing from ${Path}: ${Text}"
     }
 }
 
-if ([string]::IsNullOrWhiteSpace($CubeIdeRoot)) {
-    throw "STM32CubeIDE not found. Set STM32CUBEIDE_ROOT or pass -CubeIdeRoot."
+function Invoke-Make {
+    param(
+        [string]$ConfigDir,
+        [string]$Make,
+        [string]$Target
+    )
+
+    Push-Location $ConfigDir
+    try {
+        & $Make "-j$Jobs" $Target
+        if ($LASTEXITCODE -ne 0) {
+            throw "make $Target failed in $ConfigDir (exit code $LASTEXITCODE)."
+        }
+    } finally {
+        Pop-Location
+    }
 }
 
-$headlessBuild = Join-Path $CubeIdeRoot "headless-build.bat"
+function Add-ArtifactRow {
+    param(
+        [string]$Config,
+        [string]$Path
+    )
 
-if (-not (Test-Path -LiteralPath $headlessBuild -PathType Leaf)) {
-    throw "STM32CubeIDE headless builder not found: $headlessBuild"
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        throw "$Config build completed without generating: $Path"
+    }
+
+    $artifactRows.Add([pscustomobject]@{
+        Configuration = $Config
+        Artifact = $Path
+        Size = (Get-Item -LiteralPath $Path).Length
+    }) | Out-Null
+}
+
+if ($Jobs -lt 1) {
+    throw "-Jobs must be greater than 0."
 }
 
 if (-not (Test-Path -LiteralPath $projectDir -PathType Container)) {
     throw "APP CubeIDE project not found: $projectDir"
 }
 
-$boardConstraints = @(
-    @($iocFile, "PWR.PowerDomain2=PWR_VDDIO_RANGE_1V8"),
-    @($iocFile, "PWR.PowerDomain3=PWR_VDDIO_RANGE_1V8"),
-    @($mspFile, "HAL_PWREx_ConfigVddIORange(PWR_VDDIO2,PWR_VDDIO_RANGE_1V8);"),
-    @($mspFile, "HAL_PWREx_ConfigVddIORange(PWR_VDDIO3,PWR_VDDIO_RANGE_1V8);")
-)
+Assert-ContainsText -Path $iocFile -Text "PWR.PowerDomain2=PWR_VDDIO_RANGE_1V8"
+Assert-ContainsText -Path $iocFile -Text "PWR.PowerDomain3=PWR_VDDIO_RANGE_1V8"
+Assert-ContainsText -Path $mspFile -Text "HAL_PWREx_ConfigVddIORange(PWR_VDDIO2,PWR_VDDIO_RANGE_1V8);"
+Assert-ContainsText -Path $mspFile -Text "HAL_PWREx_ConfigVddIORange(PWR_VDDIO3,PWR_VDDIO_RANGE_1V8);"
 
-foreach ($constraint in $boardConstraints) {
-    if (-not (Select-String -LiteralPath $constraint[0] -SimpleMatch $constraint[1] -Quiet)) {
-        throw "ATK-CNN647B VDDIO constraint is missing from $($constraint[0]): $($constraint[1])"
+$CubeIdeRoot = Resolve-CubeIdeRoot -RequestedRoot $CubeIdeRoot
+$gnuTools = Find-CubeIdeToolDirectory -IdeRoot $CubeIdeRoot -PluginPattern "com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32*.win32_*"
+$makeTools = Find-CubeIdeToolDirectory -IdeRoot $CubeIdeRoot -PluginPattern "com.st.stm32cube.ide.mcu.externaltools.make.win32_*"
+$make = Join-Path $makeTools "make.exe"
+
+foreach ($tool in @($make, (Join-Path $gnuTools "arm-none-eabi-gcc.exe"), (Join-Path $gnuTools "arm-none-eabi-objcopy.exe"))) {
+    if (-not (Test-Path -LiteralPath $tool -PathType Leaf)) {
+        throw "Required build tool not found: $tool"
     }
 }
 
@@ -67,40 +133,52 @@ $configurations = if ($Configuration -eq "All") {
     @($Configuration)
 }
 
-$languageSettingsBackup = if (Test-Path -LiteralPath $languageSettings -PathType Leaf) {
-    [System.IO.File]::ReadAllBytes($languageSettings)
-} else {
-    $null
-}
-
+$oldPath = $env:Path
 try {
+    $env:Path = "$gnuTools;$makeTools;$env:Path"
+
     foreach ($config in $configurations) {
-        Write-Host "Building $projectName/$config ..."
-
-        $projectMetadata = Join-Path $workspaceDir ".metadata\.plugins\org.eclipse.core.resources\.projects\$projectName"
-        $headlessArgs = @("-data", $workspaceDir)
-        if (-not (Test-Path -LiteralPath $projectMetadata -PathType Container)) {
-            $headlessArgs += @("-import", $projectDir)
+        $configDir = Join-Path $projectDir $config
+        $makefile = Join-Path $configDir "makefile"
+        if (-not (Test-Path -LiteralPath $makefile -PathType Leaf)) {
+            throw "$config makefile not found. Generate/build the CubeIDE project once first: $makefile"
         }
-        $headlessArgs += @("-cleanBuild", "$projectName/$config")
 
-        & $headlessBuild @headlessArgs
+        Write-Host "Building $projectName/$config with direct make..."
+        if (-not $NoClean) {
+            Invoke-Make -ConfigDir $configDir -Make $make -Target "clean"
+        }
+        Invoke-Make -ConfigDir $configDir -Make $make -Target "all"
 
-        if ($LASTEXITCODE -ne 0) {
-            throw "STM32CubeIDE build failed for $config (exit code $LASTEXITCODE)."
+        foreach ($artifactName in @("$projectName.elf", "$projectName.bin", "$projectName.map", "$projectName.list")) {
+            Add-ArtifactRow -Config $config -Path (Join-Path $configDir $artifactName)
         }
     }
 } finally {
-    # CubeIDE rewrites this scanner-cache hash on every machine and dirties Git.
-    if ($null -ne $languageSettingsBackup) {
-        [System.IO.File]::WriteAllBytes($languageSettings, $languageSettingsBackup)
-    }
+    $env:Path = $oldPath
 }
 
 $releaseHex = Join-Path $repoRoot "NECCS_N647_App\Binary\appli.hex"
-if (($configurations -contains "Release") -and
-    (-not (Test-Path -LiteralPath $releaseHex -PathType Leaf))) {
-    throw "Release build completed without generating: $releaseHex"
+if ($configurations -contains "Release") {
+    Add-ArtifactRow -Config "Release" -Path $releaseHex
+
+    $hexHead = Get-Content -LiteralPath $releaseHex -TotalCount 2
+    if ($hexHead[0] -ne ":0200000470107A" -or $hexHead[1] -notlike ":10040000*") {
+        throw "Application HEX address check failed. Expected vector table at 0x70100400: $releaseHex"
+    }
+
+    if ($CopyToFlashImages) {
+        $flashImagesDir = Join-Path $repoRoot "_flash_images"
+        $flashAppHex = Join-Path $flashImagesDir "appli.hex"
+        New-Item -ItemType Directory -Path $flashImagesDir -Force | Out-Null
+        Copy-Item -LiteralPath $releaseHex -Destination $flashAppHex -Force
+        Add-ArtifactRow -Config "Release" -Path $flashAppHex
+    }
 }
 
 Write-Host "N647 APP build completed successfully."
+Write-Host ""
+Write-Host "Generated artifacts:"
+foreach ($row in $artifactRows) {
+    Write-Host ("[{0}] {1} ({2} bytes)" -f $row.Configuration, $row.Artifact, $row.Size)
+}
