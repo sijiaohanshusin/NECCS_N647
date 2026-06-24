@@ -17,6 +17,27 @@ static uint32_t PCMD3180_HAL_GetTimeout(const PCMD3180_HAL_BusContextTypeDef *co
     return context->timeout_ms;
 }
 
+static HAL_StatusTypeDef PCMD3180_HAL_WaitForTransfer(
+    PCMD3180_HAL_BusContextTypeDef *context)
+{
+    const uint32_t timeout_ms = PCMD3180_HAL_GetTimeout(context);
+    const uint32_t start_tick = HAL_GetTick();
+
+    while (HAL_I2C_GetState(context->hi2c) != HAL_I2C_STATE_READY)
+    {
+        if ((uint32_t)(HAL_GetTick() - start_tick) >= timeout_ms)
+        {
+            return HAL_TIMEOUT;
+        }
+
+        /* I2C/SAI/SysTick interrupts wake the core; I2C has top priority. */
+        __WFI();
+    }
+
+    return (HAL_I2C_GetError(context->hi2c) == HAL_I2C_ERROR_NONE) ?
+           HAL_OK : HAL_ERROR;
+}
+
 static uint32_t PCMD3180_HAL_SwI2CLock(void)
 {
     const uint32_t primask = __get_PRIMASK();
@@ -393,13 +414,16 @@ PCMD3180_StatusTypeDef PCMD3180_HAL_WriteReg(void *context,
 
     for (attempt = 0U; attempt < PCMD3180_HAL_I2C_RETRY_COUNT; attempt++)
     {
-        hal_status = HAL_I2C_Mem_Write(hal_context->hi2c,
-                                       (uint16_t)(address7 << 1),
-                                       reg,
-                                       I2C_MEMADD_SIZE_8BIT,
-                                       &value,
-                                       1U,
-                                       PCMD3180_HAL_GetTimeout(hal_context));
+        hal_status = HAL_I2C_Mem_Write_IT(hal_context->hi2c,
+                                          (uint16_t)(address7 << 1),
+                                          reg,
+                                          I2C_MEMADD_SIZE_8BIT,
+                                          &value,
+                                          1U);
+        if (hal_status == HAL_OK)
+        {
+            hal_status = PCMD3180_HAL_WaitForTransfer(hal_context);
+        }
         hal_context->last_hal_status = (uint32_t)hal_status;
         hal_context->last_hal_error = HAL_I2C_GetError(hal_context->hi2c);
         if (hal_status == HAL_OK)
@@ -469,13 +493,16 @@ PCMD3180_StatusTypeDef PCMD3180_HAL_ReadReg(void *context,
 
     for (attempt = 0U; attempt < PCMD3180_HAL_I2C_RETRY_COUNT; attempt++)
     {
-        hal_status = HAL_I2C_Mem_Read(hal_context->hi2c,
-                                      (uint16_t)(address7 << 1),
-                                      reg,
-                                      I2C_MEMADD_SIZE_8BIT,
-                                      value,
-                                      1U,
-                                      PCMD3180_HAL_GetTimeout(hal_context));
+        hal_status = HAL_I2C_Mem_Read_IT(hal_context->hi2c,
+                                         (uint16_t)(address7 << 1),
+                                         reg,
+                                         I2C_MEMADD_SIZE_8BIT,
+                                         value,
+                                         1U);
+        if (hal_status == HAL_OK)
+        {
+            hal_status = PCMD3180_HAL_WaitForTransfer(hal_context);
+        }
         hal_context->last_hal_status = (uint32_t)hal_status;
         hal_context->last_hal_error = HAL_I2C_GetError(hal_context->hi2c);
         if (hal_status == HAL_OK)

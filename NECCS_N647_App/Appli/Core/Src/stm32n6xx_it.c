@@ -56,12 +56,16 @@ volatile uint32_t g_app_systick_irq_count = 0;
 /* USER CODE END 0 */
 
 /* External variables --------------------------------------------------------*/
-
-/* USER CODE BEGIN EV */
-extern DMA_HandleTypeDef handle_GPDMA1_Channel0;
+extern I2C_HandleTypeDef hi2c2;
+extern DMA_NodeTypeDef Node_GPDMA1_Channel1;
+extern DMA_QListTypeDef List_GPDMA1_Channel1;
 extern DMA_HandleTypeDef handle_GPDMA1_Channel1;
+extern DMA_NodeTypeDef Node_GPDMA1_Channel0;
+extern DMA_QListTypeDef List_GPDMA1_Channel0;
+extern DMA_HandleTypeDef handle_GPDMA1_Channel0;
 extern SAI_HandleTypeDef hsai_BlockA1;
 extern SAI_HandleTypeDef hsai_BlockB1;
+/* USER CODE BEGIN EV */
 
 /* USER CODE END EV */
 
@@ -220,6 +224,76 @@ void SysTick_Handler(void)
 /******************************************************************************/
 
 /**
+  * @brief This function handles GPDMA1 Channel 0 global interrupt.
+  */
+void GPDMA1_Channel0_IRQHandler(void)
+{
+  /* USER CODE BEGIN GPDMA1_Channel0_IRQn 0 */
+
+  /* USER CODE END GPDMA1_Channel0_IRQn 0 */
+  HAL_DMA_IRQHandler(&handle_GPDMA1_Channel0);
+  /* USER CODE BEGIN GPDMA1_Channel0_IRQn 1 */
+
+  /* USER CODE END GPDMA1_Channel0_IRQn 1 */
+}
+
+/**
+  * @brief This function handles GPDMA1 Channel 1 global interrupt.
+  */
+void GPDMA1_Channel1_IRQHandler(void)
+{
+  /* USER CODE BEGIN GPDMA1_Channel1_IRQn 0 */
+
+  /* USER CODE END GPDMA1_Channel1_IRQn 0 */
+  HAL_DMA_IRQHandler(&handle_GPDMA1_Channel1);
+  /* USER CODE BEGIN GPDMA1_Channel1_IRQn 1 */
+
+  /* USER CODE END GPDMA1_Channel1_IRQn 1 */
+}
+
+/**
+  * @brief This function handles I2C2 Event interrupt.
+  */
+void I2C2_EV_IRQHandler(void)
+{
+  /* USER CODE BEGIN I2C2_EV_IRQn 0 */
+
+  /* USER CODE END I2C2_EV_IRQn 0 */
+  HAL_I2C_EV_IRQHandler(&hi2c2);
+  /* USER CODE BEGIN I2C2_EV_IRQn 1 */
+
+  /* USER CODE END I2C2_EV_IRQn 1 */
+}
+
+/**
+  * @brief This function handles Serial Audio Interface 1 block A interrupt.
+  */
+void SAI1_A_IRQHandler(void)
+{
+  /* USER CODE BEGIN SAI1_A_IRQn 0 */
+
+  /* USER CODE END SAI1_A_IRQn 0 */
+  HAL_SAI_IRQHandler(&hsai_BlockA1);
+  /* USER CODE BEGIN SAI1_A_IRQn 1 */
+
+  /* USER CODE END SAI1_A_IRQn 1 */
+}
+
+/**
+  * @brief This function handles Serial Audio Interface 1 block B interrupt.
+  */
+void SAI1_B_IRQHandler(void)
+{
+  /* USER CODE BEGIN SAI1_B_IRQn 0 */
+
+  /* USER CODE END SAI1_B_IRQn 0 */
+  HAL_SAI_IRQHandler(&hsai_BlockB1);
+  /* USER CODE BEGIN SAI1_B_IRQn 1 */
+
+  /* USER CODE END SAI1_B_IRQn 1 */
+}
+
+/**
   * @brief This function handles USART1 global interrupt.
   */
 void USART1_IRQHandler(void)
@@ -233,24 +307,5 @@ void USART1_IRQHandler(void)
 }
 
 /* USER CODE BEGIN 1 */
-void SAI1_A_IRQHandler(void)
-{
-  HAL_SAI_IRQHandler(&hsai_BlockA1);
-}
-
-void SAI1_B_IRQHandler(void)
-{
-  HAL_SAI_IRQHandler(&hsai_BlockB1);
-}
-
-void GPDMA1_Channel0_IRQHandler(void)
-{
-  HAL_DMA_IRQHandler(&handle_GPDMA1_Channel0);
-}
-
-void GPDMA1_Channel1_IRQHandler(void)
-{
-  HAL_DMA_IRQHandler(&handle_GPDMA1_Channel1);
-}
 
 /* USER CODE END 1 */
