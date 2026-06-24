@@ -933,7 +933,12 @@ static void App_PCMD_PrepareBus(uint8_t reset_device)
   g_pcmd_bus_context.shutdown_port = MIC_SHDNZ_GPIO_Port;
   g_pcmd_bus_context.shutdown_pin = MIC_SHDNZ_Pin;
   g_pcmd_bus_context.timeout_ms = APP_PCMD_I2C_TIMEOUT_MS;
-  PCMD3180_HAL_BusInitSoftwareI2C(&g_pcmd_bus, &g_pcmd_bus_context);
+  /*
+   * Use CubeMX-generated hardware I2C2 for PCMD3180.
+   * The software-I2C fallback bit-bangs PD14/PD4 and disables I2C2, so its
+   * edge timing becomes fragile once SAI/DMA/LCD interrupts are active.
+   */
+  PCMD3180_HAL_BusInit(&g_pcmd_bus, &g_pcmd_bus_context);
 
   if ((reset_device != 0U) && (g_pcmd_bus.set_shutdown != NULL))
   {
@@ -1249,7 +1254,8 @@ static void App_PCMD_ShowDebugPage(void)
 
   snprintf(line,
            sizeof(line),
-           "I2C rec:%lu %c %02X:%02X val:%02X h:%lu e:%lX",
+           "I2C:%s rec:%lu %c %02X:%02X val:%02X h:%lu e:%lX",
+           (g_pcmd_bus_context.use_software_i2c != 0U) ? "SW" : "HW",
            (unsigned long)g_pcmd_bus_context.recover_count,
            (g_pcmd_bus_context.last_is_read != 0U) ? 'R' : 'W',
            g_pcmd_bus_context.last_address7,
@@ -1484,7 +1490,7 @@ static void MX_I2C2_Init(void)
 
   /* USER CODE END I2C2_Init 1 */
   hi2c2.Instance = I2C2;
-  hi2c2.Init.Timing = 0x10707DBC;
+  hi2c2.Init.Timing = APP_I2C2_TIMING_25KHZ_64MHZ;
   hi2c2.Init.OwnAddress1 = 0;
   hi2c2.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
   hi2c2.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
