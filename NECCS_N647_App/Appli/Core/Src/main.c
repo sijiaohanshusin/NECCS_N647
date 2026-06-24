@@ -835,8 +835,8 @@ static void App_PCMD_ConfigureMode(PCMD3180_ArrayModeTypeDef mode)
   /*
    * PCMD3180 has two awkward requirements on this board:
    * - heavy I2C configuration is most reliable before SAI clocks start;
-   * - the PDM/PLL path should be woken only after BCLK/FSYNC are stable.
-   * Stage the register table first, then start SAI, then do the minimal wake.
+   * - the PDM/PLL path should be powered only after BCLK/FSYNC are stable.
+   * Write the register table while active, then start SAI, then only power PDM/PLL.
    */
   if (g_pcmd_debug.early_address_scan_rounds != 0U)
   {
@@ -1181,7 +1181,7 @@ static void App_PCMD_ShowDebugPage(void)
 
   snprintf(line,
            sizeof(line),
-           "PDMCLK exp:%luHz  staged cfg, wake after clocks",
+           "PDMCLK exp:%luHz  active cfg, pwr after clocks",
            (unsigned long)(g_pcmd_debug.mode_config.sample_rate_hz * 64U));
   rgblcd_show_string(APP_PCMD_UI_X, y, APP_PCMD_UI_W, 12, 12, line, CYAN);
   y += 16U;

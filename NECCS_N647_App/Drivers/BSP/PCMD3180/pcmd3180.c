@@ -558,20 +558,20 @@ PCMD3180_StatusTypeDef PCMD3180_Configure(PCMD3180_HandleTypeDef *handle,
         return status;
     }
 
+    /*
+     * TI's bring-up sequence expects the register table to be written after
+     * the device exits sleep mode.  Keep deferred bring-up active but with
+     * PWR_CFG left at 0, then enable PDM/PLL only after SAI clocks are stable.
+     */
     status = PCMD3180_WriteChecked(handle,
                                    PCMD3180_REG_SLEEP_CFG,
-                                   (defer_power_up == 0U) ?
-                                   PCMD3180_SLEEP_CFG_WAKE : PCMD3180_SLEEP_CFG_SLEEP,
+                                   PCMD3180_SLEEP_CFG_WAKE,
                                    verify);
     if (status != PCMD3180_OK)
     {
         return status;
     }
-
-    if (defer_power_up == 0U)
-    {
-        PCMD3180_Delay(handle, 10U);
-    }
+    PCMD3180_Delay(handle, 10U);
 
     asi_cfg0 = PCMD3180_ASI_CFG0_TDM_MODE |
                (uint8_t)(((uint8_t)config->slot_width & 0x03U) << 4) |
@@ -751,13 +751,11 @@ PCMD3180_StatusTypeDef PCMD3180_Activate(PCMD3180_HandleTypeDef *handle,
         return status;
     }
 
-    status = PCMD3180_WriteChecked(handle, PCMD3180_REG_SLEEP_CFG, PCMD3180_SLEEP_CFG_WAKE, verify);
-    if (status != PCMD3180_OK)
-    {
-        return status;
-    }
-    PCMD3180_Delay(handle, 10U);
-
+    /*
+     * PCMD3180_Configure() already left the control interface active. Avoid a
+     * second sleep/wake write after SAI starts, because I2C is most fragile
+     * while the audio clocks are running on this board.
+     */
     pwr_cfg = PCMD3180_PWR_PDM_AND_PLL |
               (uint8_t)((config->enable_micbias == 0U) ? 0U : PCMD3180_PWR_MICBIAS);
     status = PCMD3180_WriteChecked(handle, PCMD3180_REG_PWR_CFG, pwr_cfg, verify);
@@ -765,6 +763,7 @@ PCMD3180_StatusTypeDef PCMD3180_Activate(PCMD3180_HandleTypeDef *handle,
     {
         return status;
     }
+    PCMD3180_Delay(handle, 10U);
 
     handle->configured = 1U;
     return PCMD3180_OK;
