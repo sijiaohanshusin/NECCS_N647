@@ -1,5 +1,12 @@
 # NECCS_N647 工程速查
 
+## 2026-06-25 PCMD3180 MIC 映射辅助
+
+- 最新硬件结论：前期 PCMD3180 异常包含电源连接问题；PDMCLK/PDCLK 无时钟的根因之一是 FSYNC 虚焊。继续排查前先确认电源、FSYNC、BCLK、PDMCLK 实测正常。
+- APP 调试页已在 `MIC RAW16` 区域增加峰值音量条，用现有 SAI DMA 峰值数据显示，不改变 PCMD3180 配置和采样链路。
+- MIC 位置匹配工具位于 `docs/tools/pcmd3180_mic_mapper.html`。使用方法：打开 HTML，选择屏幕上响应的 `Mxx`，再点击阵列图中的实际麦克风位置；完成后导出 JSON/CSV，后续把最终匹配结果记录回工程。
+- 麦克风物理坐标参考 `麦克风阵列的图（现采用主方案）/array_32ch_coords.csv`，映射时以当前板子实测为准。
+
 ## 2026-06-25 PCMD3180 I2C 诊断策略
 
 - `EADDR/ADDR` 地址扫描现在只作为诊断信息，不再阻断 PCMD3180 的真实配置流程。

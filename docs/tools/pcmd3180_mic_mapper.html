@@ -1,0 +1,866 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PCMD3180 MIC Mapper</title>
+  <style>
+    :root {
+      --bg: #0e141b;
+      --panel: #18222c;
+      --panel-2: #223241;
+      --text: #eef4fb;
+      --muted: #98a7b8;
+      --accent: #4fd1c5;
+      --accent-2: #ffd166;
+      --danger: #ff6b6b;
+      --ok: #8bd450;
+      --grid: rgba(255,255,255,0.08);
+      --line-a: #7ae582;
+      --line-b: #9bbdff;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", "Microsoft YaHei", sans-serif;
+      background: linear-gradient(180deg, #0b1117 0%, #101923 100%);
+      color: var(--text);
+    }
+
+    header {
+      padding: 20px 24px 12px;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      background: rgba(0,0,0,0.15);
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 28px;
+      letter-spacing: 0.03em;
+    }
+
+    header p {
+      margin: 4px 0;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 380px 1fr;
+      gap: 18px;
+      padding: 18px;
+      min-height: calc(100vh - 120px);
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 18px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.22);
+      overflow: hidden;
+    }
+
+    .card h2 {
+      margin: 0;
+      padding: 16px 18px 10px;
+      font-size: 18px;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      background: rgba(255,255,255,0.03);
+    }
+
+    .panel-body {
+      padding: 16px 18px 18px;
+    }
+
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+
+    .summary .metric {
+      background: var(--panel-2);
+      border-radius: 12px;
+      padding: 10px 12px;
+      border: 1px solid rgba(255,255,255,0.05);
+    }
+
+    .metric .label {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 4px;
+    }
+
+    .metric .value {
+      font-size: 22px;
+      font-weight: 700;
+    }
+
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 14px;
+    }
+
+    button, select, input, textarea {
+      font: inherit;
+    }
+
+    button {
+      border: 0;
+      border-radius: 10px;
+      padding: 10px 12px;
+      cursor: pointer;
+      color: #061017;
+      background: var(--accent);
+      font-weight: 700;
+    }
+
+    button.secondary {
+      background: #314354;
+      color: var(--text);
+    }
+
+    button.warn {
+      background: var(--accent-2);
+      color: #2a2100;
+    }
+
+    button.danger {
+      background: var(--danger);
+      color: #2f0303;
+    }
+
+    .mic-list {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      margin-bottom: 16px;
+      max-height: 420px;
+      overflow: auto;
+      padding-right: 2px;
+    }
+
+    .mic-item {
+      padding: 10px 12px;
+      border-radius: 12px;
+      background: var(--panel-2);
+      border: 1px solid rgba(255,255,255,0.05);
+      cursor: pointer;
+      transition: 120ms ease;
+    }
+
+    .mic-item:hover {
+      transform: translateY(-1px);
+      border-color: rgba(255,255,255,0.15);
+    }
+
+    .mic-item.selected {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px rgba(79,209,197,0.35) inset;
+      background: #18313a;
+    }
+
+    .mic-item .top {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 6px;
+      font-weight: 700;
+    }
+
+    .mic-item .bottom {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .mic-item.bad .top {
+      color: var(--danger);
+    }
+
+    .mic-item.suspect .top {
+      color: var(--accent-2);
+    }
+
+    .mic-item.ok .top {
+      color: var(--ok);
+    }
+
+    .detail-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 10px;
+    }
+
+    .field label {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 6px;
+    }
+
+    .field input,
+    .field select,
+    .field textarea {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.08);
+      color: var(--text);
+      background: #0f171e;
+    }
+
+    .field textarea {
+      min-height: 88px;
+      resize: vertical;
+    }
+
+    .canvas-wrap {
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      height: 100%;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      color: var(--muted);
+      font-size: 13px;
+      padding: 14px 18px 0;
+    }
+
+    .legend span::before {
+      content: "";
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      margin-right: 8px;
+      vertical-align: middle;
+    }
+
+    .legend .bus-a::before { background: var(--line-a); }
+    .legend .bus-b::before { background: var(--line-b); }
+    .legend .assigned::before { background: var(--accent); }
+    .legend .selected::before { background: var(--accent-2); }
+
+    .svg-wrap {
+      padding: 16px 18px 12px;
+    }
+
+    svg {
+      width: 100%;
+      height: min(74vh, 900px);
+      background:
+        linear-gradient(90deg, var(--grid) 1px, transparent 1px) 0 0 / 40px 40px,
+        linear-gradient(var(--grid) 1px, transparent 1px) 0 0 / 40px 40px,
+        radial-gradient(circle at center, rgba(79,209,197,0.06), transparent 55%),
+        #0d141b;
+      border-radius: 18px;
+      border: 1px solid rgba(255,255,255,0.06);
+    }
+
+    .footer {
+      padding: 0 18px 18px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .status-pill {
+      display: inline-block;
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .status-pill.ok { background: rgba(139,212,80,0.18); color: var(--ok); }
+    .status-pill.suspect { background: rgba(255,209,102,0.18); color: var(--accent-2); }
+    .status-pill.bad { background: rgba(255,107,107,0.18); color: var(--danger); }
+    .status-pill.unchecked { background: rgba(255,255,255,0.08); color: var(--muted); }
+
+    .point-label {
+      font-size: 12px;
+      fill: #d7e1eb;
+      pointer-events: none;
+    }
+
+    .point-sub {
+      font-size: 10px;
+      fill: #9db0c2;
+      pointer-events: none;
+    }
+
+    .point {
+      cursor: pointer;
+      transition: 120ms ease;
+    }
+
+    .point.assigned circle.outer {
+      stroke: var(--accent);
+      stroke-width: 3;
+    }
+
+    .point.selected circle.outer {
+      stroke: var(--accent-2);
+      stroke-width: 4;
+    }
+
+    .point.bad circle.inner {
+      fill: var(--danger);
+    }
+
+    .point.suspect circle.inner {
+      fill: var(--accent-2);
+    }
+
+    .point.ok circle.inner {
+      fill: var(--ok);
+    }
+
+    .point.unchecked circle.inner {
+      fill: #c9d3dd;
+    }
+
+    .point.bus-a circle.outer {
+      stroke: var(--line-a);
+    }
+
+    .point.bus-b circle.outer {
+      stroke: var(--line-b);
+    }
+
+    .mapping-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+
+    .mapping-table th,
+    .mapping-table td {
+      padding: 8px 10px;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .mapping-table th {
+      color: var(--muted);
+      font-weight: 600;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>PCMD3180 MIC Mapper</h1>
+    <p>Use this page to map the observed firmware MIC number to the physical microphone position on the board.</p>
+    <p>Workflow: select an observed MIC on the left, click one physical point on the array plot, then set status and notes. Data is auto-saved in this browser.</p>
+  </header>
+
+  <div class="layout">
+    <section class="card">
+      <h2>Observed MICs</h2>
+      <div class="panel-body">
+        <div class="summary">
+          <div class="metric">
+            <span class="label">Assigned</span>
+            <span class="value" id="assignedCount">0</span>
+          </div>
+          <div class="metric">
+            <span class="label">Bad / Suspect</span>
+            <span class="value" id="issueCount">0</span>
+          </div>
+          <div class="metric">
+            <span class="label">Unassigned</span>
+            <span class="value" id="unassignedCount">32</span>
+          </div>
+        </div>
+
+        <div class="controls">
+          <button id="exportJsonBtn">Export JSON</button>
+          <button id="exportCsvBtn" class="secondary">Export CSV</button>
+          <button id="importBtn" class="secondary">Import JSON</button>
+          <button id="resetBtn" class="danger">Clear All</button>
+        </div>
+        <input id="importInput" class="hidden" type="file" accept=".json,application/json">
+
+        <div class="mic-list" id="micList"></div>
+
+        <div class="detail-grid">
+          <div class="field">
+            <label>Selected observed MIC</label>
+            <input id="selectedMic" type="text" readonly value="None">
+          </div>
+          <div class="field">
+            <label>Assigned physical point</label>
+            <input id="selectedPoint" type="text" readonly value="Click a MIC, then click a point">
+          </div>
+          <div class="field">
+            <label>Status</label>
+            <select id="statusSelect">
+              <option value="unchecked">Unchecked</option>
+              <option value="ok">OK</option>
+              <option value="suspect">Suspect</option>
+              <option value="bad">Bad</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Notes</label>
+            <textarea id="notesInput" placeholder="Example: blows strongest here; weak response; dead; swapped with M13"></textarea>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card canvas-wrap">
+      <h2>Physical Array Layout</h2>
+      <div class="legend">
+        <span class="bus-a">Bus A reference</span>
+        <span class="bus-b">Bus B reference</span>
+        <span class="assigned">Assigned point</span>
+        <span class="selected">Currently selected</span>
+      </div>
+      <div class="svg-wrap">
+        <svg id="plot" viewBox="0 0 900 900" role="img" aria-label="Microphone array layout"></svg>
+      </div>
+      <div class="footer">
+        <table class="mapping-table" id="mappingTable">
+          <thead>
+            <tr>
+              <th>Observed MIC</th>
+              <th>Physical point</th>
+              <th>Status</th>
+              <th>Bus / Chip / Slot</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const coordsCsv = `mic_id,x_mm,y_mm,bus,chip,chip_slot,tdm_slot_48k,tdm_slot_192k_core,is_core16
+M01,15.00,1.00,A,U1,0,0,0,1
+M02,15.80,8.60,A,U1,1,1,1,1
+M03,8.20,15.20,A,U2,0,8,4,1
+M04,-0.80,15.70,A,U2,1,9,5,1
+M05,-15.30,7.10,B,U3,0,0,0,1
+M06,-15.60,-0.80,B,U3,1,1,1,1
+M07,-8.30,-14.80,B,U4,0,8,4,1
+M08,1.50,-15.40,B,U4,1,9,5,1
+M09,25.50,10.50,A,U1,2,2,2,1
+M10,13.00,27.50,A,U1,3,3,3,1
+M11,-11.00,26.00,A,U2,2,10,6,1
+M12,-27.50,11.00,A,U2,3,11,7,1
+M13,-25.00,-11.50,B,U3,2,2,2,1
+M14,-13.50,-28.00,B,U3,3,3,3,1
+M15,10.50,-26.50,B,U4,2,10,6,1
+M16,27.00,-12.00,B,U4,3,11,7,1
+M17,5.00,46.00,A,U1,4,4,,0
+M18,19.00,47.00,A,U1,5,5,,0
+M19,36.00,44.50,A,U1,6,6,,0
+M20,46.00,28.00,A,U1,7,7,,0
+M21,47.00,10.00,B,U4,4,12,,0
+M22,43.00,-11.00,B,U4,5,13,,0
+M23,31.00,-31.00,B,U4,6,14,,0
+M24,13.00,-46.00,B,U4,7,15,,0
+M25,-8.00,-47.00,B,U3,4,4,,0
+M26,-26.00,-45.00,B,U3,5,5,,0
+M27,-43.00,-33.00,B,U3,6,6,,0
+M28,-47.00,-12.00,B,U3,7,7,,0
+M29,-47.00,9.00,A,U2,4,12,,0
+M30,-40.00,30.00,A,U2,5,13,,0
+M31,-24.00,46.00,A,U2,6,14,,0
+M32,-3.00,44.00,A,U2,7,15,,0`;
+
+    const storageKey = "neccs-pcmd3180-mic-mapper-v1";
+    const svg = document.getElementById("plot");
+    const micList = document.getElementById("micList");
+    const mappingTableBody = document.querySelector("#mappingTable tbody");
+    const selectedMicInput = document.getElementById("selectedMic");
+    const selectedPointInput = document.getElementById("selectedPoint");
+    const statusSelect = document.getElementById("statusSelect");
+    const notesInput = document.getElementById("notesInput");
+
+    const points = parseCsv(coordsCsv);
+    const observedMics = Array.from({ length: 32 }, (_, index) => `M${String(index + 1).padStart(2, "0")}`);
+    let state = loadState();
+    let selectedObservedMic = observedMics[0];
+
+    function parseCsv(text) {
+      const [headerLine, ...lines] = text.trim().split(/\r?\n/);
+      const headers = headerLine.split(",");
+      return lines.map((line) => {
+        const values = line.split(",");
+        const item = {};
+        headers.forEach((key, index) => { item[key] = values[index] ?? ""; });
+        item.x_mm = Number(item.x_mm);
+        item.y_mm = Number(item.y_mm);
+        return item;
+      });
+    }
+
+    function loadState() {
+      try {
+        const raw = localStorage.getItem(storageKey);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed && parsed.assignments) {
+            return parsed;
+          }
+        }
+      } catch (error) {
+        console.warn("Failed to load state:", error);
+      }
+
+      return {
+        version: 1,
+        assignments: Object.fromEntries(observedMics.map((micId) => [micId, {
+          observedMic: micId,
+          physicalMic: "",
+          status: "unchecked",
+          notes: ""
+        }]))
+      };
+    }
+
+    function saveState() {
+      localStorage.setItem(storageKey, JSON.stringify(state, null, 2));
+    }
+
+    function getAssignment(observedMic) {
+      return state.assignments[observedMic];
+    }
+
+    function setAssignment(observedMic, patch) {
+      state.assignments[observedMic] = {
+        ...getAssignment(observedMic),
+        ...patch
+      };
+      saveState();
+      render();
+    }
+
+    function statusClass(status) {
+      return status || "unchecked";
+    }
+
+    function assignedObservedForPhysical(physicalMic) {
+      return observedMics.find((observedMic) => getAssignment(observedMic).physicalMic === physicalMic) || "";
+    }
+
+    function renderMicList() {
+      micList.innerHTML = "";
+      observedMics.forEach((observedMic) => {
+        const assignment = getAssignment(observedMic);
+        const div = document.createElement("button");
+        div.type = "button";
+        div.className = `mic-item ${statusClass(assignment.status)} ${selectedObservedMic === observedMic ? "selected" : ""}`;
+        div.addEventListener("click", () => {
+          selectedObservedMic = observedMic;
+          render();
+        });
+
+        const physical = assignment.physicalMic || "Unassigned";
+        div.innerHTML = `
+          <div class="top">
+            <span>${observedMic}</span>
+            <span class="status-pill ${statusClass(assignment.status)}">${assignment.status}</span>
+          </div>
+          <div class="bottom">${physical}</div>
+        `;
+        micList.appendChild(div);
+      });
+    }
+
+    function buildPointNode(point, transform) {
+      const observedMic = assignedObservedForPhysical(point.mic_id);
+      const assignment = observedMic ? getAssignment(observedMic) : null;
+      const group = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      group.setAttribute("class", [
+        "point",
+        point.bus === "A" ? "bus-a" : "bus-b",
+        observedMic ? "assigned" : "",
+        selectedObservedMic && getAssignment(selectedObservedMic).physicalMic === point.mic_id ? "selected" : "",
+        assignment ? statusClass(assignment.status) : "unchecked"
+      ].filter(Boolean).join(" "));
+      group.setAttribute("transform", `translate(${transform.x}, ${transform.y})`);
+      group.addEventListener("click", () => {
+        const currentOwner = assignedObservedForPhysical(point.mic_id);
+        if (currentOwner && currentOwner !== selectedObservedMic) {
+          setAssignment(currentOwner, { physicalMic: "" });
+        }
+        setAssignment(selectedObservedMic, { physicalMic: point.mic_id });
+      });
+
+      const outer = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      outer.setAttribute("class", "outer");
+      outer.setAttribute("r", "18");
+      outer.setAttribute("fill", "transparent");
+      outer.setAttribute("stroke-width", "2");
+      group.appendChild(outer);
+
+      const inner = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+      inner.setAttribute("class", "inner");
+      inner.setAttribute("r", "11");
+      group.appendChild(inner);
+
+      const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      label.setAttribute("class", "point-label");
+      label.setAttribute("x", "24");
+      label.setAttribute("y", "-3");
+      label.textContent = point.mic_id;
+      group.appendChild(label);
+
+      const sub = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      sub.setAttribute("class", "point-sub");
+      sub.setAttribute("x", "24");
+      sub.setAttribute("y", "12");
+      sub.textContent = observedMic ? `${observedMic} <- here` : `${point.bus}/${point.chip}/S${point.chip_slot}`;
+      group.appendChild(sub);
+
+      return group;
+    }
+
+    function renderPlot() {
+      svg.innerHTML = "";
+
+      const padding = 110;
+      const xs = points.map((point) => point.x_mm);
+      const ys = points.map((point) => point.y_mm);
+      const minX = Math.min(...xs);
+      const maxX = Math.max(...xs);
+      const minY = Math.min(...ys);
+      const maxY = Math.max(...ys);
+      const width = 900 - padding * 2;
+      const height = 900 - padding * 2;
+      const scaleX = width / (maxX - minX || 1);
+      const scaleY = height / (maxY - minY || 1);
+      const scale = Math.min(scaleX, scaleY);
+
+      const axis = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      axis.setAttribute("opacity", "0.4");
+
+      const hLine = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      hLine.setAttribute("x1", "80");
+      hLine.setAttribute("x2", "820");
+      hLine.setAttribute("y1", "450");
+      hLine.setAttribute("y2", "450");
+      hLine.setAttribute("stroke", "#7f8ea1");
+      hLine.setAttribute("stroke-dasharray", "8 6");
+      axis.appendChild(hLine);
+
+      const vLine = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      vLine.setAttribute("x1", "450");
+      vLine.setAttribute("x2", "450");
+      vLine.setAttribute("y1", "80");
+      vLine.setAttribute("y2", "820");
+      vLine.setAttribute("stroke", "#7f8ea1");
+      vLine.setAttribute("stroke-dasharray", "8 6");
+      axis.appendChild(vLine);
+
+      const center = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      center.setAttribute("x", "462");
+      center.setAttribute("y", "444");
+      center.setAttribute("class", "point-sub");
+      center.textContent = "Array center";
+      axis.appendChild(center);
+
+      svg.appendChild(axis);
+
+      points.forEach((point) => {
+        const tx = 450 + point.x_mm * scale;
+        const ty = 450 - point.y_mm * scale;
+        svg.appendChild(buildPointNode(point, { x: tx, y: ty }));
+      });
+    }
+
+    function renderDetail() {
+      const assignment = getAssignment(selectedObservedMic);
+      selectedMicInput.value = selectedObservedMic;
+      selectedPointInput.value = assignment.physicalMic || "Click one physical point on the right";
+      statusSelect.value = assignment.status;
+      notesInput.value = assignment.notes;
+    }
+
+    function renderSummary() {
+      const assignments = observedMics.map((observedMic) => getAssignment(observedMic));
+      const assignedCount = assignments.filter((item) => item.physicalMic).length;
+      const issueCount = assignments.filter((item) => item.status === "bad" || item.status === "suspect").length;
+      document.getElementById("assignedCount").textContent = String(assignedCount);
+      document.getElementById("issueCount").textContent = String(issueCount);
+      document.getElementById("unassignedCount").textContent = String(observedMics.length - assignedCount);
+    }
+
+    function renderTable() {
+      mappingTableBody.innerHTML = "";
+      observedMics.forEach((observedMic) => {
+        const assignment = getAssignment(observedMic);
+        const point = points.find((item) => item.mic_id === assignment.physicalMic);
+        const row = document.createElement("tr");
+        row.innerHTML = `
+          <td>${observedMic}</td>
+          <td>${assignment.physicalMic || "-"}</td>
+          <td><span class="status-pill ${statusClass(assignment.status)}">${assignment.status}</span></td>
+          <td>${point ? `${point.bus} / ${point.chip} / chip slot ${point.chip_slot}` : "-"}</td>
+          <td>${escapeHtml(assignment.notes || "")}</td>
+        `;
+        mappingTableBody.appendChild(row);
+      });
+    }
+
+    function render() {
+      renderSummary();
+      renderMicList();
+      renderPlot();
+      renderDetail();
+      renderTable();
+    }
+
+    function escapeHtml(text) {
+      return text
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;");
+    }
+
+    function exportJson() {
+      downloadFile("pcmd3180_mic_mapping.json",
+                   JSON.stringify({
+                     exportedAt: new Date().toISOString(),
+                     assignments: state.assignments
+                   }, null, 2),
+                   "application/json");
+    }
+
+    function exportCsv() {
+      const header = [
+        "observed_mic",
+        "physical_mic",
+        "status",
+        "notes",
+        "x_mm",
+        "y_mm",
+        "bus",
+        "chip",
+        "chip_slot",
+        "tdm_slot_48k",
+        "tdm_slot_192k_core",
+        "is_core16"
+      ];
+      const lines = [header.join(",")];
+
+      observedMics.forEach((observedMic) => {
+        const assignment = getAssignment(observedMic);
+        const point = points.find((item) => item.mic_id === assignment.physicalMic);
+        lines.push([
+          observedMic,
+          assignment.physicalMic || "",
+          assignment.status || "",
+          csvEscape(assignment.notes || ""),
+          point ? point.x_mm : "",
+          point ? point.y_mm : "",
+          point ? point.bus : "",
+          point ? point.chip : "",
+          point ? point.chip_slot : "",
+          point ? point.tdm_slot_48k : "",
+          point ? point.tdm_slot_192k_core : "",
+          point ? point.is_core16 : ""
+        ].join(","));
+      });
+
+      downloadFile("pcmd3180_mic_mapping.csv", lines.join("\n"), "text/csv;charset=utf-8");
+    }
+
+    function csvEscape(value) {
+      if (/[",\n]/.test(value)) {
+        return `"${value.replaceAll("\"", "\"\"")}"`;
+      }
+      return value;
+    }
+
+    function downloadFile(filename, content, mimeType) {
+      const blob = new Blob([content], { type: mimeType });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = filename;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    }
+
+    function importJson(file) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        try {
+          const parsed = JSON.parse(String(reader.result || "{}"));
+          if (!parsed.assignments) {
+            throw new Error("Missing assignments");
+          }
+          state = {
+            version: 1,
+            assignments: Object.fromEntries(observedMics.map((observedMic) => {
+              const incoming = parsed.assignments[observedMic] || {};
+              return [observedMic, {
+                observedMic,
+                physicalMic: incoming.physicalMic || "",
+                status: incoming.status || "unchecked",
+                notes: incoming.notes || ""
+              }];
+            }))
+          };
+          saveState();
+          render();
+        } catch (error) {
+          alert(`Import failed: ${error.message}`);
+        }
+      };
+      reader.readAsText(file);
+    }
+
+    document.getElementById("exportJsonBtn").addEventListener("click", exportJson);
+    document.getElementById("exportCsvBtn").addEventListener("click", exportCsv);
+    document.getElementById("importBtn").addEventListener("click", () => {
+      document.getElementById("importInput").click();
+    });
+    document.getElementById("importInput").addEventListener("change", (event) => {
+      const file = event.target.files && event.target.files[0];
+      if (file) {
+        importJson(file);
+      }
+      event.target.value = "";
+    });
+    document.getElementById("resetBtn").addEventListener("click", () => {
+      if (!confirm("Clear all assignments, status, and notes?")) {
+        return;
+      }
+      localStorage.removeItem(storageKey);
+      state = loadState();
+      selectedObservedMic = observedMics[0];
+      render();
+    });
+
+    statusSelect.addEventListener("change", () => {
+      setAssignment(selectedObservedMic, { status: statusSelect.value });
+    });
+    notesInput.addEventListener("input", () => {
+      setAssignment(selectedObservedMic, { notes: notesInput.value });
+    });
+
+    render();
+  </script>
+</body>
+</html>

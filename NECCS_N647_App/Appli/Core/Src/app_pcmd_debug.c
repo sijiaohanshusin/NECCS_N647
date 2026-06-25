@@ -56,6 +56,10 @@ typedef struct
 #define APP_PCMD_ADDR_SCAN_ROUNDS  16U
 #define APP_PCMD_UI_X              8U
 #define APP_PCMD_UI_W              584U
+#define APP_PCMD_BAR_X_OFFSET      72U
+#define APP_PCMD_BAR_W             48U
+#define APP_PCMD_BAR_H             10U
+#define APP_PCMD_BAR_FULL_SCALE    0x0800U
 
 extern SAI_HandleTypeDef hsai_BlockA1;
 extern SAI_HandleTypeDef hsai_BlockB1;
@@ -111,6 +115,13 @@ static void App_PCMD_DebugInit(void);
 static void App_PCMD_Task(void);
 static void App_PCMD_ShowMicActivity(uint16_t start_y);
 static void App_PCMD_ShowDebugPage(void);
+static uint16_t App_PCMD_LevelToBarWidth(uint16_t peak);
+static uint16_t App_PCMD_LevelToBarColor(uint16_t peak);
+static void App_PCMD_DrawLevelBar(uint16_t x,
+                                  uint16_t y,
+                                  uint16_t peak,
+                                  uint8_t enabled,
+                                  uint8_t healthy);
 static const char *App_PCMD_ModeName(PCMD3180_ArrayModeTypeDef mode)
 {
   switch (mode)
@@ -357,6 +368,81 @@ static void App_PCMD_DecayLevels(void)
   }
 }
 
+static uint16_t App_PCMD_LevelToBarWidth(uint16_t peak)
+{
+  uint32_t width = ((uint32_t)peak * APP_PCMD_BAR_W) / APP_PCMD_BAR_FULL_SCALE;
+
+  if (peak == 0U)
+  {
+    return 0U;
+  }
+
+  if (width == 0U)
+  {
+    width = 1U;
+  }
+  if (width > APP_PCMD_BAR_W)
+  {
+    width = APP_PCMD_BAR_W;
+  }
+
+  return (uint16_t)width;
+}
+
+static uint16_t App_PCMD_LevelToBarColor(uint16_t peak)
+{
+  if (peak >= 0x0400U)
+  {
+    return GREEN;
+  }
+  if (peak >= 0x0100U)
+  {
+    return YELLOW;
+  }
+  if (peak != 0U)
+  {
+    return CYAN;
+  }
+
+  return LGRAY;
+}
+
+static void App_PCMD_DrawLevelBar(uint16_t x,
+                                  uint16_t y,
+                                  uint16_t peak,
+                                  uint8_t enabled,
+                                  uint8_t healthy)
+{
+  const uint16_t x2 = (uint16_t)(x + APP_PCMD_BAR_W);
+  const uint16_t y2 = (uint16_t)(y + APP_PCMD_BAR_H);
+  const uint16_t inner_x = (uint16_t)(x + 1U);
+  const uint16_t inner_y = (uint16_t)(y + 1U);
+  const uint16_t inner_x2 = (uint16_t)(x2 - 1U);
+  const uint16_t inner_y2 = (uint16_t)(y2 - 1U);
+  const uint16_t border_color = (healthy != 0U) ? LGRAY : RED;
+
+  rgblcd_draw_rectangle(x, y, x2, y2, border_color);
+  rgblcd_fill(inner_x, inner_y, inner_x2, inner_y2, BLACK);
+
+  if ((enabled == 0U) || (healthy == 0U))
+  {
+    return;
+  }
+
+  {
+    const uint16_t fill_width = App_PCMD_LevelToBarWidth(peak);
+
+    if (fill_width != 0U)
+    {
+      rgblcd_fill(inner_x,
+                  inner_y,
+                  (uint16_t)(inner_x + fill_width - 1U),
+                  inner_y2,
+                  App_PCMD_LevelToBarColor(peak));
+    }
+  }
+}
+
 static void App_PCMD_PollStatus(void)
 {
   for (uint32_t i = 0; i < PCMD3180_ARRAY_DEVICE_COUNT; i++)
@@ -582,13 +668,14 @@ static void App_PCMD_ShowMicActivity(uint16_t start_y)
   const uint16_t row_h = 18U;
   const uint16_t col_x0 = 56U;
   const uint16_t col_w = 132U;
+  const uint16_t text_w = (uint16_t)(APP_PCMD_BAR_X_OFFSET - 4U);
   uint16_t y = start_y;
 
   memset(&full_array_map, 0, sizeof(full_array_map));
   (void)PCMD3180_GetArrayModeConfig(PCMD3180_ARRAY_MODE_32CH_48K, &full_array_map);
 
   rgblcd_show_string(APP_PCMD_UI_X, y, APP_PCMD_UI_W, 16, 16,
-                     "MIC RAW16: U1-U4 all channels, latest sample",
+                     "MIC RAW16 + peak bar: U1-U4 all channels",
                      CYAN);
   y += 24U;
 
@@ -625,11 +712,15 @@ static void App_PCMD_ShowMicActivity(uint16_t start_y)
       const PCMD3180_ArrayDevicePlanTypeDef *plan =
           &g_pcmd_debug.mode_config.devices[device_index];
       const uint16_t x = (uint16_t)(col_x0 + device_index * col_w);
+      const uint16_t bar_x = (uint16_t)(x + APP_PCMD_BAR_X_OFFSET);
+      const uint16_t bar_y = (uint16_t)(row_y + 1U);
       const uint8_t mic_id = full_array_map.devices[device_index].mic_id[channel];
       const uint8_t channel_bit = (uint8_t)(PCMD3180_CHANNEL_1 >> channel);
       const uint8_t active = ((channel < plan->mic_count) &&
                               ((plan->output_channel_mask & channel_bit) != 0U)) ? 1U : 0U;
       uint16_t color = GRAY;
+      uint8_t healthy = 0U;
+      uint16_t peak = 0U;
 
       if (device->present == 0U)
       {
@@ -656,9 +747,10 @@ static void App_PCMD_ShowMicActivity(uint16_t start_y)
         const uint16_t raw = ((plan->tdm_bus < APP_PCMD_BUS_COUNT) &&
                               (slot < APP_PCMD_MAX_SLOTS)) ?
                              g_pcmd_slot_last_sample[plan->tdm_bus][slot] : 0U;
-        const uint16_t peak = ((plan->tdm_bus < APP_PCMD_BUS_COUNT) &&
-                               (slot < APP_PCMD_MAX_SLOTS)) ?
-                              g_pcmd_slot_peak[plan->tdm_bus][slot] : 0U;
+        peak = ((plan->tdm_bus < APP_PCMD_BUS_COUNT) &&
+                (slot < APP_PCMD_MAX_SLOTS)) ?
+               g_pcmd_slot_peak[plan->tdm_bus][slot] : 0U;
+        healthy = 1U;
 
         if (peak >= 0x0400U)
         {
@@ -672,7 +764,8 @@ static void App_PCMD_ShowMicActivity(uint16_t start_y)
         snprintf(label, sizeof(label), "M%02u %04X", mic_id, (unsigned int)raw);
       }
 
-      rgblcd_show_string(x, row_y, (uint16_t)(col_w - 6U), 12, 12, label, color);
+      rgblcd_show_string(x, row_y, text_w, 12, 12, label, color);
+      App_PCMD_DrawLevelBar(bar_x, bar_y, peak, active, healthy);
     }
   }
 }
