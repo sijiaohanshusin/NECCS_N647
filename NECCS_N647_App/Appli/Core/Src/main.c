@@ -184,7 +184,6 @@ static void App_PCMD_EarlyI2CTest(void) __attribute__((unused));
 static uint8_t App_PCMD_CheckAddressMap(void);
 static const char *App_SAI_StateName(uint32_t state);
 static const char *App_SAI_ErrorName(uint32_t error_code);
-static void App_PCMD_ActivateAfterSaiClock(void);
 static void App_PCMD_SetExpectedSnapshot(uint32_t device_index,
                                          const PCMD3180_ConfigTypeDef *device_config);
 
@@ -471,35 +470,6 @@ static void App_PCMD_StartDma(void)
   }
 }
 
-static void App_PCMD_ActivateAfterSaiClock(void)
-{
-  PCMD3180_StatusTypeDef pcmd_status;
-
-  if (g_pcmd_debug.address_scan_ok == 0U)
-  {
-    return;
-  }
-
-  HAL_Delay(APP_PCMD_CLOCK_SETTLE_MS);
-
-  for (uint32_t i = 0U; i < PCMD3180_ARRAY_DEVICE_COUNT; i++)
-  {
-    if ((g_pcmd_devices[i].present == 0U) ||
-        (g_pcmd_devices[i].config_status != PCMD3180_OK))
-    {
-      continue;
-    }
-
-    g_pcmd_device_configs[i].defer_power_up = 0U;
-    pcmd_status = PCMD3180_Activate(&g_pcmd_handles[i], &g_pcmd_device_configs[i]);
-    if (pcmd_status != PCMD3180_OK)
-    {
-      g_pcmd_devices[i].config_status = pcmd_status;
-      g_pcmd_devices[i].status_status = pcmd_status;
-    }
-  }
-}
-
 static void App_PCMD_ProcessBuffer(const uint16_t *buffer,
                                    uint32_t word_count,
                                    uint8_t slot_count,
@@ -643,10 +613,8 @@ static void App_PCMD_ConfigureMode(PCMD3180_ArrayModeTypeDef mode)
   g_pcmd_debug.mode_config = mode_config;
 
   /*
-   * PCMD3180 has two awkward requirements on this board:
-   * - heavy I2C configuration is most reliable before SAI clocks start;
-   * - the PDM/PLL path should be powered only after BCLK/FSYNC are stable.
-   * Write the register table first, then start SAI, then only power PDM/PLL.
+   * Keep the H7-proven bring-up order: SAI DMA is already running here, so
+   * BCLK/FSYNC are stable before the PCMD3180 register table is written.
    */
   if (g_pcmd_debug.early_address_scan_rounds != 0U)
   {
@@ -690,7 +658,7 @@ static void App_PCMD_ConfigureMode(PCMD3180_ArrayModeTypeDef mode)
     pcmd_status = PCMD3180_BuildDeviceConfig(&mode_config, i, &g_pcmd_device_configs[i]);
     if (pcmd_status == PCMD3180_OK)
     {
-      g_pcmd_device_configs[i].defer_power_up = 1U;
+      g_pcmd_device_configs[i].defer_power_up = 0U;
       pcmd_status = PCMD3180_Configure(&g_pcmd_handles[i], &g_pcmd_device_configs[i]);
     }
     g_pcmd_devices[i].config_status = pcmd_status;
@@ -779,11 +747,6 @@ static void App_PCMD_Task(void)
     g_pcmd_sai_a_rate_last_count = sai_a_count;
     g_pcmd_sai_b_rate_last_count = sai_b_count;
     g_pcmd_sai_rate_tick = now;
-  }
-
-  if (g_pcmd_debug.address_scan_ok != 0U)
-  {
-    App_PCMD_StartDma();
   }
 }
 
@@ -1196,7 +1159,6 @@ int main(void)
   SystemIsolation_Config();
   /* USER CODE BEGIN 2 */
   led_init();
-  rgblcd_init();
   App_PCMD_BusInit(&hi2c2,
                    GPIOD,
                    GPIO_PIN_14,
@@ -1205,10 +1167,11 @@ int main(void)
                    MIC_SHDNZ_GPIO_Port,
                    MIC_SHDNZ_Pin,
                    APP_PCMD_I2C_TIMEOUT_MS);
-  App_PCMD_DebugInit();
   MX_SAI1_Init();
   App_PCMD_StartDma();
-  App_PCMD_ActivateAfterSaiClock();
+  HAL_Delay(APP_PCMD_CLOCK_SETTLE_MS);
+  App_PCMD_DebugInit();
+  rgblcd_init();
   g_pcmd_last_ui_tick = HAL_GetTick() - APP_PCMD_UI_REFRESH_MS;
 
   /* USER CODE END 2 */

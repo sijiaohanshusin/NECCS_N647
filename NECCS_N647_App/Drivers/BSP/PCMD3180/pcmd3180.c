@@ -560,8 +560,8 @@ PCMD3180_StatusTypeDef PCMD3180_Configure(PCMD3180_HandleTypeDef *handle,
 
     /*
      * TI's bring-up sequence expects the register table to be written after
-     * the device exits sleep mode.  Keep deferred bring-up active but with
-     * PWR_CFG left at 0, then enable PDM/PLL only after SAI clocks are stable.
+     * the device exits sleep mode.  The caller now invokes this only after
+     * SAI BCLK/FSYNC are running, so PWR_CFG can be written in the same pass.
      */
     status = PCMD3180_WriteChecked(handle,
                                    PCMD3180_REG_SLEEP_CFG,

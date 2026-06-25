@@ -64,10 +64,11 @@ void App_PCMD_BusPrepare(uint8_t reset_device,
   g_app_pcmd_bus_context.timeout_ms = g_app_pcmd_bus_config.timeout_ms;
 
   /*
-   * Use CubeMX-generated hardware I2C. The software-I2C fallback bit-bangs the
-   * same pins and is too timing-sensitive once SAI/DMA/LCD traffic is active.
+   * Match the validated H7 bring-up path: PCMD3180 control traffic is slow and
+   * one-shot, so bit-banged I2C avoids HAL I2C state/IRQ interactions after
+   * SAI clocks and DMA are running.
    */
-  PCMD3180_HAL_BusInit(&g_app_pcmd_bus, &g_app_pcmd_bus_context);
+  PCMD3180_HAL_BusInitSoftwareI2C(&g_app_pcmd_bus, &g_app_pcmd_bus_context);
 
   if ((reset_device != 0U) && (g_app_pcmd_bus.set_shutdown != NULL))
   {
