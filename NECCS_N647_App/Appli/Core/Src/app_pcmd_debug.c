@@ -470,16 +470,15 @@ static void App_PCMD_ConfigureMode(PCMD3180_ArrayModeTypeDef mode)
     const uint8_t address7 = mode_config.devices[i].address7;
 
     (void)PCMD3180_Init(&g_pcmd_handles[i], App_PCMD_BusGet(), address7);
+    g_pcmd_devices[i].present = 1U;
 
+    /*
+     * The TI bring-up sequence starts with writes (wake + register table).
+     * Keep this read probe as a diagnostic only; a transient read failure must
+     * not prevent the actual configuration writes from running.
+     */
     pcmd_status = PCMD3180_Probe(&g_pcmd_handles[i]);
     g_pcmd_devices[i].probe_status = pcmd_status;
-    g_pcmd_devices[i].present = (pcmd_status == PCMD3180_OK) ? 1U : 0U;
-    if (pcmd_status != PCMD3180_OK)
-    {
-      g_pcmd_devices[i].config_status = pcmd_status;
-      g_pcmd_devices[i].status_status = pcmd_status;
-      continue;
-    }
 
     pcmd_status = PCMD3180_BuildDeviceConfig(&mode_config, i, &g_pcmd_device_configs[i]);
     if (pcmd_status == PCMD3180_OK)
@@ -632,7 +631,7 @@ static void App_PCMD_ShowMicActivity(uint16_t start_y)
                               ((plan->output_channel_mask & channel_bit) != 0U)) ? 1U : 0U;
       uint16_t color = GRAY;
 
-      if ((device->present == 0U) || (device->probe_status != PCMD3180_OK))
+      if (device->present == 0U)
       {
         snprintf(label, sizeof(label), "M%02u IO", mic_id);
         color = RED;
@@ -640,6 +639,11 @@ static void App_PCMD_ShowMicActivity(uint16_t start_y)
       else if (device->config_status != PCMD3180_OK)
       {
         snprintf(label, sizeof(label), "M%02u CFG", mic_id);
+        color = RED;
+      }
+      else if (device->status_status != PCMD3180_OK)
+      {
+        snprintf(label, sizeof(label), "M%02u ST", mic_id);
         color = RED;
       }
       else if (active == 0U)
@@ -853,7 +857,7 @@ static void App_PCMD_ShowDebugPage(void)
     const uint16_t color = (device->present != 0U) ?
                            (((device->config_status == PCMD3180_OK) &&
                              (device->status_status == PCMD3180_OK)) ?
-                            ((routing_ok != 0U) ? GREEN : RED) : YELLOW) :
+                            ((routing_ok != 0U) ? GREEN : RED) : RED) :
                            RED;
 
     snprintf(line,
