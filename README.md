@@ -85,3 +85,8 @@ powershell -ExecutionPolicy Bypass -File .\tools\rebuild_n647_boot_images.ps1
 - OCR 知识库：`docs/knowledge`
 - H7 原工程参考：`D:\Project\NECCS\H7_Original\firmware\NECCS`
 - PCMD3180 OCR 手册：`docs/knowledge/ti-pcmd3180-1629184e-801fec58.tool.md`
+## 2026-06-26 PCMD3180 ASI routing writeback check
+
+- Current debug focus: the device rows can show `Cfg:OK` while `SL` still reads `00-00`. This is no longer treated as acceptable.
+- The PCMD3180 driver now force-verifies ASI routing registers after configuration and activation: `P0_R7/P0_R8/P0_R9` plus `P0_R11..P0_R18`.
+- On the next board test, if `SL` still stays `00-00`, check the screen `Fail Ux ... reg/wr/rd` line first. It should identify whether the slot write is not latching or whether the status snapshot is reading the wrong registers/page.

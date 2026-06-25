@@ -6,6 +6,8 @@
 #define PCMD3180_ASI_CFG0_TX_HIGH_Z          0x01U
 #define PCMD3180_WRITE_VERIFY_RETRY_COUNT    4U
 #define PCMD3180_WRITE_VERIFY_DELAY_MS       1U
+#define PCMD3180_ASI_ROUTING_RETRY_COUNT     4U
+#define PCMD3180_ASI_ROUTING_RETRY_DELAY_MS  2U
 
 static const uint8_t PCMD3180_V2_MIC_MAP[PCMD3180_ARRAY_DEVICE_COUNT][PCMD3180_ARRAY_MAX_MICS_PER_DEV] =
 {
@@ -150,6 +152,106 @@ static PCMD3180_StatusTypeDef PCMD3180_WriteAsiRouting(PCMD3180_HandleTypeDef *h
     }
 
     return PCMD3180_WriteChannelSlots(handle, config->start_slot, verify);
+}
+
+static PCMD3180_StatusTypeDef PCMD3180_VerifyRegisterEquals(PCMD3180_HandleTypeDef *handle,
+                                                            uint8_t reg,
+                                                            uint8_t expected)
+{
+    uint8_t readback = 0U;
+    PCMD3180_StatusTypeDef status;
+
+    status = PCMD3180_ReadRegister(handle, reg, &readback);
+    handle->last_reg = reg;
+    handle->last_write_value = expected;
+    handle->last_read_value = readback;
+
+    if (status != PCMD3180_OK)
+    {
+        handle->last_status = status;
+        return status;
+    }
+
+    if (readback != expected)
+    {
+        handle->last_status = PCMD3180_VERIFY_ERROR;
+        return PCMD3180_VERIFY_ERROR;
+    }
+
+    handle->last_status = PCMD3180_OK;
+    return PCMD3180_OK;
+}
+
+static PCMD3180_StatusTypeDef PCMD3180_VerifyAsiRouting(PCMD3180_HandleTypeDef *handle,
+                                                        const PCMD3180_ConfigTypeDef *config)
+{
+    PCMD3180_StatusTypeDef status;
+
+    status = PCMD3180_VerifyRegisterEquals(handle,
+                                           PCMD3180_REG_ASI_CFG0,
+                                           PCMD3180_BuildAsiCfg0(config));
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    status = PCMD3180_VerifyRegisterEquals(handle, PCMD3180_REG_ASI_CFG1, config->tdm_tx_offset);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    status = PCMD3180_VerifyRegisterEquals(handle, PCMD3180_REG_ASI_CFG2, 0U);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    for (uint8_t channel = 0U; channel < PCMD3180_MAX_CHANNELS_PER_DEVICE; channel++)
+    {
+        status = PCMD3180_VerifyRegisterEquals(handle,
+                                               (uint8_t)(PCMD3180_REG_ASI_CH1 + channel),
+                                               (uint8_t)(config->start_slot + channel));
+        if (status != PCMD3180_OK)
+        {
+            return status;
+        }
+    }
+
+    return PCMD3180_OK;
+}
+
+static PCMD3180_StatusTypeDef PCMD3180_ApplyAsiRouting(PCMD3180_HandleTypeDef *handle,
+                                                       const PCMD3180_ConfigTypeDef *config,
+                                                       uint8_t verify)
+{
+    PCMD3180_StatusTypeDef status = PCMD3180_ERROR;
+
+    for (uint32_t attempt = 0U; attempt < PCMD3180_ASI_ROUTING_RETRY_COUNT; attempt++)
+    {
+        status = PCMD3180_SelectPage(handle, 0U);
+        if (status != PCMD3180_OK)
+        {
+            handle->last_status = status;
+            PCMD3180_Delay(handle, PCMD3180_ASI_ROUTING_RETRY_DELAY_MS);
+            continue;
+        }
+
+        status = PCMD3180_WriteAsiRouting(handle, config, verify);
+        if (status == PCMD3180_OK)
+        {
+            PCMD3180_Delay(handle, PCMD3180_ASI_ROUTING_RETRY_DELAY_MS);
+            status = PCMD3180_VerifyAsiRouting(handle, config);
+            if (status == PCMD3180_OK)
+            {
+                return PCMD3180_OK;
+            }
+        }
+
+        PCMD3180_Delay(handle, PCMD3180_ASI_ROUTING_RETRY_DELAY_MS);
+    }
+
+    return status;
 }
 
 static PCMD3180_StatusTypeDef PCMD3180_WritePdmInputConfig(PCMD3180_HandleTypeDef *handle,
@@ -608,7 +710,7 @@ PCMD3180_StatusTypeDef PCMD3180_Configure(PCMD3180_HandleTypeDef *handle,
     }
     PCMD3180_Delay(handle, 10U);
 
-    status = PCMD3180_WriteAsiRouting(handle, config, verify);
+    status = PCMD3180_ApplyAsiRouting(handle, config, verify);
     if (status != PCMD3180_OK)
     {
         return status;
@@ -747,7 +849,7 @@ PCMD3180_StatusTypeDef PCMD3180_Configure(PCMD3180_HandleTypeDef *handle,
             return status;
         }
 
-        status = PCMD3180_WriteAsiRouting(handle, config, verify);
+        status = PCMD3180_ApplyAsiRouting(handle, config, verify);
         if (status != PCMD3180_OK)
         {
             return status;
@@ -804,7 +906,7 @@ PCMD3180_StatusTypeDef PCMD3180_Activate(PCMD3180_HandleTypeDef *handle,
         return status;
     }
 
-    status = PCMD3180_WriteAsiRouting(handle, config, verify);
+    status = PCMD3180_ApplyAsiRouting(handle, config, verify);
     if (status != PCMD3180_OK)
     {
         return status;
