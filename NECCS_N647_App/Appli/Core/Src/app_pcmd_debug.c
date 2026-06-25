@@ -173,6 +173,14 @@ static uint8_t App_PCMD_IsRoutingSnapshotOk(uint32_t device_index,
   if (device_index < PCMD3180_ARRAY_DEVICE_COUNT)
   {
     expected_mask = g_pcmd_debug.mode_config.devices[device_index].input_channel_mask;
+    const uint8_t expected_start = g_pcmd_debug.mode_config.devices[device_index].start_slot;
+    for (uint32_t channel = 0U; channel < PCMD3180_ARRAY_MAX_MICS_PER_DEV; channel++)
+    {
+      if (snapshot->asi_ch_slot[channel] != (uint8_t)(expected_start + channel))
+      {
+        return 0U;
+      }
+    }
   }
 
   if (snapshot->pdmclk_cfg != (PCMD3180_PDMCLK_CFG_RESET_MASK |
@@ -1023,7 +1031,7 @@ static void App_PCMD_ShowDebugPage(void)
   y += 20U;
 
   rgblcd_show_string(APP_PCMD_UI_X, y, APP_PCMD_UI_W, 12, 12,
-                     "Dev Adr P C S PWR ASI D0/D1 PD PI GPOs GI EN/AO",
+                     "Dev Adr P C S SL PWR ASI D0/D1 PD PI GPOs GI EN/AO",
                      YELLOW);
   y += 16U;
 
@@ -1039,12 +1047,14 @@ static void App_PCMD_ShowDebugPage(void)
 
     snprintf(line,
              sizeof(line),
-             "U%lu %02X %-2s %-2s %-2s P%02X A%02X D%02X/%02X PD%02X PI%02X G%02X%02X%02X%02X GI%02X/%02X E%02X/O%02X",
+             "U%lu %02X %-2s %-2s %-2s %02X-%02X P%02X A%02X D%02X/%02X PD%02X PI%02X G%02X%02X%02X%02X GI%02X/%02X E%02X/O%02X",
              (unsigned long)(i + 1U),
              (unsigned int)(PCMD3180_I2C_ADDR_0 + i),
              App_PCMD_StatusName(device->probe_status),
              App_PCMD_StatusName(device->config_status),
              App_PCMD_StatusName(device->status_status),
+             device->snapshot.asi_ch_slot[0],
+             device->snapshot.asi_ch_slot[PCMD3180_ARRAY_MAX_MICS_PER_DEV - 1U],
              device->snapshot.pwr_cfg,
              device->snapshot.asi_sts,
              device->snapshot.dev_sts0,

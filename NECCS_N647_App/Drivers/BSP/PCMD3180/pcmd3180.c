@@ -603,25 +603,6 @@ PCMD3180_StatusTypeDef PCMD3180_Configure(PCMD3180_HandleTypeDef *handle,
         return status;
     }
 
-    /* Default slave-clock setup: BCLK/FSYNC must be provided by the host or another master. */
-    status = PCMD3180_WriteChecked(handle, PCMD3180_REG_MST_CFG0, 0U, verify);
-    if (status != PCMD3180_OK)
-    {
-        return status;
-    }
-
-    status = PCMD3180_WriteChecked(handle, PCMD3180_REG_MST_CFG1, 0U, verify);
-    if (status != PCMD3180_OK)
-    {
-        return status;
-    }
-
-    status = PCMD3180_WriteChecked(handle, PCMD3180_REG_CLK_SRC, 0U, verify);
-    if (status != PCMD3180_OK)
-    {
-        return status;
-    }
-
     status = PCMD3180_WriteChecked(handle,
                                    PCMD3180_REG_PDMCLK_CFG,
                                    (uint8_t)(PCMD3180_PDMCLK_CFG_RESET_MASK |
@@ -693,6 +674,25 @@ PCMD3180_StatusTypeDef PCMD3180_Configure(PCMD3180_HandleTypeDef *handle,
     }
 
     status = PCMD3180_WriteChecked(handle, PCMD3180_REG_DSP_CFG1, 0U, verify);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    /* Default slave-clock setup: BCLK/FSYNC must be provided by the host or another master. */
+    status = PCMD3180_WriteChecked(handle, PCMD3180_REG_MST_CFG0, 0U, verify);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    status = PCMD3180_WriteChecked(handle, PCMD3180_REG_MST_CFG1, 0U, verify);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    status = PCMD3180_WriteChecked(handle, PCMD3180_REG_CLK_SRC, 0U, verify);
     if (status != PCMD3180_OK)
     {
         return status;
@@ -955,6 +955,17 @@ PCMD3180_StatusTypeDef PCMD3180_ReadStatus(PCMD3180_HandleTypeDef *handle,
     if (status != PCMD3180_OK)
     {
         return status;
+    }
+
+    for (uint32_t channel = 0U; channel < PCMD3180_ARRAY_MAX_MICS_PER_DEV; channel++)
+    {
+        status = PCMD3180_ReadRegister(handle,
+                                       (uint8_t)(PCMD3180_REG_ASI_CH1 + channel),
+                                       &status_snapshot->asi_ch_slot[channel]);
+        if (status != PCMD3180_OK)
+        {
+            return status;
+        }
     }
 
     status = PCMD3180_ReadRegister(handle, PCMD3180_REG_PDMCLK_CFG, &status_snapshot->pdmclk_cfg);

@@ -260,6 +260,7 @@ typedef struct
     uint8_t dev_sts0;
     uint8_t dev_sts1;
     uint8_t asi_sts;
+    uint8_t asi_ch_slot[PCMD3180_ARRAY_MAX_MICS_PER_DEV];
     uint8_t pdmclk_cfg;
     uint8_t pdmin_cfg;
     uint8_t gpo_cfg0;
