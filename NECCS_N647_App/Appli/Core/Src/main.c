@@ -1419,6 +1419,13 @@ static void MX_LTDC_Init(void)
 {
 
   /* USER CODE BEGIN RIF_Init 0 */
+  /*
+   * CubeMX emits GPDMA channel attribute setup here, but the generated SAI MSP
+   * code fills these DMA handles later from MX_SAI1_Init().  Seed only the
+   * channel instances so HAL_DMA_ConfigChannelAttributes() has valid registers.
+   */
+  handle_GPDMA1_Channel0.Instance = GPDMA1_Channel0;
+  handle_GPDMA1_Channel1.Instance = GPDMA1_Channel1;
 
   /* USER CODE END RIF_Init 0 */
 
