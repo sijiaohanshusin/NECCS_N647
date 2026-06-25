@@ -97,6 +97,282 @@ function Invoke-Make {
     }
 }
 
+function Get-ConfigRelativeMakePath {
+    param(
+        [string]$ConfigDir,
+        [string]$Path
+    )
+
+    $configFullPath = (Resolve-Path -LiteralPath $ConfigDir).Path
+    $pathFullName = (Get-Item -LiteralPath $Path).FullName
+    return ($pathFullName.Substring($configFullPath.Length + 1) -replace "\\", "/")
+}
+
+function Get-GeneratedSubdirMakefiles {
+    param([string]$ConfigDir)
+
+    return @(Get-ChildItem -LiteralPath $ConfigDir -Recurse -Filter "subdir.mk" -File |
+        Sort-Object {
+            $relativePath = Get-ConfigRelativeMakePath -ConfigDir $ConfigDir -Path $_.FullName
+            if ($relativePath -like "Drivers/STM32N6xx_HAL_Driver/*") { "00_$relativePath" }
+            elseif ($relativePath -like "Drivers/CMSIS/*") { "01_$relativePath" }
+            elseif ($relativePath -like "Drivers/BSP/*") { "02_$relativePath" }
+            elseif ($relativePath -like "Application/User/Startup/*") { "03_$relativePath" }
+            elseif ($relativePath -like "Application/User/Core/*") { "04_$relativePath" }
+            else { "99_$relativePath" }
+        })
+}
+
+function Get-MakeVariableAppendEntries {
+    param(
+        [string]$Path,
+        [string]$Variable
+    )
+
+    $entries = New-Object System.Collections.Generic.List[string]
+    $lines = Get-Content -LiteralPath $Path
+    $collecting = $false
+
+    foreach ($line in $lines) {
+        if ($collecting) {
+            if ([string]::IsNullOrWhiteSpace($line)) {
+                $collecting = $false
+                continue
+            }
+
+            $entry = ($line -replace "\\\s*$", "").Trim()
+            if (-not [string]::IsNullOrWhiteSpace($entry)) {
+                $entries.Add($entry) | Out-Null
+            }
+
+            if ($line -notmatch "\\\s*$") {
+                $collecting = $false
+            }
+
+            continue
+        }
+
+        if ($line -match "^\s*$([regex]::Escape($Variable))\s*\+=\s*(.*)$") {
+            $rest = $Matches[1].Trim()
+            if ($rest -eq "\") {
+                $collecting = $true
+                continue
+            }
+
+            if (-not [string]::IsNullOrWhiteSpace($rest)) {
+                foreach ($entry in ($rest -split "\s+")) {
+                    $entry = ($entry -replace "\\\s*$", "").Trim()
+                    if (-not [string]::IsNullOrWhiteSpace($entry)) {
+                        $entries.Add($entry) | Out-Null
+                    }
+                }
+            }
+
+            if ($line -match "\\\s*$") {
+                $collecting = $true
+            }
+        }
+    }
+
+    return @($entries)
+}
+
+function Get-MainCompileLine {
+    param(
+        [string]$ConfigDir,
+        [string]$CoreSubdirText
+    )
+
+    if ($CoreSubdirText -match "(?m)^Application/User/Core/main\.o:.*\r?\n(\tarm-none-eabi-gcc .*)$") {
+        return $Matches[1]
+    }
+
+    throw "Cannot locate main.c compile rule in generated makefile: $(Join-Path $ConfigDir 'Application\User\Core\subdir.mk')"
+}
+
+function Add-MissingLocalBspSubdirMakefiles {
+    param(
+        [string]$ConfigDir,
+        [string]$MainCompileLine
+    )
+
+    $bspRoot = Join-Path $repoRoot "NECCS_N647_App\Drivers\BSP"
+    if (-not (Test-Path -LiteralPath $bspRoot -PathType Container)) {
+        return
+    }
+
+    foreach ($sourceDir in Get-ChildItem -LiteralPath $bspRoot -Directory) {
+        $sources = @(Get-ChildItem -LiteralPath $sourceDir.FullName -Filter "*.c" -File)
+        if ($sources.Count -eq 0) {
+            continue
+        }
+
+        $relativeDir = "Drivers/BSP/$($sourceDir.Name)"
+        $subdirMk = Join-Path $ConfigDir "$relativeDir/subdir.mk"
+        if (Test-Path -LiteralPath $subdirMk -PathType Leaf) {
+            continue
+        }
+
+        New-Item -ItemType Directory -Path (Split-Path -Parent $subdirMk) -Force | Out-Null
+
+        $cSrcLines = New-Object System.Collections.Generic.List[string]
+        $objLines = New-Object System.Collections.Generic.List[string]
+        $depLines = New-Object System.Collections.Generic.List[string]
+        $ruleLines = New-Object System.Collections.Generic.List[string]
+        $cleanFiles = New-Object System.Collections.Generic.List[string]
+
+        foreach ($source in $sources) {
+            $baseName = [System.IO.Path]::GetFileNameWithoutExtension($source.Name)
+            $sourceForMake = $source.FullName -replace "\\", "/"
+            $objectForMake = "./$relativeDir/$baseName.o"
+            $dependencyForMake = "./$relativeDir/$baseName.d"
+            $targetForMake = "$relativeDir/$baseName.o"
+
+            $cSrcLines.Add($sourceForMake) | Out-Null
+            $objLines.Add($objectForMake) | Out-Null
+            $depLines.Add($dependencyForMake) | Out-Null
+            $ruleLines.Add("$targetForMake`: $sourceForMake $relativeDir/subdir.mk") | Out-Null
+            $ruleLines.Add($MainCompileLine) | Out-Null
+            $ruleLines.Add("") | Out-Null
+
+            foreach ($suffix in @(".cyclo", ".d", ".o", ".su")) {
+                $cleanFiles.Add("./$relativeDir/$baseName$suffix") | Out-Null
+            }
+        }
+
+        $cleanTarget = "clean-" + ($relativeDir -replace "/", "-2f-")
+        $subdirText = @(
+            "################################################################################",
+            "# Generated by tools/build_n647_app.ps1 when CubeIDE omits a local BSP source directory.",
+            "################################################################################",
+            "",
+            "C_SRCS += \",
+            (($cSrcLines | ForEach-Object { "$_ \" }) -join "`r`n").TrimEnd(" \"),
+            "",
+            "OBJS += \",
+            (($objLines | ForEach-Object { "$_ \" }) -join "`r`n").TrimEnd(" \"),
+            "",
+            "C_DEPS += \",
+            (($depLines | ForEach-Object { "$_ \" }) -join "`r`n").TrimEnd(" \"),
+            "",
+            ($ruleLines -join "`r`n"),
+            "clean: $cleanTarget",
+            "",
+            "$cleanTarget`:",
+            ("`t-`$(RM) " + ($cleanFiles -join " ")),
+            "",
+            ".PHONY: $cleanTarget",
+            ""
+        ) -join "`r`n"
+
+        Write-TextFileNoBom -Path $subdirMk -Text $subdirText
+        Write-Host ("Added generated local BSP source list for {0}: {1} file(s)." -f $relativeDir, $sources.Count)
+    }
+}
+
+function Repair-GeneratedMakefileSubdirIncludes {
+    param([string]$ConfigDir)
+
+    $makefile = Join-Path $ConfigDir "makefile"
+    $sourcesMk = Join-Path $ConfigDir "sources.mk"
+    if (-not (Test-Path -LiteralPath $makefile -PathType Leaf) -or
+        -not (Test-Path -LiteralPath $sourcesMk -PathType Leaf)) {
+        return
+    }
+
+    $subdirMakefiles = Get-GeneratedSubdirMakefiles -ConfigDir $ConfigDir
+    $subdirDirs = @($subdirMakefiles | ForEach-Object {
+        (Get-ConfigRelativeMakePath -ConfigDir $ConfigDir -Path $_.FullName) -replace "/subdir\.mk$", ""
+    })
+
+    $makeLines = New-Object System.Collections.Generic.List[string]
+    $originalMakeLines = @(Get-Content -LiteralPath $makefile)
+    $sourceIncludeIndex = [Array]::FindIndex($originalMakeLines, [Predicate[string]]{ param($line) $line -eq "-include sources.mk" })
+    $objectsIncludeIndex = [Array]::FindIndex($originalMakeLines, [Predicate[string]]{ param($line) $line -eq "-include objects.mk" })
+
+    if ($sourceIncludeIndex -lt 0 -or $objectsIncludeIndex -lt 0 -or $objectsIncludeIndex -le $sourceIncludeIndex) {
+        throw "Cannot locate generated include block in $makefile"
+    }
+
+    for ($i = 0; $i -le $sourceIncludeIndex; $i++) {
+        $makeLines.Add($originalMakeLines[$i]) | Out-Null
+    }
+    foreach ($subdirDir in $subdirDirs) {
+        $makeLines.Add("-include $subdirDir/subdir.mk") | Out-Null
+    }
+    for ($i = $objectsIncludeIndex; $i -lt $originalMakeLines.Count; $i++) {
+        $makeLines.Add($originalMakeLines[$i]) | Out-Null
+    }
+
+    $newMakeText = ($makeLines -join "`r`n") + "`r`n"
+    $oldMakeText = Get-Content -LiteralPath $makefile -Raw
+    if ($newMakeText -ne $oldMakeText) {
+        Write-TextFileNoBom -Path $makefile -Text $newMakeText
+        Write-Host ("Repaired generated makefile include list for {0}." -f (Split-Path -Leaf $ConfigDir))
+    }
+
+    $sourceLines = New-Object System.Collections.Generic.List[string]
+    $originalSourceLines = @(Get-Content -LiteralPath $sourcesMk)
+    $subdirsIndex = [Array]::FindIndex($originalSourceLines, [Predicate[string]]{ param($line) $line -like "SUBDIRS :=*" })
+    if ($subdirsIndex -lt 0) {
+        return
+    }
+
+    $subdirsEndIndex = $subdirsIndex + 1
+    while ($subdirsEndIndex -lt $originalSourceLines.Count -and
+        -not [string]::IsNullOrWhiteSpace($originalSourceLines[$subdirsEndIndex])) {
+        $subdirsEndIndex++
+    }
+
+    for ($i = 0; $i -lt $subdirsIndex; $i++) {
+        $sourceLines.Add($originalSourceLines[$i]) | Out-Null
+    }
+    $sourceLines.Add("SUBDIRS := \") | Out-Null
+    foreach ($subdirDir in $subdirDirs) {
+        $sourceLines.Add("$subdirDir \") | Out-Null
+    }
+    for ($i = $subdirsEndIndex; $i -lt $originalSourceLines.Count; $i++) {
+        $sourceLines.Add($originalSourceLines[$i]) | Out-Null
+    }
+
+    $newSourcesText = ($sourceLines -join "`r`n") + "`r`n"
+    $oldSourcesText = Get-Content -LiteralPath $sourcesMk -Raw
+    if ($newSourcesText -ne $oldSourcesText) {
+        Write-TextFileNoBom -Path $sourcesMk -Text $newSourcesText
+        Write-Host ("Repaired generated sources.mk SUBDIRS for {0}." -f (Split-Path -Leaf $ConfigDir))
+    }
+}
+
+function Repair-GeneratedObjectsListFromSubdirMakefiles {
+    param([string]$ConfigDir)
+
+    $objectsList = Join-Path $ConfigDir "objects.list"
+    if (-not (Test-Path -LiteralPath $objectsList -PathType Leaf)) {
+        return
+    }
+
+    $objectLines = New-Object System.Collections.Generic.List[string]
+    foreach ($subdirMk in Get-GeneratedSubdirMakefiles -ConfigDir $ConfigDir) {
+        foreach ($objectEntry in Get-MakeVariableAppendEntries -Path $subdirMk.FullName -Variable "OBJS") {
+            $quotedEntry = "`"$objectEntry`""
+            if (-not ($objectLines -contains $quotedEntry)) {
+                $objectLines.Add($quotedEntry) | Out-Null
+            }
+        }
+    }
+
+    if ($objectLines.Count -eq 0) {
+        return
+    }
+
+    $newObjectsText = ($objectLines -join "`r`n") + "`r`n"
+    $oldObjectsText = Get-Content -LiteralPath $objectsList -Raw
+    if ($newObjectsText -ne $oldObjectsText) {
+        Write-TextFileNoBom -Path $objectsList -Text $newObjectsText
+        Write-Host ("Rebuilt objects.list from generated subdir.mk files for {0}: {1} object(s)." -f (Split-Path -Leaf $ConfigDir), $objectLines.Count)
+    }
+}
+
 function Repair-GeneratedCoreSourceList {
     param([string]$ConfigDir)
 
@@ -113,12 +389,7 @@ function Repair-GeneratedCoreSourceList {
     $repairBlockPattern = "(?ms)\r?\n?# Added by tools/build_n647_app\.ps1 when CubeIDE omits local user sources\.\r?\nC_SRCS \+= \\\r?\n[^\r\n]+\r?\n\r?\nOBJS \+= \\\r?\n[^\r\n]+\r?\n\r?\nC_DEPS \+= \\\r?\n[^\r\n]+(?:\r?\n\r?\nApplication/User/Core/[^\r\n]+\.o: [^\r\n]+\r?\n\t[^\r\n]+)?"
     $subdirText = [regex]::Replace($subdirText, $repairBlockPattern, "")
 
-    $mainCompileLine = $null
-    if ($subdirText -match "(?m)^Application/User/Core/main\.o:.*\r?\n(\tarm-none-eabi-gcc .*)$") {
-        $mainCompileLine = $Matches[1]
-    } else {
-        throw "Cannot locate main.c compile rule in generated makefile: $subdirMk"
-    }
+    $mainCompileLine = Get-MainCompileLine -ConfigDir $ConfigDir -CoreSubdirText $subdirText
 
     $allSubdirText = $subdirText
     foreach ($otherSubdirMk in Get-ChildItem -LiteralPath $ConfigDir -Recurse -Filter "subdir.mk" -File) {
@@ -262,7 +533,17 @@ try {
             throw "$config makefile not found. Generate/build the CubeIDE project once first: $makefile"
         }
 
+        $coreSubdirMk = Join-Path $configDir "Application\User\Core\subdir.mk"
+        if (-not (Test-Path -LiteralPath $coreSubdirMk -PathType Leaf)) {
+            throw "$config Core source list not found. Generate/build the CubeIDE project once first: $coreSubdirMk"
+        }
+        $mainCompileLine = Get-MainCompileLine -ConfigDir $configDir -CoreSubdirText (Get-Content -LiteralPath $coreSubdirMk -Raw)
+
+        Add-MissingLocalBspSubdirMakefiles -ConfigDir $configDir -MainCompileLine $mainCompileLine
+        Repair-GeneratedMakefileSubdirIncludes -ConfigDir $configDir
         Repair-GeneratedCoreSourceList -ConfigDir $configDir
+        Repair-GeneratedMakefileSubdirIncludes -ConfigDir $configDir
+        Repair-GeneratedObjectsListFromSubdirMakefiles -ConfigDir $configDir
 
         Write-Host "Building $projectName/$config with direct make..."
         if (-not $NoClean) {

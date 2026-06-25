@@ -21,8 +21,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#ifdef DEBUG
 #include "./SYS/sys.h"
+#ifdef DEBUG
 #include "./HyperRAM/hyperram.h"
 #endif
 #include "./LED/led.h"
@@ -264,6 +264,10 @@ int main(void)
   led_init();
   App_PCMD_DebugSetRamStatus(g_app_hyperram_init_ok, g_app_hyperram_test_ok);
   App_PCMD_DebugBusInit(&hi2c2);
+  if (sys_audio_clock_config() == 0U)
+  {
+    Error_Handler();
+  }
   MX_SAI1_Init();
   App_PCMD_DebugStartDma();
   App_PCMD_DebugInitAfterSaiClock();

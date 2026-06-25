@@ -1,5 +1,11 @@
 # NECCS_N647 工程速查
 
+## 2026-06-25 PCMD3180 / SAI 时钟结论
+
+- 当前 APP-only 工程的 CubeMX `SystemClock_Config()` 属于 FSBL context，APP 冷启动不会执行它。
+- PCMD3180 调试前，APP 必须主动确认 `PLL2=245.76 MHz`、`SAI1/IC7=12.288 MHz`，否则 SAI 可能落到 `PLL2=64 MHz / SAIclk=3.2 MHz` 这类错误状态。
+- 若屏幕显示 `PLL2:64000000` 或 `SAIclk:3200000`，优先排查 APP 音频时钟链路，不要先改 PCMD3180 寄存器表。
+
 > 新会话 / 压缩上下文恢复提醒：先读本 `README.md`，再根据任务需要读 `AGENTS.md` 和 `MIGRATION_CONTEXT.md`。如果聊天摘要与仓库文件不一致，以当前仓库文件和 `git status` 为准。
 
 本仓库是 NECCS 从 H7 迁移到 STM32N647 的当前工程入口。此文件用于给人和 AI 协作快速恢复上下文，后续遇到新的硬件结论、构建方式或调试结论时可以继续更新。
