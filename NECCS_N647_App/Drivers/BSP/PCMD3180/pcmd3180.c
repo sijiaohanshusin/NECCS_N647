@@ -116,6 +116,42 @@ static PCMD3180_StatusTypeDef PCMD3180_WriteChannelSlots(PCMD3180_HandleTypeDef 
     return PCMD3180_OK;
 }
 
+static uint8_t PCMD3180_BuildAsiCfg0(const PCMD3180_ConfigTypeDef *config)
+{
+    return (uint8_t)(PCMD3180_ASI_CFG0_TDM_MODE |
+                    (uint8_t)(((uint8_t)config->slot_width & 0x03U) << 4) |
+                    (uint8_t)((config->invert_fsync == 0U) ? 0U : 0x08U) |
+                    (uint8_t)((config->invert_bclk == 0U) ? 0U : 0x04U) |
+                    PCMD3180_ASI_CFG0_TX_HIGH_Z);
+}
+
+static PCMD3180_StatusTypeDef PCMD3180_WriteAsiRouting(PCMD3180_HandleTypeDef *handle,
+                                                       const PCMD3180_ConfigTypeDef *config,
+                                                       uint8_t verify)
+{
+    PCMD3180_StatusTypeDef status;
+
+    status = PCMD3180_WriteChecked(handle, PCMD3180_REG_ASI_CFG0, PCMD3180_BuildAsiCfg0(config), verify);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    status = PCMD3180_WriteChecked(handle, PCMD3180_REG_ASI_CFG1, config->tdm_tx_offset, verify);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    status = PCMD3180_WriteChecked(handle, PCMD3180_REG_ASI_CFG2, 0U, verify);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    return PCMD3180_WriteChannelSlots(handle, config->start_slot, verify);
+}
+
 static PCMD3180_StatusTypeDef PCMD3180_WritePdmInputConfig(PCMD3180_HandleTypeDef *handle,
                                                            uint8_t verify)
 {
@@ -510,7 +546,6 @@ PCMD3180_StatusTypeDef PCMD3180_Probe(PCMD3180_HandleTypeDef *handle)
 PCMD3180_StatusTypeDef PCMD3180_Configure(PCMD3180_HandleTypeDef *handle,
                                           const PCMD3180_ConfigTypeDef *config)
 {
-    uint8_t asi_cfg0;
     uint8_t pwr_cfg;
     uint8_t verify;
     uint8_t defer_power_up;
@@ -573,31 +608,7 @@ PCMD3180_StatusTypeDef PCMD3180_Configure(PCMD3180_HandleTypeDef *handle,
     }
     PCMD3180_Delay(handle, 10U);
 
-    asi_cfg0 = PCMD3180_ASI_CFG0_TDM_MODE |
-               (uint8_t)(((uint8_t)config->slot_width & 0x03U) << 4) |
-               (uint8_t)((config->invert_fsync == 0U) ? 0U : 0x08U) |
-               (uint8_t)((config->invert_bclk == 0U) ? 0U : 0x04U) |
-               PCMD3180_ASI_CFG0_TX_HIGH_Z;
-
-    status = PCMD3180_WriteChecked(handle, PCMD3180_REG_ASI_CFG0, asi_cfg0, verify);
-    if (status != PCMD3180_OK)
-    {
-        return status;
-    }
-
-    status = PCMD3180_WriteChecked(handle, PCMD3180_REG_ASI_CFG1, config->tdm_tx_offset, verify);
-    if (status != PCMD3180_OK)
-    {
-        return status;
-    }
-
-    status = PCMD3180_WriteChecked(handle, PCMD3180_REG_ASI_CFG2, 0U, verify);
-    if (status != PCMD3180_OK)
-    {
-        return status;
-    }
-
-    status = PCMD3180_WriteChannelSlots(handle, config->start_slot, verify);
+    status = PCMD3180_WriteAsiRouting(handle, config, verify);
     if (status != PCMD3180_OK)
     {
         return status;
@@ -721,6 +732,28 @@ PCMD3180_StatusTypeDef PCMD3180_Configure(PCMD3180_HandleTypeDef *handle,
         return status;
     }
 
+    if ((defer_power_up == 0U) && (pwr_cfg != 0U))
+    {
+        /*
+         * Keep the H7-proven register values, but re-apply the ASI routing
+         * after power-up.  On the N647 bring-up board the slot registers
+         * (0x0B..0x12) have been observed to read back as reset values after
+         * PWR_CFG while the rest of the table remains valid.
+         */
+        PCMD3180_Delay(handle, 10U);
+        status = PCMD3180_SelectPage(handle, 0U);
+        if (status != PCMD3180_OK)
+        {
+            return status;
+        }
+
+        status = PCMD3180_WriteAsiRouting(handle, config, verify);
+        if (status != PCMD3180_OK)
+        {
+            return status;
+        }
+    }
+
     handle->configured = 1U;
 
     return PCMD3180_OK;
@@ -764,6 +797,18 @@ PCMD3180_StatusTypeDef PCMD3180_Activate(PCMD3180_HandleTypeDef *handle,
         return status;
     }
     PCMD3180_Delay(handle, 10U);
+
+    status = PCMD3180_SelectPage(handle, 0U);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    status = PCMD3180_WriteAsiRouting(handle, config, verify);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
 
     handle->configured = 1U;
     return PCMD3180_OK;
