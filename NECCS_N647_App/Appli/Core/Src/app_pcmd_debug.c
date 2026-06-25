@@ -458,13 +458,12 @@ static void App_PCMD_ConfigureMode(PCMD3180_ArrayModeTypeDef mode)
     g_pcmd_debug.address_scan_ok = App_PCMD_CheckAddressMap();
   }
 
-  if (g_pcmd_debug.address_scan_ok == 0U)
-  {
-    g_pcmd_debug.mode_start_tick = HAL_GetTick();
-    g_pcmd_debug.last_poll_tick = 0U;
-    g_pcmd_debug.reconfigure_count++;
-    return;
-  }
+  /*
+   * Keep the address scan as a diagnostic only. A noisy scan while SAI/LTDC are
+   * already active must not prevent the H7/TI register sequence from running,
+   * otherwise every device row only reports the scan gate instead of the real
+   * probe/configure failure point.
+   */
 
   for (uint32_t i = 0; i < PCMD3180_ARRAY_DEVICE_COUNT; i++)
   {

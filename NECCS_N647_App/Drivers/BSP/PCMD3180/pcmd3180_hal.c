@@ -70,7 +70,12 @@ static void PCMD3180_HAL_BusClear(PCMD3180_HAL_BusContextTypeDef *context)
     HAL_GPIO_WritePin(context->sda_port, context->sda_pin, GPIO_PIN_SET);
 
     gpio_init.Mode = GPIO_MODE_OUTPUT_OD;
-    gpio_init.Pull = GPIO_NOPULL;
+    /*
+     * Keep the same pull-up bias used by the normal software-I2C path.
+     * Recovering with NOPULL could leave SCL/SDA weak after the first failed
+     * transaction, making later PCMD3180 probes look random.
+     */
+    gpio_init.Pull = GPIO_PULLUP;
     gpio_init.Speed = GPIO_SPEED_FREQ_LOW;
 
     gpio_init.Pin = context->scl_pin;

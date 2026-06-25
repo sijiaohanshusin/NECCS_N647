@@ -98,6 +98,7 @@ uint8_t App_PCMD_BusRunAddressScan(uint8_t *ack_count,
   uint8_t all_stable = 1U;
   uint8_t local_scl_idle_high = 0U;
   uint8_t local_sda_idle_high = 0U;
+  const uint8_t min_ack_count = (rounds > 4U) ? (uint8_t)(rounds - 2U) : rounds;
 
   if ((ack_count == NULL) || (scan_rounds == NULL) ||
       (scl_idle_high == NULL) || (sda_idle_high == NULL) ||
@@ -134,7 +135,12 @@ uint8_t App_PCMD_BusRunAddressScan(uint8_t *ack_count,
        device < PCMD3180_ARRAY_DEVICE_COUNT;
        device++)
   {
-    if (ack_count[device] != rounds)
+    /*
+     * The PCMD3180 address pins are stable when all devices ACK most probes.
+     * Requiring 16/16 perfect ACKs made the bring-up path reject otherwise
+     * usable buses when one SAI/LTDC interrupt hit a bit-banged I2C probe.
+     */
+    if (ack_count[device] < min_ack_count)
     {
       all_stable = 0U;
     }

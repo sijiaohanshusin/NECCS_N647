@@ -1,5 +1,12 @@
 # NECCS_N647 工程速查
 
+## 2026-06-25 PCMD3180 I2C 诊断策略
+
+- `EADDR/ADDR` 地址扫描现在只作为诊断信息，不再阻断 PCMD3180 的真实配置流程。
+- 原因：SAI/LTDC 已运行时，16 轮 bit-bang I2C 扫描可能出现漏 ACK；如果把扫描结果作为硬门槛，后续 `Probe -> Configure -> ReadStatus` 根本不会执行，屏幕只能看到一片 `ERR/IO`，无法定位真正失败点。
+- 当前排查时应同时看两层信息：`ADDR/16` 反映总线/地址稳定性，设备表里的 `Prb/Cfg/St` 反映真正探测、写寄存器、读状态的结果。
+- 若 `ADDR/16 BAD` 但 `Cfg/St` 能变绿，优先继续排查 PDMCLK/SAI 数据链路；若 `Cfg` 仍为 `IO`，优先用示波器或逻辑分析仪看 SCL/SDA 的 ACK、拉升沿和是否被其它初始化阶段干扰。
+
 ## 2026-06-25 PCMD3180 / SAI 时钟结论
 
 - 当前 APP-only 工程的 CubeMX `SystemClock_Config()` 属于 FSBL context，APP 冷启动不会执行它。
