@@ -947,6 +947,29 @@ static void App_PCMD_ShowDebugPage(void)
   rgblcd_show_string(APP_PCMD_UI_X, y, APP_PCMD_UI_W, 12, 12, line, CYAN);
   y += 20U;
 
+  uint32_t sai_cr1 = hsai_BlockA1.Instance->CR1;
+  uint32_t sai_frcr = hsai_BlockA1.Instance->FRCR;
+  uint32_t sai_slotr = hsai_BlockA1.Instance->SLOTR;
+  snprintf(line,
+           sizeof(line),
+           "SAIA cr1:%08lX fr:%08lX sl:%08lX",
+           (unsigned long)sai_cr1,
+           (unsigned long)sai_frcr,
+           (unsigned long)sai_slotr);
+  rgblcd_show_string(APP_PCMD_UI_X, y, APP_PCMD_UI_W, 12, 12, line, CYAN);
+  y += 16U;
+
+  snprintf(line,
+           sizeof(line),
+           "DEC nodiv:%lu mck:%lu frl:%lu slots:%lu en:%04lX",
+           (unsigned long)((sai_cr1 & SAI_xCR1_NODIV_Msk) >> SAI_xCR1_NODIV_Pos),
+           (unsigned long)((sai_cr1 & SAI_xCR1_MCKDIV_Msk) >> SAI_xCR1_MCKDIV_Pos),
+           (unsigned long)(((sai_frcr & SAI_xFRCR_FRL_Msk) >> SAI_xFRCR_FRL_Pos) + 1U),
+           (unsigned long)(((sai_slotr & SAI_xSLOTR_NBSLOT_Msk) >> SAI_xSLOTR_NBSLOT_Pos) + 1U),
+           (unsigned long)((sai_slotr & SAI_xSLOTR_SLOTEN_Msk) >> SAI_xSLOTR_SLOTEN_Pos));
+  rgblcd_show_string(APP_PCMD_UI_X, y, APP_PCMD_UI_W, 12, 12, line, CYAN);
+  y += 16U;
+
   snprintf(line,
            sizeof(line),
            "PDMCLK exp:%luHz  active cfg, pwr after clocks",
