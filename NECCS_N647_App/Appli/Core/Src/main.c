@@ -17,6 +17,7 @@
   */
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
+#include "app_threadx.h"
 #include "main.h"
 
 /* Private includes ----------------------------------------------------------*/
@@ -27,17 +28,11 @@
 #endif
 #include "./LED/led.h"
 #include "./RGBLCD/rgblcd.h"
-#include <stdio.h>
 
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-typedef struct
-{
-  uint16_t color;
-  const char *name;
-} AppColorStep_t;
 
 /* USER CODE END PTD */
 
@@ -45,7 +40,6 @@ typedef struct
 /* USER CODE BEGIN PD */
 #define APP_HYPERRAM_BASE        0x90000000UL
 #define APP_HYPERRAM_TEST_BYTES  0x1000UL
-#define APP_COLOR_STEP_MS        1000U
 
 /* USER CODE END PD */
 
@@ -85,7 +79,6 @@ static void MX_LTDC_Init(void);
 static void SystemIsolation_Config(void);
 /* USER CODE BEGIN PFP */
 static uint32_t App_HyperRAM_SelfTest(void);
-static void App_ShowBringUpPage(uint16_t color, const char *color_name, const char *status_line);
 static void App_RecoverHalTick(void);
 
 /* USER CODE END PFP */
@@ -155,19 +148,6 @@ static uint32_t App_HyperRAM_SelfTest(void)
   return 1;
 }
 
-static void App_ShowBringUpPage(uint16_t color, const char *color_name, const char *status_line)
-{
-  const uint16_t text_color = ((color == WHITE) || (color == YELLOW) ||
-                               (color == CYAN) || (color == LGRAY)) ? RED : WHITE;
-
-  rgblcd_clear(color);
-  rgblcd_show_string(10, 32, 300, 32, 32, "NECCS N647 APP", text_color);
-  rgblcd_show_string(10, 76, 300, 24, 24, "HyperRAM + RGBLCD", text_color);
-  rgblcd_show_string(10, 110, 360, 16, 16, (char *)status_line, text_color);
-  rgblcd_show_string(10, 132, 240, 16, 16, "Color:", text_color);
-  rgblcd_show_string(80, 132, 240, 16, 16, (char *)color_name, text_color);
-}
-
 /* USER CODE END 0 */
 
 /**
@@ -178,16 +158,6 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
-  uint32_t color_index = 0;
-  char status_line[48];
-  static const AppColorStep_t color_steps[] =
-  {
-    { RED,   "RED"   },
-    { GREEN, "GREEN" },
-    { BLUE,  "BLUE"  },
-    { WHITE, "WHITE" },
-    { BLACK, "BLACK" },
-  };
 
   /* USER CODE END 1 */
 
@@ -244,26 +214,19 @@ int main(void)
   /* USER CODE BEGIN 2 */
   led_init();
   rgblcd_init();
-  snprintf(status_line, sizeof(status_line), "RAM OK, LCD ID: %04X", rgblcddev.id);
 
   /* USER CODE END 2 */
+
+  MX_ThreadX_Init();
+
+  /* We should never get here as control is now taken by the scheduler */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-    App_ShowBringUpPage(color_steps[color_index].color,
-                        color_steps[color_index].name,
-                        status_line);
-
-    color_index++;
-    if (color_index >= (sizeof(color_steps) / sizeof(color_steps[0])))
-    {
-      color_index = 0;
-    }
-
     LED0_TOGGLE();
-    HAL_Delay(APP_COLOR_STEP_MS);
+    HAL_Delay(1000U);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
