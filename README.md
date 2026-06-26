@@ -1,5 +1,17 @@
 # NECCS_N647 Project Notes
 
+## 2026-06-26 OCR and microphone array references
+
+- The full OCRKB generated corpus is still present locally after branch
+  switching: `docs/ocrkb/documents/` currently contains 9585 files across
+  `H7_Original`, `N647_BaseBoard`, `N657_MainBoard`, and `Shared_References`.
+- The generated OCR exports, logs, state, and catalogs are intentionally ignored
+  by Git via `.gitignore`; the tracked recovery points are `docs/ocrkb/INDEX.md`,
+  `docs/ocrkb/README.md`, `docs/ocrkb/reports/quality_report.md`, and
+  `docs/ocrkb/run_ocrkb_all.ps1`.
+- The microphone array design that lived on `codex/pcmd3180-screen-freeze` has
+  been collected under `docs/knowledge/microphone-array/`.
+
 ## 2026-06-26 ThreadX clean main merge
 
 - `main` enables ThreadX Core through `NECCS_N647_App.ioc` and CubeMX-generated APP files.
