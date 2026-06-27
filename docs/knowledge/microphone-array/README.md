@@ -23,3 +23,12 @@ Original source on branch `codex/pcmd3180-screen-freeze`:
 This directory is documentation only. Do not treat these files as the active
 PCMD firmware configuration until the hardware wiring and slot ownership are
 confirmed during bring-up.
+
+Firmware-side passive mapping layer:
+
+- `NECCS_N647_App/Appli/Core/Inc/app_mic_array.h`
+- `NECCS_N647_App/Appli/Core/Src/app_mic_array.c`
+
+The mapping layer keeps the current main-scheme Bus A/Bus B slot ownership and
+can copy received TDM samples into logical microphone order. It intentionally
+does not start SAI, DMA, I2C, PCMD3180 initialization, or debug tasks.

@@ -1,5 +1,17 @@
 # NECCS_N647 Project Notes
 
+## 2026-06-27 Microphone array abstraction
+
+- Added a passive microphone-array mapping layer in `app_mic_array.*`.
+- It maps theoretical Bus A/Bus B TDM slot data into the main-scheme logical
+  mic order: `M01..M32` for `Wide32 @ 48 kHz`, and `M01..M16` for
+  `Core16 @ 192 kHz`.
+- This layer does not start SAI, DMA, I2C, PCMD3180 initialization, or any PCMD
+  debug task. It is ready for the future DMA callback/audio pipeline handoff
+  once the hardware wiring issue is resolved.
+- Verified `tools/build_n647_app.ps1` with both `Release` and `Debug`: 0 errors,
+  0 warnings.
+
 ## 2026-06-26 OCR and microphone array references
 
 - The full OCRKB generated corpus is still present locally after branch

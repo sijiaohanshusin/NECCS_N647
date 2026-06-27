@@ -201,6 +201,11 @@
 			<locationURI>PARENT-2-PROJECT_LOC/Appli/Core/Src/app_bringup_thread.c</locationURI>
 		</link>
 		<link>
+			<name>Application/User/Core/app_mic_array.c</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/Appli/Core/Src/app_mic_array.c</locationURI>
+		</link>
+		<link>
 			<name>Application/User/Core/app_threadx.c</name>
 			<type>1</type>
 			<locationURI>PARENT-2-PROJECT_LOC/Appli/Core/Src/app_threadx.c</locationURI>
