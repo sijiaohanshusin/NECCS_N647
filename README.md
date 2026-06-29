@@ -1,5 +1,42 @@
 # NECCS_N647 Project Notes
 
+## 2026-06-28 N6 SRP-PHAT runtime initial port
+
+- Added `app_acoustic_srp.*`, a hardware-neutral SRP-PHAT runtime for
+  `Wide32 @ 48 kHz / BALANCED`: 32 planar F32 channels, `NFFT=256`, active bins
+  `3..42`, `160` pairs, 9x9 coarse search, and top3 x 4x4 fine search.
+- Added `app_acoustic_synthetic.*` to generate deterministic 32-channel planar
+  F32 plane-wave frames, so the algorithm path can be verified before real
+  capture is enabled.
+- The SRP runtime uses the N6/CMSIS-DSP F32 path first and records DWT cycle
+  counters for preprocess, FFT, GCC, coarse search, fine search, output, and
+  total runtime. F16 and NPU heatmap backends are reserved as unsupported
+  extension points.
+- Large SRP work buffers are placed in `.EXTRAM` with 32-byte alignment; only
+  the small context lives in normal RAM.
+- CubeIDE now links the required CMSIS-DSP F32 source files from the STM32Cube
+  repository and defines `ARM_MATH_AUTOVECTORIZE` for the current stable build
+  path.
+- No capture callback, hardware initialization, ThreadX task, or UI publishing
+  was added in this step.
+
+## 2026-06-27 Acoustic imaging route foundation
+
+- Added a hardware-neutral `audio_frame` contract in `app_audio_frame.*` above
+  the passive microphone mapper. Algorithm code now has a clean frame shape:
+  mode, sample rate, channel count, frame length, planar I16/F32 data, sequence,
+  timestamp, and drop/error counters.
+- Added `app_acoustic_imaging.*` for the first SRP-PHAT route foundation:
+  `Wide32 @ 48 kHz` defaults to `NFFT=256`, active bins `3..42`, 9x9 coarse
+  grid, top3 x 4x4 fine-search contract, and `BALANCED=160` pair selection.
+  `FAST=96` and `QUALITY=240` are available; `Core16 @ 192 kHz` is defined as a
+  phase-2 profile with `NFFT=512` and up to 120 pairs.
+- Added PC-side offline tools under `tools/acoustic_imaging/` to generate pair
+  sets/TDOA LUTs and run synthetic SRP sanity checks from
+  `docs/knowledge/microphone-array/array_32ch_coords.csv`.
+- PCMD configuration, initialization, debug tasks, SAI start, and DMA callback
+  wiring remain intentionally untouched while hardware is under investigation.
+
 ## 2026-06-27 Microphone array abstraction
 
 - Added a passive microphone-array mapping layer in `app_mic_array.*`.

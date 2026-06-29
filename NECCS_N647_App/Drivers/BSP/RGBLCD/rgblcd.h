@@ -24,8 +24,14 @@
 #include "main.h"
 
 /* RGB LCD部分引脚定义 */
+/* N647 baseboard LCD backlight is PA3; LCD_BL_PWM/PE9 belongs to another board label set. */
 #define RGBLCD_BL_GPIO_PORT GPIOA
 #define RGBLCD_BL_GPIO_PIN  GPIO_PIN_3
+
+#if defined(LCD_NRST_GPIO_Port) && defined(LCD_NRST_Pin)
+#define RGBLCD_RST_GPIO_PORT LCD_NRST_GPIO_Port
+#define RGBLCD_RST_GPIO_PIN  LCD_NRST_Pin
+#endif
 
 #define RGBLCD_B7_GPIO_PORT GPIOA
 #define RGBLCD_B7_GPIO_PIN  GPIO_PIN_2
@@ -44,6 +50,15 @@
                                 HAL_GPIO_WritePin(RGBLCD_BL_GPIO_PORT, RGBLCD_BL_GPIO_PIN, GPIO_PIN_SET):   \
                                 HAL_GPIO_WritePin(RGBLCD_BL_GPIO_PORT, RGBLCD_BL_GPIO_PIN, GPIO_PIN_RESET); \
                             } while (0)
+
+#if defined(RGBLCD_RST_GPIO_PORT) && defined(RGBLCD_RST_GPIO_PIN)
+#define RGBLCD_RESET(x)     do { (x) ?                                                                         \
+                                HAL_GPIO_WritePin(RGBLCD_RST_GPIO_PORT, RGBLCD_RST_GPIO_PIN, GPIO_PIN_SET):    \
+                                HAL_GPIO_WritePin(RGBLCD_RST_GPIO_PORT, RGBLCD_RST_GPIO_PIN, GPIO_PIN_RESET);  \
+                            } while (0)
+#else
+#define RGBLCD_RESET(x)     do { (void)(x); } while (0)
+#endif
 
 /* RGB LCD重要参数集 */
 typedef struct
@@ -89,6 +104,10 @@ extern uint16_t g_ltdc_lcd_framebuf[1280 * 800] __attribute__((section(".EXTRAM"
 extern volatile uint16_t g_rgblcd_raw_panel_id;
 extern volatile uint16_t g_rgblcd_effective_panel_id;
 extern volatile uint32_t g_rgblcd_init_stage;
+extern volatile uint32_t g_rgblcd_ltdc_requested_clock;
+extern volatile uint32_t g_rgblcd_ltdc_clock_divider;
+extern volatile uint32_t g_rgblcd_ltdc_actual_clock;
+extern volatile uint32_t g_rgblcd_ltdc_clk_status;
 
 /* 函数声明 */
 void rgblcd_init(void);                                                                                                     /* 初始化RGB LED */

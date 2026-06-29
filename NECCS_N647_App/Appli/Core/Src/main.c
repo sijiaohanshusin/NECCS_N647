@@ -19,6 +19,7 @@
 /* Includes ------------------------------------------------------------------*/
 #include "app_threadx.h"
 #include "main.h"
+#include "app_touchgfx.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -28,6 +29,7 @@
 #endif
 #include "./LED/led.h"
 #include "./RGBLCD/rgblcd.h"
+#include "app_boot_diag.h"
 
 /* USER CODE END Includes */
 
@@ -39,6 +41,7 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define APP_HYPERRAM_BASE        0x90000000UL
+#define APP_HYPERRAM_TEST_BASE   (APP_HYPERRAM_BASE + 0x00200000UL)
 #define APP_HYPERRAM_TEST_BYTES  0x1000UL
 
 /* USER CODE END PD */
@@ -49,6 +52,8 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+
+CRC_HandleTypeDef hcrc;
 
 DMA2D_HandleTypeDef hdma2d;
 
@@ -76,6 +81,7 @@ volatile uint32_t g_app_tick_recover_primask = 0;
 static void MX_GPIO_Init(void);
 static void MX_DMA2D_Init(void);
 static void MX_LTDC_Init(void);
+static void MX_CRC_Init(void);
 static void SystemIsolation_Config(void);
 /* USER CODE BEGIN PFP */
 static uint32_t App_HyperRAM_SelfTest(void);
@@ -109,7 +115,7 @@ static void App_RecoverHalTick(void)
 
 static uint32_t App_HyperRAM_SelfTest(void)
 {
-  volatile uint32_t *ram = (volatile uint32_t *)APP_HYPERRAM_BASE;
+  volatile uint32_t *ram = (volatile uint32_t *)APP_HYPERRAM_TEST_BASE;
   const uint32_t words = APP_HYPERRAM_TEST_BYTES / sizeof(uint32_t);
   const uint32_t patterns[] =
   {
@@ -126,7 +132,7 @@ static uint32_t App_HyperRAM_SelfTest(void)
       ram[i] = patterns[p] ^ (i * 0x01010101U);
     }
 
-    SCB_CleanInvalidateDCache_by_Addr((void *)APP_HYPERRAM_BASE, APP_HYPERRAM_TEST_BYTES);
+    SCB_CleanInvalidateDCache_by_Addr((void *)APP_HYPERRAM_TEST_BASE, APP_HYPERRAM_TEST_BYTES);
     __DSB();
     __ISB();
 
@@ -137,7 +143,7 @@ static uint32_t App_HyperRAM_SelfTest(void)
 
       if (actual != expected)
       {
-        g_app_hyperram_error_addr = APP_HYPERRAM_BASE + (i * sizeof(uint32_t));
+        g_app_hyperram_error_addr = APP_HYPERRAM_TEST_BASE + (i * sizeof(uint32_t));
         g_app_hyperram_expected = expected;
         g_app_hyperram_actual = actual;
         return 0;
@@ -158,6 +164,7 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
+  App_BootDiag_SetStage(APP_BOOT_STAGE_MAIN_ENTER);
 
   /* USER CODE END 1 */
 
@@ -171,17 +178,21 @@ int main(void)
 
   /* MCU Configuration--------------------------------------------------------*/
   HAL_Init();
+  App_BootDiag_SetStage(APP_BOOT_STAGE_HAL_INIT_DONE);
 
   /* USER CODE BEGIN Init */
 #ifdef DEBUG
   sys_clock_config_debug();
 #endif
   SystemCoreClockUpdate();
+  App_BootDiag_SetStage(APP_BOOT_STAGE_CLOCK_DONE);
   App_RecoverHalTick();
+  App_BootDiag_SetStage(APP_BOOT_STAGE_TICK_RECOVER_DONE);
 
   /* USER CODE END Init */
 
   /* USER CODE BEGIN SysInit */
+  App_BootDiag_SetStage(APP_BOOT_STAGE_HYPERRAM_INIT_START);
 #ifdef DEBUG
   MX_XSPI1_Init();
   if (HyperRAM_Init(&HyperRAMObject, &hxspi1) != HyperRAM_OK)
@@ -197,26 +208,37 @@ int main(void)
   /* In cold boot, FSBL already configures XSPI1 HyperRAM before jumping to Appli. */
   g_app_hyperram_init_ok = 2;
 #endif
+  App_BootDiag_SetStage(APP_BOOT_STAGE_HYPERRAM_INIT_DONE);
 
   g_app_hyperram_test_ok = App_HyperRAM_SelfTest();
   if (g_app_hyperram_test_ok == 0)
   {
     Error_Handler();
   }
+  App_BootDiag_SetStage(APP_BOOT_STAGE_HYPERRAM_TEST_DONE);
 
   /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  App_BootDiag_SetStage(APP_BOOT_STAGE_GPIO_DONE);
   MX_DMA2D_Init();
+  App_BootDiag_SetStage(APP_BOOT_STAGE_DMA2D_DONE);
   MX_LTDC_Init();
+  App_BootDiag_SetStage(APP_BOOT_STAGE_LTDC_DONE);
+  MX_CRC_Init();
+  App_BootDiag_SetStage(APP_BOOT_STAGE_CRC_DONE);
   SystemIsolation_Config();
+  App_BootDiag_SetStage(APP_BOOT_STAGE_RIF_DONE);
   /* USER CODE BEGIN 2 */
   led_init();
+  App_BootDiag_SetStage(APP_BOOT_STAGE_BSP_LED_DONE);
   rgblcd_init();
+  App_BootDiag_SetStage(APP_BOOT_STAGE_BSP_RGBLCD_DONE);
 
   /* USER CODE END 2 */
 
+  App_BootDiag_SetStage(APP_BOOT_STAGE_THREADX_ENTER);
   MX_ThreadX_Init();
 
   /* We should never get here as control is now taken by the scheduler */
@@ -229,9 +251,41 @@ int main(void)
     HAL_Delay(1000U);
     /* USER CODE END WHILE */
 
+  MX_TouchGFX_Process();
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
+}
+
+/**
+  * @brief CRC Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_CRC_Init(void)
+{
+
+  /* USER CODE BEGIN CRC_Init 0 */
+
+  /* USER CODE END CRC_Init 0 */
+
+  /* USER CODE BEGIN CRC_Init 1 */
+
+  /* USER CODE END CRC_Init 1 */
+  hcrc.Instance = CRC;
+  hcrc.Init.DefaultPolynomialUse = DEFAULT_POLYNOMIAL_ENABLE;
+  hcrc.Init.DefaultInitValueUse = DEFAULT_INIT_VALUE_ENABLE;
+  hcrc.Init.InputDataInversionMode = CRC_INPUTDATA_INVERSION_NONE;
+  hcrc.Init.OutputDataInversionMode = CRC_OUTPUTDATA_INVERSION_DISABLE;
+  hcrc.InputDataFormat = CRC_INPUTDATA_FORMAT_BYTES;
+  if (HAL_CRC_Init(&hcrc) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN CRC_Init 2 */
+
+  /* USER CODE END CRC_Init 2 */
+
 }
 
 /**
@@ -773,6 +827,7 @@ void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
+  App_BootDiag_RecordFault(APP_BOOT_STAGE_ERROR_HANDLER);
   __disable_irq();
   while (1)
   {

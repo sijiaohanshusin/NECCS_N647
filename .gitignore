@@ -8,11 +8,14 @@ Desktop.ini
 *.orig
 *.swp
 *.swo
+__pycache__/
+*.pyc
 
 # Codex/local analysis scratch
 .codex/
 _analysis/
 _cubeide_ws_*/
+_debug_logs/
 
 # Vendor data disk copy; keep smaller curated references separately.
 【正点原子】N647开发板资料盘(A盘)/
@@ -33,6 +36,8 @@ RemoteSystemsTempFiles/
 **/Release/
 **/build/
 **/cmake-build-*/
+!tools/debug/
+!tools/debug/**
 
 # Generated compiler/linker artifacts
 *.o

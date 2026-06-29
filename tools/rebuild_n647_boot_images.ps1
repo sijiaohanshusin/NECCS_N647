@@ -90,6 +90,35 @@ function Assert-FsblTrustedLayout {
     }
 }
 
+function Write-CombinedIntelHex {
+    param(
+        [string[]]$InputHexes,
+        [string]$OutputHex
+    )
+
+    $records = New-Object System.Collections.Generic.List[string]
+
+    foreach ($hex in $InputHexes) {
+        foreach ($line in Get-Content -LiteralPath $hex) {
+            if ([string]::IsNullOrWhiteSpace($line)) {
+                continue
+            }
+
+            if ($line.Length -ge 9) {
+                $recordType = $line.Substring(7, 2)
+                if ($recordType -eq "01" -or $recordType -eq "05") {
+                    continue
+                }
+            }
+
+            $records.Add($line)
+        }
+    }
+
+    $records.Add(":00000001FF")
+    Set-Content -LiteralPath $OutputHex -Encoding ascii -Value $records
+}
+
 $CubeIdeRoot = Resolve-CubeIdeRoot -RequestedRoot $CubeIdeRoot
 New-Item -ItemType Directory -Path $flashImages -Force | Out-Null
 
@@ -153,8 +182,10 @@ if (-not (Test-Path -LiteralPath $appHex -PathType Leaf)) {
 
 $flashFsbl = Join-Path $flashImages "fsbl.hex"
 $flashApp = Join-Path $flashImages "appli.hex"
+$flashBundle = Join-Path $flashImages "n647_boot_bundle.hex"
 Copy-Item -LiteralPath $fsblHex -Destination $flashFsbl -Force
 Copy-Item -LiteralPath $appHex -Destination $flashApp -Force
+Write-CombinedIntelHex -InputHexes @($flashFsbl, $flashApp) -OutputHex $flashBundle
 
 $fsblHead = Get-Content -LiteralPath $flashFsbl -TotalCount 2
 $appHead = Get-Content -LiteralPath $flashApp -TotalCount 2
@@ -169,4 +200,4 @@ if ($appHead[0] -ne ":0200000470107A" -or $appHead[1] -notlike ":10040000*") {
 
 Write-Host ""
 Write-Host "Boot images are ready:"
-Get-Item -LiteralPath $flashFsbl, $flashApp | Select-Object FullName, Length, LastWriteTime
+Get-Item -LiteralPath $flashFsbl, $flashApp, $flashBundle | Select-Object FullName, Length, LastWriteTime

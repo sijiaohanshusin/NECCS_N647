@@ -60,6 +60,18 @@ $configurations = if ($Configuration -eq "All") {
     @($Configuration)
 }
 
+$repoRootFull = [System.IO.Path]::GetFullPath($repoRoot).TrimEnd('\', '/')
+$workspaceDirFull = [System.IO.Path]::GetFullPath($workspaceDir).TrimEnd('\', '/')
+$repoRootWithSlash = $repoRootFull + [System.IO.Path]::DirectorySeparatorChar
+
+if (-not $workspaceDirFull.StartsWith($repoRootWithSlash, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "Refusing to clean CubeIDE workspace outside repo: $workspaceDirFull"
+}
+
+if (Test-Path -LiteralPath $workspaceDirFull) {
+    Remove-Item -LiteralPath $workspaceDirFull -Recurse -Force
+}
+
 $languageSettingsBackup = if (Test-Path -LiteralPath $languageSettings -PathType Leaf) {
     [System.IO.File]::ReadAllBytes($languageSettings)
 } else {

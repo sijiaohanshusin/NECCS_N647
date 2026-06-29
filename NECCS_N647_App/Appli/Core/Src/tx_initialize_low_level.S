@@ -156,6 +156,11 @@ _tx_initialize_low_level:
     LDR     r1, =0x40FF0000                         // SysT, PnSV, Rsrv, DbgM
     STR     r1, [r0, #0xD20]                        // Setup System Handlers 12-15 Priority Registers
                                                     // Note: PnSV must be lowest priority, which is 0xFF
+    /* Allow the shared SysTick hook to dispatch ThreadX timer interrupts. */
+    LDR     r0, =g_app_threadx_systick_active
+    MOV     r1, #1
+    STR     r1, [r0]
+
     /* Re-enable interrupts */
     CPSIE   i
 
@@ -212,7 +217,6 @@ SysTick_Handler:
     BL      _tx_execution_isr_enter             // Call the ISR enter function
 #endif
     BL      App_ThreadX_SysTickHook
-    BL      _tx_timer_interrupt
 #if (defined(TX_ENABLE_EXECUTION_CHANGE_NOTIFY) || defined(TX_EXECUTION_PROFILE_ENABLE))
     BL      _tx_execution_isr_exit              // Call the ISR exit function
 #endif
@@ -273,7 +277,6 @@ __tx_DBGHandler:
     EXTERN  _tx_thread_system_stack_ptr
     EXTERN  _tx_initialize_unused_memory
     EXTERN  _tx_timer_interrupt
-    EXTERN  App_ThreadX_SysTickHook
     EXTERN  __main
     EXTERN  __vector_table
     EXTERN  _tx_thread_current_ptr
@@ -421,7 +424,6 @@ __tx_SysTickHandler:
     BL      _tx_execution_isr_enter             // Call the ISR enter function
 #endif
     BL      App_ThreadX_SysTickHook
-    BL      _tx_timer_interrupt
 #if (defined(TX_ENABLE_EXECUTION_CHANGE_NOTIFY) || defined(TX_EXECUTION_PROFILE_ENABLE))
     BL      _tx_execution_isr_exit              // Call the ISR exit function
 #endif
@@ -575,6 +577,11 @@ _tx_initialize_low_level:
     LDR     r1, =0x40FF0000                         // SysT, PnSV, Rsrv, DbgM
     STR     r1, [r0, #0xD20]                        // Setup System Handlers 12-15 Priority Registers
                                                     // Note: PnSV must be lowest priority, which is 0xFF
+    /* Allow the shared SysTick hook to dispatch ThreadX timer interrupts. */
+    LDR     r0, =g_app_threadx_systick_active
+    MOV     r1, #1
+    STR     r1, [r0]
+
     /* Re-enable interrupts */
     CPSIE   i
 
@@ -631,7 +638,6 @@ SysTick_Handler:
     BL      _tx_execution_isr_enter             // Call the ISR enter function
 #endif
     BL      App_ThreadX_SysTickHook
-    BL      _tx_timer_interrupt
 #if (defined(TX_ENABLE_EXECUTION_CHANGE_NOTIFY) || defined(TX_EXECUTION_PROFILE_ENABLE))
     BL      _tx_execution_isr_exit              // Call the ISR exit function
 #endif

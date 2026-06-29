@@ -20,8 +20,10 @@
 
 /* Includes ------------------------------------------------------------------*/
 #include "app_azure_rtos.h"
+#include "app_touchgfx.h"
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "app_boot_diag.h"
 
 /* USER CODE END Includes */
 
@@ -55,6 +57,15 @@
 __ALIGN_BEGIN static UCHAR tx_byte_pool_buffer[TX_APP_MEM_POOL_SIZE] __ALIGN_END;
 static TX_BYTE_POOL tx_app_byte_pool;
 
+/* USER CODE BEGIN TouchGFX_Pool_Buffer */
+
+/* USER CODE END TouchGFX_Pool_Buffer */
+#if defined ( __ICCARM__ )
+#pragma data_alignment=4
+#endif
+__ALIGN_BEGIN static UCHAR touchgfx_byte_pool_buffer[TOUCHGFX_APP_MEM_POOL_SIZE] __ALIGN_END;
+static TX_BYTE_POOL touchgfx_app_byte_pool;
+
 #endif
 
 /* Private function prototypes -----------------------------------------------*/
@@ -70,40 +81,82 @@ static TX_BYTE_POOL tx_app_byte_pool;
 VOID tx_application_define(VOID *first_unused_memory)
 {
   /* USER CODE BEGIN  tx_application_define_1*/
+  App_BootDiag_SetStage(APP_BOOT_STAGE_TX_APP_DEFINE_ENTER);
 
   /* USER CODE END  tx_application_define_1 */
 #if (USE_STATIC_ALLOCATION == 1)
   UINT status = TX_SUCCESS;
   VOID *memory_ptr;
 
-  if (tx_byte_pool_create(&tx_app_byte_pool, "Tx App memory pool", tx_byte_pool_buffer, TX_APP_MEM_POOL_SIZE) != TX_SUCCESS)
+  status = tx_byte_pool_create(&tx_app_byte_pool, "Tx App memory pool", tx_byte_pool_buffer, TX_APP_MEM_POOL_SIZE);
+  g_app_boot_diag.tx_app_pool_status = status;
+  if (status != TX_SUCCESS)
   {
     /* USER CODE BEGIN TX_Byte_Pool_Error */
+    App_BootDiag_SetError(status);
 
     /* USER CODE END TX_Byte_Pool_Error */
   }
   else
   {
     /* USER CODE BEGIN TX_Byte_Pool_Success */
+    App_BootDiag_SetStage(APP_BOOT_STAGE_TX_APP_POOL_DONE);
 
     /* USER CODE END TX_Byte_Pool_Success */
 
     memory_ptr = (VOID *)&tx_app_byte_pool;
     status = App_ThreadX_Init(memory_ptr);
+    g_app_boot_diag.app_threadx_status = status;
     if (status != TX_SUCCESS)
     {
       /* USER CODE BEGIN  App_ThreadX_Init_Error */
+      App_BootDiag_SetError(status);
       while(1)
       {
       }
       /* USER CODE END  App_ThreadX_Init_Error */
     }
     /* USER CODE BEGIN  App_ThreadX_Init_Success */
+    App_BootDiag_SetStage(APP_BOOT_STAGE_TX_APP_THREAD_DONE);
 
     /* USER CODE END  App_ThreadX_Init_Success */
 
   }
 
+    status = tx_byte_pool_create(&touchgfx_app_byte_pool, "TouchGFX App memory pool", touchgfx_byte_pool_buffer, TOUCHGFX_APP_MEM_POOL_SIZE);
+    g_app_boot_diag.touchgfx_pool_status = status;
+    if (status != TX_SUCCESS)
+    {
+        /* USER CODE BEGIN TouchGFX_Byte_Pool_Error */
+        App_BootDiag_SetError(status);
+
+        /* USER CODE END TouchGFX_Byte_Pool_Error */
+    }
+    else
+    {
+        /* USER CODE BEGIN TouchGFX_Byte_Pool_Success */
+        App_BootDiag_SetStage(APP_BOOT_STAGE_TX_TOUCHGFX_POOL_DONE);
+
+        /* USER CODE END TouchGFX_Byte_Pool_Success */
+
+        memory_ptr = (VOID*)&touchgfx_app_byte_pool;
+    status = MX_TouchGFX_Init(memory_ptr);
+    g_app_boot_diag.touchgfx_init_status = status;
+    if (status != TX_SUCCESS)
+    {
+      /* USER CODE BEGIN  MX_X-CUBE-TOUCHGFX_Init_Error */
+      App_BootDiag_SetError(status);
+
+      /* USER CODE END  MX_X-CUBE-TOUCHGFX_Init_Error */
+    }
+    /* USER CODE BEGIN  MX_X-CUBE-TOUCHGFX_Init_Success */
+    else
+    {
+      App_BootDiag_SetStage(APP_BOOT_STAGE_TX_TOUCHGFX_INIT_DONE);
+    }
+
+    /* USER CODE END  MX_X-CUBE-TOUCHGFX_Init_Success */
+  }
 #else
 /*
  * Using dynamic memory allocation requires to apply some changes to the linker file.

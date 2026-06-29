@@ -20,6 +20,7 @@
 
 #include "rgblcd.h"
 #include "rgblcdfont.h"
+#include <stdint.h>
 
 /* LTDC句柄 */
 extern LTDC_HandleTypeDef hltdc;
@@ -43,6 +44,10 @@ _rgblcd_dev rgblcddev;
 volatile uint16_t g_rgblcd_raw_panel_id = 0;
 volatile uint16_t g_rgblcd_effective_panel_id = 0;
 volatile uint32_t g_rgblcd_init_stage = 0;
+volatile uint32_t g_rgblcd_ltdc_requested_clock = 0;
+volatile uint32_t g_rgblcd_ltdc_clock_divider = 0;
+volatile uint32_t g_rgblcd_ltdc_actual_clock = 0;
+volatile uint32_t g_rgblcd_ltdc_clk_status = 0;
 
 /* LTDC帧缓冲区 */
 uint16_t g_ltdc_lcd_framebuf[1280 * 800] __attribute__((section(".EXTRAM")));
@@ -52,6 +57,47 @@ static uint16_t rgblcd_panelid_read(void);
 static void rgblcd_use_default_panel(void);
 static uint8_t rgblcd_ltdc_clk_set(uint32_t clock);
 static uint32_t rgblcd_pow(uint8_t m, uint8_t n);
+static void rgblcd_cache_clean_invalidate_region(void *addr, uint32_t bytes);
+static void rgblcd_cache_invalidate_region(void *addr, uint32_t bytes);
+static uint32_t rgblcd_dma2d_span_bytes(uint16_t psx, uint16_t pex, uint16_t pey, uint16_t psy);
+
+static void rgblcd_cache_clean_invalidate_region(void *addr, uint32_t bytes)
+{
+    if ((addr == NULL) || (bytes == 0U) || ((SCB->CCR & SCB_CCR_DC_Msk) == 0U))
+    {
+        return;
+    }
+
+    uintptr_t start = ((uintptr_t)addr) & ~(uintptr_t)31U;
+    uintptr_t end = (((uintptr_t)addr) + bytes + 31U) & ~(uintptr_t)31U;
+
+    SCB_CleanInvalidateDCache_by_Addr((uint32_t *)start, (int32_t)(end - start));
+    __DSB();
+    __ISB();
+}
+
+static void rgblcd_cache_invalidate_region(void *addr, uint32_t bytes)
+{
+    if ((addr == NULL) || (bytes == 0U) || ((SCB->CCR & SCB_CCR_DC_Msk) == 0U))
+    {
+        return;
+    }
+
+    uintptr_t start = ((uintptr_t)addr) & ~(uintptr_t)31U;
+    uintptr_t end = (((uintptr_t)addr) + bytes + 31U) & ~(uintptr_t)31U;
+
+    SCB_InvalidateDCache_by_Addr((void *)start, (int32_t)(end - start));
+    __DSB();
+    __ISB();
+}
+
+static uint32_t rgblcd_dma2d_span_bytes(uint16_t psx, uint16_t pex, uint16_t pey, uint16_t psy)
+{
+    uint32_t width = (uint32_t)pex - (uint32_t)psx + 1U;
+    uint32_t rows = (uint32_t)pey - (uint32_t)psy + 1U;
+
+    return (((rows - 1U) * (uint32_t)rgblcddev.pwidth) + width) * (uint32_t)sizeof(uint16_t);
+}
 
 /**
  * @brief   初始化RGB LED
@@ -63,6 +109,12 @@ void rgblcd_init(void)
     LTDC_LayerCfgTypeDef ltdc_layer_cfg_struct = {0};
 
     g_rgblcd_init_stage = 1;
+    RGBLCD_BL(0);
+    RGBLCD_RESET(0);
+    HAL_Delay(10);
+    RGBLCD_RESET(1);
+    HAL_Delay(120);
+
     g_rgblcd_raw_panel_id = rgblcd_panelid_read();
 #if (RGBLCD_FORCE_PANEL_ID != 0U)
     rgblcddev.id = RGBLCD_FORCE_PANEL_ID;
@@ -162,7 +214,7 @@ void rgblcd_init(void)
     }
     else if (rgblcddev.id == 0x7016)    /* ATK-MD0700R-1024600 */
     {
-        rgblcd_ltdc_clk_set(40000000);  /* LTDC_CLK = 40MHz */
+        rgblcd_ltdc_clk_set(51200000);  /* LTDC_CLK ~= 51.2MHz */
     }
     else if (rgblcddev.id == 0x7018)    /* ATK-MD0700R-1280800 */
     {
@@ -268,11 +320,17 @@ void rgblcd_fill(uint16_t sx, uint16_t sy, uint16_t ex, uint16_t ey, uint16_t co
         pey = ey;
     }
 
+    uint16_t *dst = &g_ltdc_lcd_framebuf[psy * rgblcddev.pwidth + psx];
+    uint32_t cache_bytes = rgblcd_dma2d_span_bytes(psx, pex, pey, psy);
+
+    rgblcd_cache_clean_invalidate_region(dst, cache_bytes);
+
     hdma2d.Init.Mode = DMA2D_R2M;
     hdma2d.Init.OutputOffset = rgblcddev.pwidth - (pex - psx + 1);
     HAL_DMA2D_Init(&hdma2d);
-    HAL_DMA2D_Start(&hdma2d, CONVERTRGB5652ARGB8888(color), (uint32_t)&g_ltdc_lcd_framebuf[psy * rgblcddev.pwidth + psx], pex - psx + 1, pey - psy + 1);
+    HAL_DMA2D_Start(&hdma2d, CONVERTRGB5652ARGB8888(color), (uint32_t)dst, pex - psx + 1, pey - psy + 1);
     HAL_DMA2D_PollForTransfer(&hdma2d, 50);
+    rgblcd_cache_invalidate_region(dst, cache_bytes);
 }
 
 /**
@@ -306,11 +364,17 @@ void rgblcd_color_fill(uint16_t sx, uint16_t sy, uint16_t ex, uint16_t ey, uint1
         pey = ey;
     }
 
+    uint16_t *dst = &g_ltdc_lcd_framebuf[psy * rgblcddev.pwidth + psx];
+    uint32_t cache_bytes = rgblcd_dma2d_span_bytes(psx, pex, pey, psy);
+
+    rgblcd_cache_clean_invalidate_region(dst, cache_bytes);
+
     hdma2d.Init.Mode = DMA2D_M2M;
     hdma2d.Init.OutputOffset = rgblcddev.pwidth - (pex - psx + 1);
     HAL_DMA2D_Init(&hdma2d);
-    HAL_DMA2D_Start(&hdma2d, (uint32_t)color, (uint32_t)&g_ltdc_lcd_framebuf[psy * rgblcddev.pwidth + psx], pex - psx + 1, pey - psy + 1);
+    HAL_DMA2D_Start(&hdma2d, (uint32_t)color, (uint32_t)dst, pex - psx + 1, pey - psy + 1);
     HAL_DMA2D_PollForTransfer(&hdma2d, 50);
+    rgblcd_cache_invalidate_region(dst, cache_bytes);
 }
 
 /**
@@ -337,6 +401,7 @@ void rgblcd_draw_point(uint16_t x, uint16_t y, uint16_t color)
     }
 
     g_ltdc_lcd_framebuf[rgblcddev.pwidth * py + px] = color;
+    rgblcd_cache_clean_invalidate_region(&g_ltdc_lcd_framebuf[rgblcddev.pwidth * py + px], sizeof(uint16_t));
 }
 
 /**
@@ -883,15 +948,37 @@ static void rgblcd_use_default_panel(void)
 static uint8_t rgblcd_ltdc_clk_set(uint32_t clock)
 {
     RCC_PeriphCLKInitTypeDef rcc_periph_clk_init_struct = {0};
+    uint32_t pll1_clock = HAL_RCCEx_GetPLL1CLKFreq();
+    uint32_t divider;
+
+    g_rgblcd_ltdc_requested_clock = clock;
+    g_rgblcd_ltdc_clock_divider = 0;
+    g_rgblcd_ltdc_actual_clock = 0;
+    g_rgblcd_ltdc_clk_status = 1;
+
+    if ((clock == 0U) || (pll1_clock == 0U))
+    {
+        return 1;
+    }
+
+    divider = (pll1_clock + (clock / 2U)) / clock;
+    if (divider == 0U)
+    {
+        divider = 1U;
+    }
 
     rcc_periph_clk_init_struct.PeriphClockSelection = RCC_PERIPHCLK_LTDC;
     rcc_periph_clk_init_struct.LtdcClockSelection = RCC_LTDCCLKSOURCE_IC16;
     rcc_periph_clk_init_struct.ICSelection[RCC_IC16].ClockSelection = RCC_ICCLKSOURCE_PLL1;
-    rcc_periph_clk_init_struct.ICSelection[RCC_IC16].ClockDivider = HAL_RCCEx_GetPLL1CLKFreq() / clock;
+    rcc_periph_clk_init_struct.ICSelection[RCC_IC16].ClockDivider = divider;
     if (HAL_RCCEx_PeriphCLKConfig(&rcc_periph_clk_init_struct) != HAL_OK)
     {
         return 1;
     }
+
+    g_rgblcd_ltdc_clock_divider = divider;
+    g_rgblcd_ltdc_actual_clock = pll1_clock / divider;
+    g_rgblcd_ltdc_clk_status = 0;
 
     return 0;
 }
