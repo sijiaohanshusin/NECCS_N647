@@ -7,5 +7,18 @@
 
 touchgfx::Font* ApplicationFontProvider::getFont(touchgfx::FontId typography)
 {
-    return 0;
+    switch (typography)
+    {
+    case Typography::TITLE:
+        // NotoSansSC_VF_30_4bpp
+        return const_cast<touchgfx::Font*>(TypedTextDatabase::getFonts()[0]);
+    case Typography::BODY:
+        // NotoSansSC_VF_21_4bpp
+        return const_cast<touchgfx::Font*>(TypedTextDatabase::getFonts()[1]);
+    case Typography::SMALL:
+        // NotoSansSC_VF_15_4bpp
+        return const_cast<touchgfx::Font*>(TypedTextDatabase::getFonts()[2]);
+    default:
+        return 0;
+    }
 }

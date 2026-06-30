@@ -32,19 +32,47 @@ enum AppUiProfile
     APP_UI_PROFILE_QUALITY = 2
 };
 
+enum AppUiPowerState
+{
+    APP_UI_POWER_STATE_UNKNOWN = 0,
+    APP_UI_POWER_STATE_IDLE = 1,
+    APP_UI_POWER_STATE_CHARGING = 2,
+    APP_UI_POWER_STATE_DISCHARGING = 3,
+    APP_UI_POWER_STATE_OTG = 4,
+    APP_UI_POWER_STATE_UNDERVOLTAGE = 5,
+    APP_UI_POWER_STATE_FAULT = 6
+};
+
+enum AppUiPowerFlag
+{
+    APP_UI_POWER_FLAG_BQ_PRESENT = 0x00000001UL,
+    APP_UI_POWER_FLAG_ADC_VALID = 0x00000002UL,
+    APP_UI_POWER_FLAG_UNDERVOLTAGE_RAW = 0x00000004UL,
+    APP_UI_POWER_FLAG_UNDERVOLTAGE_CONFIRMED = 0x00000008UL,
+    APP_UI_POWER_FLAG_CHARGER_FAULT = 0x00000010UL
+};
+
 struct AppUiSnapshot
 {
     uint32_t frameSeq;
+    uint32_t powerFlags;
+    uint32_t batteryMv;
+    uint32_t systemMv;
+    int32_t batteryCurrentMa;
+    uint32_t powerPinState;
     uint16_t touchX;
     uint16_t touchY;
     uint16_t touchRawX;
     uint16_t touchRawY;
     uint16_t srpMsX100;
     uint16_t uiFpsX10;
+    uint16_t chargerStatus;
     int16_t thetaDeg;
     int16_t phiDeg;
     uint8_t activeScreen;
     uint8_t activeProfile;
+    uint8_t powerState;
+    uint8_t batteryPct;
     uint8_t touchReady;
     uint8_t touchDown;
     uint8_t touchIc;

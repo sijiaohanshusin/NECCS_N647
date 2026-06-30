@@ -15,10 +15,53 @@
 
 #include <string.h>
 
+#if defined(STM32N647xx)
 extern "C"
 {
+#include "app_power.h"
 #include "TOUCH/app_touch.h"
 }
+#else
+typedef struct
+{
+    uint8_t ready;
+    uint8_t down;
+    uint8_t ic;
+    uint16_t x;
+    uint16_t y;
+    uint16_t raw_x;
+    uint16_t raw_y;
+} AppTouchSnapshot_t;
+
+static void AppTouch_GetSnapshot(AppTouchSnapshot_t* snapshot)
+{
+    if (snapshot != 0)
+    {
+        memset(snapshot, 0, sizeof(*snapshot));
+    }
+}
+
+typedef struct
+{
+    uint32_t flags;
+    uint32_t battery_mv;
+    uint32_t system_mv;
+    int32_t battery_current_ma;
+    uint16_t charger_status;
+    uint32_t pin_state;
+    uint8_t battery_percent;
+    uint8_t state;
+} AppPowerSnapshot_t;
+
+static void AppPower_GetSnapshot(AppPowerSnapshot_t* snapshot)
+{
+    if (snapshot != 0)
+    {
+        memset(snapshot, 0, sizeof(*snapshot));
+        snapshot->state = APP_UI_POWER_STATE_UNKNOWN;
+    }
+}
+#endif
 
 namespace
 {
@@ -81,7 +124,8 @@ void Model::tick()
     snapshot.srpMsX100 = static_cast<uint16_t>(560U + ((tickCount / 5U) % 220U));
     snapshot.uiFpsX10 = 200U;
 
-    AppTouchSnapshot_t touch = {0};
+    AppTouchSnapshot_t touch;
+    memset(&touch, 0, sizeof(touch));
     AppTouch_GetSnapshot(&touch);
     snapshot.touchReady = touch.ready;
     snapshot.touchDown = touch.down;
@@ -90,6 +134,18 @@ void Model::tick()
     snapshot.touchY = touch.y;
     snapshot.touchRawX = touch.raw_x;
     snapshot.touchRawY = touch.raw_y;
+
+    AppPowerSnapshot_t power;
+    memset(&power, 0, sizeof(power));
+    AppPower_GetSnapshot(&power);
+    snapshot.powerFlags = power.flags;
+    snapshot.batteryMv = power.battery_mv;
+    snapshot.systemMv = power.system_mv;
+    snapshot.batteryCurrentMa = power.battery_current_ma;
+    snapshot.chargerStatus = power.charger_status;
+    snapshot.powerPinState = power.pin_state;
+    snapshot.batteryPct = power.battery_percent;
+    snapshot.powerState = power.state;
 
     if ((modelListener != 0) && ((tickCount % 3U) == 0U))
     {

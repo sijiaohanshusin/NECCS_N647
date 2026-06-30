@@ -8,8 +8,9 @@
 # If no LICENSE file comes with this software, it is provided AS-IS.
 #
 ###############################################################################/
-# Relative location of the TouchGFX framework from root of application
-touchgfx_path := C:/Users/XIAZHI~1/AppData/Local/Temp/touchgfx_4_26_1_extract/TouchGFX/4.26.1/touchgfx
+# Relative location of the TouchGFX framework from root of application.
+# Keep this on a stable path; do not depend on CubeMX temporary extraction folders.
+touchgfx_path := C:/ST/TouchGFX/4.26.1/touchgfx
 
 # Optional additional compiler flags
 user_cflags := -DUSE_BPP=16

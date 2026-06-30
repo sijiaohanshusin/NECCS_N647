@@ -1,8 +1,138 @@
 <?xml version="1.0" encoding="utf-8"?>
 <TextDatabase xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="texts.xsd" Version="4.19.0">
-  <Languages />
+  <Languages>
+    <Language Id="GB" />
+  </Languages>
   <Texts>
-    <TextGroup Id="AllTexts" />
+    <TextGroup Id="Common">
+      <Text Id="APP_TITLE" Alignment="Left" TypographyId="Title">
+        <Translation Language="GB">NECCS N647 声学成像</Translation>
+      </Text>
+      <Text Id="APP_MODE" Alignment="Right" TypographyId="Body">
+        <Translation Language="GB">Wide32 48 kHz 平衡</Translation>
+      </Text>
+      <Text Id="NAV_IMAGE" Alignment="Center" TypographyId="Body">
+        <Translation Language="GB">成像</Translation>
+      </Text>
+      <Text Id="NAV_MICS" Alignment="Center" TypographyId="Body">
+        <Translation Language="GB">麦克风</Translation>
+      </Text>
+      <Text Id="NAV_PERF" Alignment="Center" TypographyId="Body">
+        <Translation Language="GB">性能</Translation>
+      </Text>
+      <Text Id="NAV_SETTINGS" Alignment="Center" TypographyId="Body">
+        <Translation Language="GB">设置</Translation>
+      </Text>
+      <Text Id="PROFILE_FAST" Alignment="Center" TypographyId="Small">
+        <Translation Language="GB">快速</Translation>
+      </Text>
+      <Text Id="PROFILE_BALANCED" Alignment="Center" TypographyId="Small">
+        <Translation Language="GB">平衡</Translation>
+      </Text>
+      <Text Id="PROFILE_QUALITY" Alignment="Center" TypographyId="Small">
+        <Translation Language="GB">质量</Translation>
+      </Text>
+    </TextGroup>
+    <TextGroup Id="Pages">
+      <Text Id="PAGE_IMAGE" Alignment="Left" TypographyId="Body">
+        <Translation Language="GB">SRP-PHAT 方向热图</Translation>
+      </Text>
+      <Text Id="PAGE_MICS" Alignment="Left" TypographyId="Body">
+        <Translation Language="GB">32 路麦克风状态</Translation>
+      </Text>
+      <Text Id="PAGE_PERF" Alignment="Left" TypographyId="Body">
+        <Translation Language="GB">实时负载与渲染性能</Translation>
+      </Text>
+      <Text Id="PAGE_SETTINGS" Alignment="Left" TypographyId="Body">
+        <Translation Language="GB">声学成像配置</Translation>
+      </Text>
+      <Text Id="SETTINGS_MODE" Alignment="Left" TypographyId="Body">
+        <Translation Language="GB">模式 Wide32 / 48 kHz</Translation>
+      </Text>
+      <Text Id="SETTINGS_NFFT" Alignment="Left" TypographyId="Body">
+        <Translation Language="GB">NFFT 256 / 频段 3..42</Translation>
+      </Text>
+      <Text Id="SETTINGS_PAIRS" Alignment="Left" TypographyId="Body">
+        <Translation Language="GB">平衡档 160 对麦克风</Translation>
+      </Text>
+      <Text Id="SETTINGS_GRID" Alignment="Left" TypographyId="Body">
+        <Translation Language="GB">9x9 粗搜 / Top3 精搜</Translation>
+      </Text>
+      <Text Id="SETTINGS_SOURCE" Alignment="Left" TypographyId="Body">
+        <Translation Language="GB">当前输入：合成数据</Translation>
+      </Text>
+      <Text Id="SETTINGS_CORE16" Alignment="Left" TypographyId="Body">
+        <Translation Language="GB">Core16 192 kHz 暂未启用</Translation>
+      </Text>
+      <Text Id="SETTINGS_REAL_CAPTURE" Alignment="Left" TypographyId="Body">
+        <Translation Language="GB">真实采集等待 PCMD 链路稳定</Translation>
+      </Text>
+    </TextGroup>
+    <TextGroup Id="Diagnostics">
+      <Text Id="STATUS_TOUCH_OK" Alignment="Left" TypographyId="Small">
+        <Translation Language="GB">状态：触摸正常</Translation>
+      </Text>
+      <Text Id="STATUS_TOUCH_WAIT" Alignment="Left" TypographyId="Small">
+        <Translation Language="GB">状态：等待触摸</Translation>
+      </Text>
+      <Text Id="LABEL_TOUCH" Alignment="Left" TypographyId="Small">
+        <Translation Language="GB">触摸</Translation>
+      </Text>
+      <Text Id="LABEL_POSITION" Alignment="Left" TypographyId="Small">
+        <Translation Language="GB">坐标</Translation>
+      </Text>
+      <Text Id="LABEL_RAW" Alignment="Left" TypographyId="Small">
+        <Translation Language="GB">原始坐标</Translation>
+      </Text>
+      <Text Id="LABEL_PROFILE" Alignment="Left" TypographyId="Small">
+        <Translation Language="GB">档位</Translation>
+      </Text>
+      <Text Id="LABEL_FRAME" Alignment="Left" TypographyId="Small">
+        <Translation Language="GB">帧号</Translation>
+      </Text>
+      <Text Id="LABEL_SRP" Alignment="Left" TypographyId="Small">
+        <Translation Language="GB">SRP 耗时</Translation>
+      </Text>
+      <Text Id="LABEL_UI_FPS" Alignment="Left" TypographyId="Small">
+        <Translation Language="GB">UI 帧率</Translation>
+      </Text>
+      <Text Id="LABEL_QUALITY" Alignment="Left" TypographyId="Small">
+        <Translation Language="GB">质量</Translation>
+      </Text>
+      <Text Id="LABEL_CONTRAST" Alignment="Left" TypographyId="Small">
+        <Translation Language="GB">对比度</Translation>
+      </Text>
+      <Text Id="LABEL_BOOT" Alignment="Left" TypographyId="Small">
+        <Translation Language="GB">启动：RAM Debug</Translation>
+      </Text>
+    </TextGroup>
+    <TextGroup Id="Wildcards">
+      <Text Id="WC_TITLE_LEFT" Alignment="Left" TypographyId="Title">
+        <Translation Language="GB">&lt;&gt;</Translation>
+      </Text>
+      <Text Id="WC_BODY_LEFT" Alignment="Left" TypographyId="Body">
+        <Translation Language="GB">&lt;&gt;</Translation>
+      </Text>
+      <Text Id="WC_BODY_CENTER" Alignment="Center" TypographyId="Body">
+        <Translation Language="GB">&lt;&gt;</Translation>
+      </Text>
+      <Text Id="WC_BODY_RIGHT" Alignment="Right" TypographyId="Body">
+        <Translation Language="GB">&lt;&gt;</Translation>
+      </Text>
+      <Text Id="WC_SMALL_LEFT" Alignment="Left" TypographyId="Small">
+        <Translation Language="GB">&lt;&gt;</Translation>
+      </Text>
+      <Text Id="WC_SMALL_CENTER" Alignment="Center" TypographyId="Small">
+        <Translation Language="GB">&lt;&gt;</Translation>
+      </Text>
+      <Text Id="WC_SMALL_RIGHT" Alignment="Right" TypographyId="Small">
+        <Translation Language="GB">&lt;&gt;</Translation>
+      </Text>
+    </TextGroup>
   </Texts>
-  <Typographies />
+  <Typographies>
+    <Typography Id="Title" Font="NotoSansSC-VF.ttf" Size="30" Bpp="4" Direction="LTR" FallbackCharacter="?" EllipsisCharacter="." WidgetWildcardCharacters="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .,:;/%+-_@#()[]?" />
+    <Typography Id="Body" Font="NotoSansSC-VF.ttf" Size="21" Bpp="4" Direction="LTR" FallbackCharacter="?" EllipsisCharacter="." WidgetWildcardCharacters="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .,:;/%+-_@#()[]?" />
+    <Typography Id="Small" Font="NotoSansSC-VF.ttf" Size="15" Bpp="4" Direction="LTR" FallbackCharacter="?" EllipsisCharacter="." WidgetWildcardCharacters="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .,:;/%+-_@#()[]?" />
+  </Typographies>
 </TextDatabase>

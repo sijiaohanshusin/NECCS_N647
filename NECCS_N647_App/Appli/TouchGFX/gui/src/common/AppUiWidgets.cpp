@@ -1,6 +1,8 @@
 #include <gui/common/AppUiWidgets.hpp>
 
 #include <touchgfx/Color.hpp>
+#include <touchgfx/TypedText.hpp>
+#include <texts/TextKeysAndLanguages.hpp>
 #include <touchgfx/hal/HAL.hpp>
 #include <touchgfx/lcd/LCD.hpp>
 
@@ -132,6 +134,134 @@ void fillLocalRect(const touchgfx::Drawable& drawable,
 }
 }
 
+AppTextLabel::AppTextLabel()
+    : foregroundColor(touchgfx::Color::getColorFromRGB(235, 240, 238)),
+      backgroundColor(touchgfx::Color::getColorFromRGB(17, 19, 22)),
+      opaque(true),
+      style(STYLE_BODY),
+      alignment(ALIGN_LEFT)
+{
+    wildcard[0] = 0U;
+
+    background.setColor(backgroundColor);
+    add(background);
+
+    textArea.setColor(foregroundColor);
+    textArea.setWildcard1(wildcard);
+    add(textArea);
+
+    refreshTypedText();
+}
+
+void AppTextLabel::setPosition(int16_t x, int16_t y, int16_t width, int16_t height)
+{
+    touchgfx::Container::setPosition(x, y, width, height);
+    refreshLayout();
+}
+
+void AppTextLabel::setText(const char* value)
+{
+    if (value == 0)
+    {
+        value = "";
+    }
+
+    const uint16_t converted = touchgfx::Unicode::fromUTF8(reinterpret_cast<const uint8_t*>(value), wildcard, static_cast<uint16_t>(MaxText - 1U));
+    wildcard[converted] = 0U;
+    textArea.invalidate();
+}
+
+void AppTextLabel::setColors(touchgfx::colortype foreground, touchgfx::colortype backgroundColorValue, bool opaqueBackground)
+{
+    foregroundColor = foreground;
+    backgroundColor = backgroundColorValue;
+    opaque = opaqueBackground;
+
+    background.setColor(backgroundColor);
+    background.setVisible(opaque);
+    textArea.setColor(foregroundColor);
+    invalidate();
+}
+
+void AppTextLabel::setScale(uint8_t value)
+{
+    if (value >= 3U)
+    {
+        setStyle(STYLE_TITLE);
+    }
+    else if (value == 2U)
+    {
+        setStyle(STYLE_BODY);
+    }
+    else
+    {
+        setStyle(STYLE_SMALL);
+    }
+}
+
+void AppTextLabel::setStyle(Style value)
+{
+    if (style != value)
+    {
+        style = value;
+        refreshTypedText();
+    }
+}
+
+void AppTextLabel::setAlignment(Align value)
+{
+    if (alignment != value)
+    {
+        alignment = value;
+        refreshTypedText();
+    }
+}
+
+uint16_t AppTextLabel::typedTextId() const
+{
+    if (style == STYLE_TITLE)
+    {
+        return T_WC_TITLE_LEFT;
+    }
+
+    if (style == STYLE_BODY)
+    {
+        if (alignment == ALIGN_CENTER)
+        {
+            return T_WC_BODY_CENTER;
+        }
+        if (alignment == ALIGN_RIGHT)
+        {
+            return T_WC_BODY_RIGHT;
+        }
+        return T_WC_BODY_LEFT;
+    }
+
+    if (alignment == ALIGN_CENTER)
+    {
+        return T_WC_SMALL_CENTER;
+    }
+    if (alignment == ALIGN_RIGHT)
+    {
+        return T_WC_SMALL_RIGHT;
+    }
+    return T_WC_SMALL_LEFT;
+}
+
+void AppTextLabel::refreshTypedText()
+{
+    textArea.setTypedText(touchgfx::TypedText(typedTextId()));
+    textArea.setWildcard1(wildcard);
+    refreshLayout();
+    invalidate();
+}
+
+void AppTextLabel::refreshLayout()
+{
+    background.setPosition(0, 0, getWidth(), getHeight());
+    textArea.setPosition(0, 0, getWidth(), getHeight());
+}
+
 AppAsciiLabel::AppAsciiLabel()
     : foregroundColor(touchgfx::Color::getColorFromRGB(235, 240, 238)),
       backgroundColor(touchgfx::Color::getColorFromRGB(17, 19, 22)),
@@ -204,7 +334,8 @@ void AppAsciiLabel::draw(const touchgfx::Rect& area) const
         startX = 0;
     }
 
-    const int16_t startY = static_cast<int16_t>((getHeight() > (7U * scale)) ? ((getHeight() - (7U * scale)) / 2U) : 0U);
+    const int16_t glyphHeight = static_cast<int16_t>(7U * scale);
+    const int16_t startY = (getHeight() > glyphHeight) ? static_cast<int16_t>((getHeight() - glyphHeight) / 2) : 0;
 
     for (uint32_t i = 0U; i < len; ++i)
     {

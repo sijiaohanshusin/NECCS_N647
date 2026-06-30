@@ -94,27 +94,27 @@ private:
     touchgfx::Box statusDot;
     touchgfx::BoxWithBorder navButton[NavCount];
     touchgfx::TouchArea navTouch[NavCount];
-    AppAsciiLabel navLabel[NavCount];
+    AppTextLabel navLabel[NavCount];
 
     touchgfx::BoxWithBorder profileButton[ProfileCount];
     touchgfx::TouchArea profileTouch[ProfileCount];
-    AppAsciiLabel profileLabel[ProfileCount];
+    AppTextLabel profileLabel[ProfileCount];
 
-    AppAsciiLabel titleLabel;
-    AppAsciiLabel modeLabel;
-    AppAsciiLabel pageTitleLabel;
-    AppAsciiLabel detailLabel[DetailCount];
-    AppAsciiLabel settingsLabel[SettingsCount];
+    AppTextLabel titleLabel;
+    AppTextLabel modeLabel;
+    AppTextLabel pageTitleLabel;
+    AppTextLabel detailLabel[DetailCount];
+    AppTextLabel settingsLabel[SettingsCount];
 
     AppHeatMap heatMap;
-    AppAsciiLabel heatMetricLabel[4];
+    AppTextLabel heatMetricLabel[4];
 
     touchgfx::BoxWithBorder micCell[MicCount];
-    AppAsciiLabel micSummaryLabel[4];
+    AppTextLabel micSummaryLabel[4];
 
     touchgfx::Box perfTrack[PerfCount];
     touchgfx::Box perfFill[PerfCount];
-    AppAsciiLabel perfLabel[PerfCount];
+    AppTextLabel perfLabel[PerfCount];
 
     touchgfx::Callback<TemplateView, const touchgfx::AbstractButton&> navPressedCallback;
     touchgfx::Callback<TemplateView, const touchgfx::AbstractButton&> profilePressedCallback;

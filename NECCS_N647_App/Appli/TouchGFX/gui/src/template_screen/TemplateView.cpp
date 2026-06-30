@@ -54,6 +54,27 @@ const char* touchName(uint8_t ic)
     }
 }
 
+const char* powerStateName(uint8_t state)
+{
+    switch (state)
+    {
+    case APP_UI_POWER_STATE_IDLE:
+        return "IDLE";
+    case APP_UI_POWER_STATE_CHARGING:
+        return "CHG";
+    case APP_UI_POWER_STATE_DISCHARGING:
+        return "DISCHG";
+    case APP_UI_POWER_STATE_OTG:
+        return "OTG";
+    case APP_UI_POWER_STATE_UNDERVOLTAGE:
+        return "LOW";
+    case APP_UI_POWER_STATE_FAULT:
+        return "FAULT";
+    default:
+        return "WAIT";
+    }
+}
+
 touchgfx::colortype levelColor(uint8_t level)
 {
     if (level > 82U)
@@ -71,7 +92,7 @@ touchgfx::colortype levelColor(uint8_t level)
     return rgb(43, 73, 78);
 }
 
-void setupLabel(AppAsciiLabel& label,
+void setupLabel(AppTextLabel& label,
                 int16_t x,
                 int16_t y,
                 int16_t w,
@@ -80,7 +101,7 @@ void setupLabel(AppAsciiLabel& label,
                 const char* text,
                 touchgfx::colortype fg,
                 touchgfx::colortype bg,
-                AppAsciiLabel::Align align = AppAsciiLabel::ALIGN_LEFT)
+                AppTextLabel::Align align = AppTextLabel::ALIGN_LEFT)
 {
     label.setPosition(x, y, w, h);
     label.setScale(scale);
@@ -141,7 +162,7 @@ void TemplateView::setupStaticUi()
     setupLabel(titleLabel, 22, 14, 470, 34, 3, "NECCS N647 ACOUSTIC", rgb(238, 242, 236), rgb(26, 30, 32));
     add(titleLabel);
 
-    setupLabel(modeLabel, 602, 18, 350, 28, 2, "WIDE32 48K BAL", rgb(161, 221, 206), rgb(26, 30, 32), AppAsciiLabel::ALIGN_RIGHT);
+    setupLabel(modeLabel, 602, 18, 350, 28, 2, "WIDE32 48K BAL", rgb(161, 221, 206), rgb(26, 30, 32), AppTextLabel::ALIGN_RIGHT);
     add(modeLabel);
 
     statusDot.setPosition(976, 23, 18, 18);
@@ -165,7 +186,7 @@ void TemplateView::setupNavigation()
         navButton[i].setBorderSize(2);
         add(navButton[i]);
 
-        setupLabel(navLabel[i], 28, static_cast<int16_t>(y + 13), 92, 24, 2, labels[i], rgb(219, 226, 220), rgb(29, 34, 37), AppAsciiLabel::ALIGN_CENTER);
+        setupLabel(navLabel[i], 28, static_cast<int16_t>(y + 13), 92, 24, 2, labels[i], rgb(219, 226, 220), rgb(29, 34, 37), AppTextLabel::ALIGN_CENTER);
         add(navLabel[i]);
 
         navTouch[i].setPosition(18, y, 112, 50);
@@ -257,17 +278,17 @@ void TemplateView::setupSettingsPage()
 void TemplateView::setupDetails()
 {
     const char* initial[DetailCount] = {
-        "STATUS",
+        "POWER WAIT",
+        "BAT --%",
+        "VBAT --.--V",
+        "VSYS --.--V",
+        "IBAT +0.00A",
         "TOUCH NO IC",
         "POS X0000 Y0000",
-        "RAW X0000 Y0000",
         "PROFILE BAL",
         "FRAME 000000",
-        "SRP 0.00MS",
         "UI 20.0FPS",
-        "QUALITY 00%",
-        "CONTRAST 00%",
-        "BOOT RAM DBG"
+        "BQ 0x0000 PIN 00"
     };
 
     for (uint32_t i = 0U; i < DetailCount; ++i)
@@ -294,7 +315,7 @@ void TemplateView::setupDetails()
         profileButton[i].setBorderSize(2);
         add(profileButton[i]);
 
-        setupLabel(profileLabel[i], static_cast<int16_t>(x + 4), 539, 50, 16, 1, labels[i], rgb(223, 230, 224), rgb(33, 38, 41), AppAsciiLabel::ALIGN_CENTER);
+        setupLabel(profileLabel[i], static_cast<int16_t>(x + 4), 539, 50, 16, 1, labels[i], rgb(223, 230, 224), rgb(33, 38, 41), AppTextLabel::ALIGN_CENTER);
         add(profileLabel[i]);
 
         profileTouch[i].setPosition(x, 532, 58, 30);
@@ -420,34 +441,63 @@ void TemplateView::refreshProfileButtons()
 void TemplateView::refreshDetails(const AppUiSnapshot& snapshot)
 {
     char text[48];
+    const bool powerReady = ((snapshot.powerFlags & APP_UI_POWER_FLAG_BQ_PRESENT) != 0U);
+    const bool adcReady = ((snapshot.powerFlags & APP_UI_POWER_FLAG_ADC_VALID) != 0U);
+    const bool powerFault = ((snapshot.powerState == APP_UI_POWER_STATE_FAULT) ||
+                             (snapshot.powerState == APP_UI_POWER_STATE_UNDERVOLTAGE));
 
-    statusDot.setColor(snapshot.touchReady ? rgb(82, 196, 126) : rgb(226, 172, 62));
+    statusDot.setColor(powerFault ? rgb(225, 91, 63) :
+                       (adcReady ? rgb(82, 196, 126) :
+                       (snapshot.touchReady ? rgb(109, 212, 186) : rgb(226, 172, 62))));
     statusDot.invalidate();
 
-    detailLabel[0].setText(snapshot.touchReady ? "STATUS TOUCH OK" : "STATUS TOUCH WAIT");
-    (void)snprintf(text, sizeof(text), "TOUCH %s %s", touchName(snapshot.touchIc), snapshot.touchDown ? "DOWN" : "UP");
-    detailLabel[1].setText(text);
-    (void)snprintf(text, sizeof(text), "POS X%04u Y%04u", snapshot.touchX, snapshot.touchY);
-    detailLabel[2].setText(text);
-    (void)snprintf(text, sizeof(text), "RAW X%04u Y%04u", snapshot.touchRawX, snapshot.touchRawY);
-    detailLabel[3].setText(text);
-    (void)snprintf(text, sizeof(text), "PROFILE %s", profileName(snapshot.activeProfile));
+    (void)snprintf(text, sizeof(text), "POWER %s", powerStateName(snapshot.powerState));
+    detailLabel[0].setText(text);
+
+    if (powerReady && adcReady)
+    {
+        (void)snprintf(text, sizeof(text), "BAT %03u%%", snapshot.batteryPct);
+        detailLabel[1].setText(text);
+        (void)snprintf(text, sizeof(text), "VBAT %lu.%02luV",
+                       static_cast<unsigned long>(snapshot.batteryMv / 1000U),
+                       static_cast<unsigned long>((snapshot.batteryMv % 1000U) / 10U));
+        detailLabel[2].setText(text);
+        (void)snprintf(text, sizeof(text), "VSYS %lu.%02luV",
+                       static_cast<unsigned long>(snapshot.systemMv / 1000U),
+                       static_cast<unsigned long>((snapshot.systemMv % 1000U) / 10U));
+        detailLabel[3].setText(text);
+    }
+    else
+    {
+        detailLabel[1].setText("BAT --%");
+        detailLabel[2].setText("VBAT --.--V");
+        detailLabel[3].setText("VSYS --.--V");
+    }
+
+    const int32_t currentMa = snapshot.batteryCurrentMa;
+    const uint32_t absCurrentMa = (currentMa < 0) ? static_cast<uint32_t>(-currentMa) : static_cast<uint32_t>(currentMa);
+    (void)snprintf(text, sizeof(text), "IBAT %c%lu.%02luA",
+                   (currentMa < 0) ? '-' : '+',
+                   static_cast<unsigned long>(absCurrentMa / 1000U),
+                   static_cast<unsigned long>((absCurrentMa % 1000U) / 10U));
     detailLabel[4].setText(text);
-    (void)snprintf(text, sizeof(text), "FRAME %06lu", static_cast<unsigned long>(snapshot.frameSeq));
+
+    (void)snprintf(text, sizeof(text), "TOUCH %s %s", touchName(snapshot.touchIc), snapshot.touchDown ? "DOWN" : "UP");
     detailLabel[5].setText(text);
-    (void)snprintf(text, sizeof(text), "SRP %lu.%02luMS",
-                   static_cast<unsigned long>(snapshot.srpMsX100 / 100U),
-                   static_cast<unsigned long>(snapshot.srpMsX100 % 100U));
+    (void)snprintf(text, sizeof(text), "POS X%04u Y%04u", snapshot.touchX, snapshot.touchY);
     detailLabel[6].setText(text);
+    (void)snprintf(text, sizeof(text), "PROFILE %s", profileName(snapshot.activeProfile));
+    detailLabel[7].setText(text);
+    (void)snprintf(text, sizeof(text), "FRAME %06lu", static_cast<unsigned long>(snapshot.frameSeq));
+    detailLabel[8].setText(text);
     (void)snprintf(text, sizeof(text), "UI %lu.%luFPS",
                    static_cast<unsigned long>(snapshot.uiFpsX10 / 10U),
                    static_cast<unsigned long>(snapshot.uiFpsX10 % 10U));
-    detailLabel[7].setText(text);
-    (void)snprintf(text, sizeof(text), "QUALITY %02u%%", snapshot.qualityPct);
-    detailLabel[8].setText(text);
-    (void)snprintf(text, sizeof(text), "CONTRAST %02u%%", snapshot.contrastPct);
     detailLabel[9].setText(text);
-    detailLabel[10].setText("BOOT RAM DBG");
+    (void)snprintf(text, sizeof(text), "BQ 0x%04X PIN %02lX",
+                   static_cast<unsigned int>(snapshot.chargerStatus),
+                   static_cast<unsigned long>(snapshot.powerPinState & 0xFFU));
+    detailLabel[10].setText(text);
 }
 
 void TemplateView::refreshImagePage(const AppUiSnapshot& snapshot)
