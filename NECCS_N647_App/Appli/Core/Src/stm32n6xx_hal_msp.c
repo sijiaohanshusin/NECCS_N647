@@ -562,5 +562,23 @@ void HAL_XSPI_MspDeInit(XSPI_HandleTypeDef* hxspi)
 }
 
 /* USER CODE BEGIN 1 */
+void HAL_GPU2D_MspInit(GPU2D_HandleTypeDef* hgpu2d)
+{
+  if(hgpu2d->Instance==GPU2D)
+  {
+    __HAL_RCC_GPU2D_CLK_ENABLE();
+    __HAL_RCC_GPU2D_FORCE_RESET();
+    __HAL_RCC_GPU2D_RELEASE_RESET();
+  }
+}
 
+void HAL_GPU2D_MspDeInit(GPU2D_HandleTypeDef* hgpu2d)
+{
+  if(hgpu2d->Instance==GPU2D)
+  {
+    __HAL_RCC_GPU2D_FORCE_RESET();
+    __HAL_RCC_GPU2D_RELEASE_RESET();
+    __HAL_RCC_GPU2D_CLK_DISABLE();
+  }
+}
 /* USER CODE END 1 */

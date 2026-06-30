@@ -52,7 +52,7 @@ extern "C" {
 #define HAL_I2C_MODULE_ENABLED
 /*#define HAL_I2S_MODULE_ENABLED   */
 /*#define HAL_I3C_MODULE_ENABLED   */
-/*#define HAL_ICACHE_MODULE_ENABLED   */
+#define HAL_ICACHE_MODULE_ENABLED
 /*#define HAL_IRDA_MODULE_ENABLED   */
 /*#define HAL_IWDG_MODULE_ENABLED   */
 /*#define HAL_JPEG_MODULE_ENABLED   */
@@ -86,7 +86,7 @@ extern "C" {
 #define HAL_XSPI_MODULE_ENABLED
 /*#define HAL_CACHEAXI_MODULE_ENABLED   */
 /*#define HAL_MDIOS_MODULE_ENABLED   */
-/*#define HAL_GPU2D_MODULE_ENABLED   */
+#define HAL_GPU2D_MODULE_ENABLED
 #define HAL_GPIO_MODULE_ENABLED
 #define HAL_EXTI_MODULE_ENABLED
 #define HAL_DMA_MODULE_ENABLED
@@ -184,11 +184,13 @@ extern "C" {
 #define  USE_HAL_FDCAN_REGISTER_CALLBACKS     0U /* FDCAN register callback disabled     */
 #define  USE_HAL_GFXMMU_REGISTER_CALLBACKS    0U /* GFXMMU register callback disabled    */
 #define  USE_HAL_GFXTIM_REGISTER_CALLBACKS    0U /* GFXTIM register callback disabled    */
+#define  USE_HAL_GPU2D_REGISTER_CALLBACKS     0U /* GPU2D register callback disabled     */
 #define  USE_HAL_HASH_REGISTER_CALLBACKS      0U /* HASH register callback disabled      */
 #define  USE_HAL_HCD_REGISTER_CALLBACKS       0U /* HCD register callback disabled       */
 #define  USE_HAL_I2C_REGISTER_CALLBACKS       0U /* I2C register callback disabled       */
 #define  USE_HAL_I2S_REGISTER_CALLBACKS       0U /* I2S register callback disabled       */
 #define  USE_HAL_I3C_REGISTER_CALLBACKS       0U /* I3C register callback disabled       */
+#define  USE_HAL_ICACHE_REGISTER_CALLBACKS    0U /* ICACHE register callback disabled    */
 #define  USE_HAL_IWDG_REGISTER_CALLBACKS      0U /* IWDG register callback disabled      */
 #define  USE_HAL_IRDA_REGISTER_CALLBACKS      0U /* IRDA register callback disabled      */
 #define  USE_HAL_LPTIM_REGISTER_CALLBACKS     0U /* LPTIM register callback disabled     */

@@ -57,6 +57,8 @@ CRC_HandleTypeDef hcrc;
 
 DMA2D_HandleTypeDef hdma2d;
 
+GPU2D_HandleTypeDef hgpu2d;
+
 LTDC_HandleTypeDef hltdc;
 
 SD_HandleTypeDef hsd2;
@@ -82,6 +84,7 @@ volatile uint32_t g_app_tick_recover_primask = 0;
 /* Private function prototypes -----------------------------------------------*/
 static void MX_GPIO_Init(void);
 static void MX_DMA2D_Init(void);
+static void MX_GPU2D_Init(void);
 static void MX_LTDC_Init(void);
 static void MX_CRC_Init(void);
 static void SystemIsolation_Config(void);
@@ -227,6 +230,7 @@ int main(void)
   App_BootDiag_SetStage(APP_BOOT_STAGE_GPIO_DONE);
   MX_DMA2D_Init();
   App_BootDiag_SetStage(APP_BOOT_STAGE_DMA2D_DONE);
+  MX_GPU2D_Init();
   MX_LTDC_Init();
   App_BootDiag_SetStage(APP_BOOT_STAGE_LTDC_DONE);
   MX_CRC_Init();
@@ -328,6 +332,31 @@ static void MX_DMA2D_Init(void)
 
 }
 
+/**
+  * @brief GPU2D Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_GPU2D_Init(void)
+{
+
+  /* USER CODE BEGIN GPU2D_Init 0 */
+
+  /* USER CODE END GPU2D_Init 0 */
+
+  /* USER CODE BEGIN GPU2D_Init 1 */
+
+  /* USER CODE END GPU2D_Init 1 */
+  hgpu2d.Instance = GPU2D;
+  if (HAL_GPU2D_Init(&hgpu2d) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN GPU2D_Init 2 */
+
+  /* USER CODE END GPU2D_Init 2 */
+
+}
 /**
   * @brief LTDC Initialization Function
   * @param None
@@ -572,6 +601,8 @@ HAL_StatusTypeDef MX_SDMMC2_SD_Init(void)
   HAL_GPIO_ConfigPinAttributes(GPIOQ,GPIO_PIN_7,GPIO_PIN_SEC|GPIO_PIN_NPRIV);
 
   /* USER CODE BEGIN RIF_Init 1 */
+  HAL_RIF_RIMC_ConfigMasterAttributes(RIF_MASTER_INDEX_GPU2D, &RIMC_master);
+  HAL_RIF_RISC_SetSlaveSecureAttributes(RIF_RISC_PERIPH_INDEX_GPU2D, RIF_ATTRIBUTE_SEC | RIF_ATTRIBUTE_PRIV);
 
   /* USER CODE END RIF_Init 1 */
   /* USER CODE BEGIN RIF_Init 2 */

@@ -20,7 +20,11 @@
 #include <fonts/ApplicationFontProvider.hpp>
 #include <gui/common/FrontendHeap.hpp>
 #include <BitmapDatabase.hpp>
-#include <platform/driver/lcd/LCD16bpp.hpp>
+#include <touchgfx_nema/LCDGPU2D_AXI.hpp>
+extern "C"
+{
+#include <nema_hal.h>
+}
 #include <touchgfx/hal/OSWrappers.hpp>
 #include <STM32DMA.hpp>
 #include <TouchGFXHAL.hpp>
@@ -35,7 +39,7 @@ extern "C" void touchgfx_components_init();
 
 static STM32TouchController tc;
 static STM32DMA dma;
-static LCD16bpp display;
+static LCDGPU2D_AXI display;
 
 static ApplicationFontProvider fontProvider;
 static Texts texts;
@@ -46,6 +50,8 @@ void touchgfx_init()
     Bitmap::registerBitmapDatabase(BitmapDatabase::getInstance(), BitmapDatabase::getInstanceSize());
     TypedText::registerTexts(&texts);
     Texts::setLanguage(0);
+
+    display.setFrameBufferFormat(Bitmap::RGB565);
 
     FontManager::setFontProvider(&fontProvider);
 
@@ -63,6 +69,8 @@ void touchgfx_init()
 
 void touchgfx_components_init()
 {
+    nema_init();
+    nema_reg_write(0xFFC, 0x7E); /* Enable bus error interrupts */
 }
 
 void touchgfx_taskEntry()

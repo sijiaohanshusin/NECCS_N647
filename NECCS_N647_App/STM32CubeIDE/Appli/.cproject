@@ -60,6 +60,14 @@
 									<listOptionValue builtIn="false" value="../../../Appli/TouchGFX/generated/texts/include"/>
 									<listOptionValue builtIn="false" value="../../../Appli/TouchGFX/generated/videos/include"/>
 									<listOptionValue builtIn="false" value="../../../Appli/TouchGFX/gui/include"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Middlewares/ST/touchgfx/framework/include"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Appli/TouchGFX/generated/fonts/include"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Appli/TouchGFX/generated/images/include"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Appli/TouchGFX/generated/texts/include"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Appli/TouchGFX/generated/videos/include"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Appli/TouchGFX/gui/include"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Middlewares/ST/touchgfx_components/gpu2d/NemaGFX/include"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Middlewares/ST/touchgfx_components/gpu2d/TouchGFXNema/include"/>
 								</option>
 								<inputType id="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.assembler.input.793976321" superClass="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.assembler.input"/>
 							</tool>
@@ -99,6 +107,14 @@
 									<listOptionValue builtIn="false" value="../../../Appli/TouchGFX/generated/texts/include"/>
 									<listOptionValue builtIn="false" value="../../../Appli/TouchGFX/generated/videos/include"/>
 									<listOptionValue builtIn="false" value="../../../Appli/TouchGFX/gui/include"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Middlewares/ST/touchgfx/framework/include"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Appli/TouchGFX/generated/fonts/include"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Appli/TouchGFX/generated/images/include"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Appli/TouchGFX/generated/texts/include"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Appli/TouchGFX/generated/videos/include"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Appli/TouchGFX/gui/include"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Middlewares/ST/touchgfx_components/gpu2d/NemaGFX/include"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Middlewares/ST/touchgfx_components/gpu2d/TouchGFXNema/include"/>
 								</option>
 								<inputType id="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.compiler.input.c.2091573379" superClass="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.compiler.input.c"/>
 							</tool>
@@ -128,6 +144,14 @@
 									<listOptionValue builtIn="false" value="../../../Appli/TouchGFX/generated/texts/include"/>
 									<listOptionValue builtIn="false" value="../../../Appli/TouchGFX/generated/videos/include"/>
 									<listOptionValue builtIn="false" value="../../../Appli/TouchGFX/gui/include"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Middlewares/ST/touchgfx/framework/include"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Appli/TouchGFX/generated/fonts/include"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Appli/TouchGFX/generated/images/include"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Appli/TouchGFX/generated/texts/include"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Appli/TouchGFX/generated/videos/include"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Appli/TouchGFX/gui/include"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Middlewares/ST/touchgfx_components/gpu2d/NemaGFX/include"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Middlewares/ST/touchgfx_components/gpu2d/TouchGFXNema/include"/>
 								</option>
 								<option IS_BUILTIN_EMPTY="false" IS_VALUE_EMPTY="false" id="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.cpp.compiler.option.definedsymbols.237237991" superClass="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.cpp.compiler.option.definedsymbols" valueType="definedSymbols">
 									<listOptionValue builtIn="false" value="DEBUG"/>
@@ -159,10 +183,14 @@
 									<additionalInput kind="additionalinput" paths="$(LIBS)"/>
 								</inputType>
 								<option IS_BUILTIN_EMPTY="false" IS_VALUE_EMPTY="true" id="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.cpp.linker.option.directories.6363490632" superClass="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.cpp.linker.option.directories" valueType="libPaths">
-									<listOptionValue builtIn="false" value="../../../Middlewares/ST/touchgfx/lib/core/cortex_m55/gcc"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Middlewares/ST/touchgfx/lib/core/cortex_m55/gcc"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Middlewares/ST/touchgfx_components/gpu2d/NemaGFX/lib/core/cortex_m55/gcc"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Middlewares/ST/touchgfx_components/gpu2d/TouchGFXNema/lib/cortex_m55/gcc"/>
 								</option>
 								<option IS_BUILTIN_EMPTY="false" IS_VALUE_EMPTY="true" id="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.cpp.linker.option.libraries.5272286019" superClass="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.cpp.linker.option.libraries" valueType="libs">
+									<listOptionValue builtIn="false" value=":libtouchgfxnema-float-abi-hard.a"/>
 									<listOptionValue builtIn="false" value=":libtouchgfx-float-abi-hard.a"/>
+									<listOptionValue builtIn="false" value=":libnemagfx-float-abi-hard.a"/>
 								</option>
 							</tool>
 							<tool id="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.archiver.625562689" name="MCU/MPU GCC Archiver" superClass="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.archiver"/>
@@ -185,11 +213,12 @@
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Application/User/TouchGFX/target/generated"/>
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Application/User/generated"/>
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Application/User/gui"/>
+
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Drivers/BSP/HyperRAM"/>
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Drivers/BSP/LED"/>
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Drivers/BSP/PCMD3180"/>
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Drivers/BSP/RGBLCD"/>
-						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Drivers/BSP/SD_NAND"/>
+
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Drivers/BSP/SYS"/>
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Drivers/BSP/TOUCH"/>
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Drivers/CMSIS"/>
@@ -264,6 +293,14 @@
 									<listOptionValue builtIn="false" value="../../../Appli/TouchGFX/generated/texts/include"/>
 									<listOptionValue builtIn="false" value="../../../Appli/TouchGFX/generated/videos/include"/>
 									<listOptionValue builtIn="false" value="../../../Appli/TouchGFX/gui/include"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Middlewares/ST/touchgfx/framework/include"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Appli/TouchGFX/generated/fonts/include"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Appli/TouchGFX/generated/images/include"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Appli/TouchGFX/generated/texts/include"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Appli/TouchGFX/generated/videos/include"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Appli/TouchGFX/gui/include"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Middlewares/ST/touchgfx_components/gpu2d/NemaGFX/include"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Middlewares/ST/touchgfx_components/gpu2d/TouchGFXNema/include"/>
 								</option>
 								<inputType id="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.assembler.input.2040559296" superClass="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.assembler.input"/>
 							</tool>
@@ -302,6 +339,14 @@
 									<listOptionValue builtIn="false" value="../../../Appli/TouchGFX/generated/texts/include"/>
 									<listOptionValue builtIn="false" value="../../../Appli/TouchGFX/generated/videos/include"/>
 									<listOptionValue builtIn="false" value="../../../Appli/TouchGFX/gui/include"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Middlewares/ST/touchgfx/framework/include"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Appli/TouchGFX/generated/fonts/include"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Appli/TouchGFX/generated/images/include"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Appli/TouchGFX/generated/texts/include"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Appli/TouchGFX/generated/videos/include"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Appli/TouchGFX/gui/include"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Middlewares/ST/touchgfx_components/gpu2d/NemaGFX/include"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Middlewares/ST/touchgfx_components/gpu2d/TouchGFXNema/include"/>
 								</option>
 								<inputType id="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.compiler.input.c.1575925869" superClass="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.c.compiler.input.c"/>
 							</tool>
@@ -331,6 +376,14 @@
 									<listOptionValue builtIn="false" value="../../../Appli/TouchGFX/generated/texts/include"/>
 									<listOptionValue builtIn="false" value="../../../Appli/TouchGFX/generated/videos/include"/>
 									<listOptionValue builtIn="false" value="../../../Appli/TouchGFX/gui/include"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Middlewares/ST/touchgfx/framework/include"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Appli/TouchGFX/generated/fonts/include"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Appli/TouchGFX/generated/images/include"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Appli/TouchGFX/generated/texts/include"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Appli/TouchGFX/generated/videos/include"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Appli/TouchGFX/gui/include"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Middlewares/ST/touchgfx_components/gpu2d/NemaGFX/include"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Middlewares/ST/touchgfx_components/gpu2d/TouchGFXNema/include"/>
 								</option>
 								<option IS_BUILTIN_EMPTY="false" IS_VALUE_EMPTY="false" id="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.cpp.compiler.option.definedsymbols.909871426" superClass="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.cpp.compiler.option.definedsymbols" valueType="definedSymbols">
 									<listOptionValue builtIn="false" value="USE_HAL_DRIVER"/>
@@ -361,10 +414,14 @@
 									<additionalInput kind="additionalinput" paths="$(LIBS)"/>
 								</inputType>
 								<option IS_BUILTIN_EMPTY="false" IS_VALUE_EMPTY="true" id="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.cpp.linker.option.directories.1917784400" superClass="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.cpp.linker.option.directories" valueType="libPaths">
-									<listOptionValue builtIn="false" value="../../../Middlewares/ST/touchgfx/lib/core/cortex_m55/gcc"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Middlewares/ST/touchgfx/lib/core/cortex_m55/gcc"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Middlewares/ST/touchgfx_components/gpu2d/NemaGFX/lib/core/cortex_m55/gcc"/>
+									<listOptionValue builtIn="false" value="../../Appli/../../Middlewares/ST/touchgfx_components/gpu2d/TouchGFXNema/lib/cortex_m55/gcc"/>
 								</option>
 								<option IS_BUILTIN_EMPTY="false" IS_VALUE_EMPTY="true" id="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.cpp.linker.option.libraries.2352729984" superClass="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.cpp.linker.option.libraries" valueType="libs">
+									<listOptionValue builtIn="false" value=":libtouchgfxnema-float-abi-hard.a"/>
 									<listOptionValue builtIn="false" value=":libtouchgfx-float-abi-hard.a"/>
+									<listOptionValue builtIn="false" value=":libnemagfx-float-abi-hard.a"/>
 								</option>
 							</tool>
 							<tool id="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.archiver.126136279" name="MCU/MPU GCC Archiver" superClass="com.st.stm32cube.ide.mcu.gnu.managedbuild.tool.archiver"/>
@@ -387,11 +444,12 @@
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Application/User/TouchGFX/target/generated"/>
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Application/User/generated"/>
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Application/User/gui"/>
+
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Drivers/BSP/HyperRAM"/>
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Drivers/BSP/LED"/>
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Drivers/BSP/PCMD3180"/>
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Drivers/BSP/RGBLCD"/>
-						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Drivers/BSP/SD_NAND"/>
+
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Drivers/BSP/SYS"/>
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Drivers/BSP/TOUCH"/>
 						<entry flags="VALUE_WORKSPACE_PATH|RESOLVED" kind="sourcePath" name="Drivers/CMSIS"/>

@@ -18,7 +18,7 @@
 #ifndef TouchGFXGeneratedHAL_HPP
 #define TouchGFXGeneratedHAL_HPP
 
-#include <touchgfx/hal/HAL.hpp>
+#include <touchgfx_nema/HALGPU2D.hpp>
 
 /**
  * @class TouchGFXGeneratedHAL
@@ -27,11 +27,11 @@
  *
  * @sa HAL
  */
-class TouchGFXGeneratedHAL : public touchgfx::HAL
+class TouchGFXGeneratedHAL : public touchgfx::HALGPU2D
 {
 public:
     /**
-     * @fn TouchGFXGeneratedHAL::TouchGFXGeneratedHAL(touchgfx::DMA_Interface& dma, touchgfx::LCD& display, touchgfx::TouchController& tc, uint16_t width, uint16_t height) : touchgfx::HAL(dma, display, tc, width, height)
+     * @fn TouchGFXGeneratedHAL::TouchGFXGeneratedHAL(touchgfx::DMA_Interface& dma, touchgfx::LCD& display, touchgfx::TouchController& tc, uint16_t width, uint16_t height) : touchgfx::HALGPU2D(dma, display, tc, width, height)
      *
      * @brief Constructor.
      *
@@ -44,7 +44,7 @@ public:
      * @param height           Height of the display.
      */
     TouchGFXGeneratedHAL(touchgfx::DMA_Interface& dma, touchgfx::LCD& display, touchgfx::TouchController& tc, uint16_t width, uint16_t height) :
-        touchgfx::HAL(dma, display, tc, width, height)
+        touchgfx::HALGPU2D(dma, display, tc, width, height)
     {
     }
 
@@ -105,7 +105,7 @@ public:
      */
     virtual void flushFrameBuffer()
     {
-        HAL::flushFrameBuffer();
+        HALGPU2D::flushFrameBuffer();
     }
 
     /**
@@ -154,6 +154,13 @@ public:
      *        Called when a rendering pass is completed.
      */
     virtual void endFrame();
+
+    /**
+     * @fn virtual void TouchGFXGeneratedHAL::submitGPU2D();
+     *
+     *  @brief Submit any queued GPU2D operations.
+     */
+    virtual void submitGPU2D();
 
 protected:
     /**
@@ -204,6 +211,8 @@ protected:
     virtual void InvalidateCache();
 
     virtual void FlushCache();
+
+    virtual void InvalidateTextureCache();
 
 };
 #endif // TouchGFXGeneratedHAL_HPP

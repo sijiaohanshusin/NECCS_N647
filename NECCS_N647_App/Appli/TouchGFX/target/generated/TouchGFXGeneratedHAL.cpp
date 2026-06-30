@@ -22,6 +22,7 @@
 #include <touchgfx/hal/GPIO.hpp>
 
 #include "stm32n6xx.h"
+#include "stm32n6xx_hal.h"
 #include "stm32n6xx_hal_ltdc.h"
 
 using namespace touchgfx;
@@ -34,7 +35,7 @@ static uint16_t lcd_int_porch_line;
 
 void TouchGFXGeneratedHAL::initialize()
 {
-    HAL::initialize();
+    HALGPU2D::initialize(16384);
     registerEventListener(*(Application::getInstance()));
     registerTaskDelayFunction(&OSWrappers::taskDelay);
     if (!setFrameRefreshStrategy(HAL::REFRESH_STRATEGY_OPTIM_SINGLE_BUFFER_TFT_CTRL))
@@ -48,18 +49,24 @@ void TouchGFXGeneratedHAL::configureInterrupts()
 {
     NVIC_SetPriority(DMA2D_IRQn, 9);
     NVIC_SetPriority(LTDC_UP_IRQn, 9);
+    NVIC_SetPriority(GPU2D_IRQn, 9);
+    NVIC_SetPriority(GPU2D_ER_IRQn, 9);
 }
 
 void TouchGFXGeneratedHAL::enableInterrupts()
 {
     NVIC_EnableIRQ(DMA2D_IRQn);
     NVIC_EnableIRQ(LTDC_UP_IRQn);
+    NVIC_EnableIRQ(GPU2D_IRQn);
+    NVIC_EnableIRQ(GPU2D_ER_IRQn);
 }
 
 void TouchGFXGeneratedHAL::disableInterrupts()
 {
     NVIC_DisableIRQ(DMA2D_IRQn);
     NVIC_DisableIRQ(LTDC_UP_IRQn);
+    NVIC_DisableIRQ(GPU2D_IRQn);
+    NVIC_DisableIRQ(GPU2D_ER_IRQn);
 }
 
 void TouchGFXGeneratedHAL::enableLCDControllerInterrupt()
@@ -75,12 +82,17 @@ void TouchGFXGeneratedHAL::enableLCDControllerInterrupt()
 
 bool TouchGFXGeneratedHAL::beginFrame()
 {
-    return HAL::beginFrame();
+    return HALGPU2D::beginFrame();
 }
 
 void TouchGFXGeneratedHAL::endFrame()
 {
-    HAL::endFrame();
+    HALGPU2D::endFrame();
+}
+
+void TouchGFXGeneratedHAL::submitGPU2D()
+{
+    HALGPU2D::submitExecBuffer();
 }
 
 uint16_t* TouchGFXGeneratedHAL::getTFTFrameBuffer() const
@@ -98,12 +110,12 @@ void TouchGFXGeneratedHAL::setTFTFrameBuffer(uint16_t* adr)
 
 void TouchGFXGeneratedHAL::flushFrameBuffer(const touchgfx::Rect& rect)
 {
-    HAL::flushFrameBuffer(rect);
+    HALGPU2D::flushFrameBuffer(rect);
 }
 
 bool TouchGFXGeneratedHAL::blockCopy(void* RESTRICT dest, const void* RESTRICT src, uint32_t numBytes)
 {
-    return HAL::blockCopy(dest, src, numBytes);
+    return HALGPU2D::blockCopy(dest, src, numBytes);
 }
 
 uint16_t TouchGFXGeneratedHAL::getTFTCurrentLine()
@@ -144,6 +156,11 @@ void TouchGFXGeneratedHAL::FlushCache()
     {
         SCB_CleanInvalidateDCache();
     }
+}
+
+void TouchGFXGeneratedHAL::InvalidateTextureCache()
+{
+    HAL_ICACHE_Invalidate();
 }
 
 extern "C"

@@ -21,7 +21,7 @@
       16
     ],
     "AvailableLCDs": {
-      "16": "LCD16bpp"
+      "16": "LCDGPU2D"
     },
     "AvailableSections": [
       "ExtFlashSection",
@@ -35,8 +35,8 @@
     ],
     "PhysicalButtons": [],
     "FrameworkFeatures": {
-      "LCD16bpp": {
-        "Id": "LCD16bpp",
+      "LCDGPU2D": {
+        "Id": "LCDGPU2D",
         "IsEnabled": true,
         "Features": []
       }
@@ -57,7 +57,9 @@
     "Platform": "m55",
     "ProjectFile": "../../NECCS_N647_App.ioc",
     "OptionalComponentsRoot": "../../Middlewares/ST/touchgfx_components",
-    "OptionalComponents": []
+    "OptionalComponents": [
+      "GPU2D"
+    ]
   },
   "Version": "4.26.1",
   "CreatedBy": "4.26.1"
