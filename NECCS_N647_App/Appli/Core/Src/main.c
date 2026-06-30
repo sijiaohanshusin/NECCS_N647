@@ -59,6 +59,8 @@ DMA2D_HandleTypeDef hdma2d;
 
 LTDC_HandleTypeDef hltdc;
 
+SD_HandleTypeDef hsd2;
+
 XSPI_HandleTypeDef hxspi1;
 
 /* USER CODE BEGIN PV */
@@ -83,6 +85,7 @@ static void MX_DMA2D_Init(void);
 static void MX_LTDC_Init(void);
 static void MX_CRC_Init(void);
 static void SystemIsolation_Config(void);
+HAL_StatusTypeDef MX_SDMMC2_SD_Init(void);
 /* USER CODE BEGIN PFP */
 static uint32_t App_HyperRAM_SelfTest(void);
 static void App_RecoverHalTick(void);
@@ -385,6 +388,38 @@ static void MX_LTDC_Init(void)
 
   /* USER CODE END LTDC_Init 2 */
 
+}
+
+/**
+  * @brief SDMMC2 Initialization Function
+  * @param None
+  * @retval HAL status
+  */
+HAL_StatusTypeDef MX_SDMMC2_SD_Init(void)
+{
+
+  /* USER CODE BEGIN SDMMC2_Init 0 */
+
+  /* USER CODE END SDMMC2_Init 0 */
+
+  /* USER CODE BEGIN SDMMC2_Init 1 */
+
+  /* USER CODE END SDMMC2_Init 1 */
+  hsd2.Instance = SDMMC2;
+  hsd2.Init.ClockEdge = SDMMC_CLOCK_EDGE_RISING;
+  hsd2.Init.ClockPowerSave = SDMMC_CLOCK_POWER_SAVE_DISABLE;
+  hsd2.Init.BusWide = SDMMC_BUS_WIDE_4B;
+  hsd2.Init.HardwareFlowControl = SDMMC_HARDWARE_FLOW_CONTROL_ENABLE;
+  hsd2.Init.ClockDiv = 4;
+  if (HAL_SD_Init(&hsd2) != HAL_OK)
+  {
+    return HAL_ERROR;
+  }
+  /* USER CODE BEGIN SDMMC2_Init 2 */
+
+  /* USER CODE END SDMMC2_Init 2 */
+
+  return HAL_OK;
 }
 
 /**

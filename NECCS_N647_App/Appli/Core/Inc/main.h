@@ -69,10 +69,12 @@ typedef funcptr funcptr_NS;
 
 /* Exported functions prototypes ---------------------------------------------*/
 void Error_Handler(void);
+HAL_StatusTypeDef MX_SDMMC2_SD_Init(void);
 void MX_XSPI1_Init(void);
 void MX_XSPIM_Init(void);
 
 /* USER CODE BEGIN EFP */
+extern SD_HandleTypeDef hsd2;
 
 /* USER CODE END EFP */
 
