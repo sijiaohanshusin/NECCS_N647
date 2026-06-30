@@ -1,6 +1,7 @@
 #include "app_bringup_thread.h"
 
 #include "app_boot_diag.h"
+#include "app_power.h"
 #include "main.h"
 #include "./LED/led.h"
 #include "./SD_NAND/sd_nand.h"
@@ -20,6 +21,8 @@ void App_BringUpThreadEntry(ULONG thread_input)
 {
   (void)thread_input;
   App_BootDiag_SetStage(APP_BOOT_STAGE_BRINGUP_THREAD_ENTER);
+
+  AppPower_Init();
 
   g_app_sd_card_present = sd_nand_is_inserted();
   if (g_app_sd_card_present != 0U)
@@ -42,6 +45,7 @@ void App_BringUpThreadEntry(ULONG thread_input)
   {
     App_BootDiag_SetStage(APP_BOOT_STAGE_BRINGUP_THREAD_LOOP);
     g_app_boot_diag.bringup_loop_count++;
+    AppPower_Poll(1000U);
     LED0_TOGGLE();
     tx_thread_sleep(APP_HEARTBEAT_TICKS);
   }

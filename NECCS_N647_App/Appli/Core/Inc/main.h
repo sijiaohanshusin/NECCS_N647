@@ -75,6 +75,7 @@ void MX_XSPIM_Init(void);
 
 /* USER CODE BEGIN EFP */
 extern SD_HandleTypeDef hsd2;
+extern I2C_HandleTypeDef hi2c2;
 
 /* USER CODE END EFP */
 
@@ -105,16 +106,16 @@ extern SD_HandleTypeDef hsd2;
 #define EXP_GPIO_PE12_GPIO_Port GPIOE
 #define EXP_GPIO_PE7_Pin GPIO_PIN_7
 #define EXP_GPIO_PE7_GPIO_Port GPIOE
-#define EXP_GPIO_PH8_Pin GPIO_PIN_8
-#define EXP_GPIO_PH8_GPIO_Port GPIOH
+#define BQ25730_CMPOUT_Pin GPIO_PIN_8
+#define BQ25730_CMPOUT_GPIO_Port GPIOH
 #define EXP_GPIO_PC12_Pin GPIO_PIN_12
 #define EXP_GPIO_PC12_GPIO_Port GPIOC
 #define EXP_GPIO_PC7_Pin GPIO_PIN_7
 #define EXP_GPIO_PC7_GPIO_Port GPIOC
 #define EXP_ALT_ETH_PD12_Pin GPIO_PIN_12
 #define EXP_ALT_ETH_PD12_GPIO_Port GPIOD
-#define EXP_GPIO_PD13_Pin GPIO_PIN_13
-#define EXP_GPIO_PD13_GPIO_Port GPIOD
+#define BQ25730_OTG_VAP_Pin GPIO_PIN_13
+#define BQ25730_OTG_VAP_GPIO_Port GPIOD
 #define EXT_SMPS_MODE_Pin GPIO_PIN_7
 #define EXT_SMPS_MODE_GPIO_Port GPIOH
 #define EXP_GPIO_PQ3_Pin GPIO_PIN_3
@@ -133,14 +134,14 @@ extern SD_HandleTypeDef hsd2;
 #define EXP_GPIO_PQ0_GPIO_Port GPIOQ
 #define EXP_GPIO_PH2_Pin GPIO_PIN_2
 #define EXP_GPIO_PH2_GPIO_Port GPIOH
-#define EXP_GPIO_PD3_Pin GPIO_PIN_3
-#define EXP_GPIO_PD3_GPIO_Port GPIOD
+#define BQ25730_PROCHOT_Pin GPIO_PIN_3
+#define BQ25730_PROCHOT_GPIO_Port GPIOD
 #define TAMP_Pin GPIO_PIN_13
 #define TAMP_GPIO_Port GPIOC
-#define EXP_GPIO_PH5_Pin GPIO_PIN_5
-#define EXP_GPIO_PH5_GPIO_Port GPIOH
-#define EXP_GPIO_PB3_Pin GPIO_PIN_3
-#define EXP_GPIO_PB3_GPIO_Port GPIOB
+#define BQ25730_CHRG_OK_Pin GPIO_PIN_5
+#define BQ25730_CHRG_OK_GPIO_Port GPIOH
+#define BQ25730_PG_Pin GPIO_PIN_3
+#define BQ25730_PG_GPIO_Port GPIOB
 #define USER2_Pin GPIO_PIN_2
 #define USER2_GPIO_Port GPIOE
 #define USER1_Pin GPIO_PIN_0
