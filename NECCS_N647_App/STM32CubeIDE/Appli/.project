@@ -247,6 +247,11 @@
 			<locationURI>PARENT-2-PROJECT_LOC/Appli/Core/Src/app_boot_diag.c</locationURI>
 		</link>
 		<link>
+			<name>Application/User/Core/app_i2c2_bus.c</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/Appli/Core/Src/app_i2c2_bus.c</locationURI>
+		</link>
+		<link>
 			<name>Application/User/Core/app_power.c</name>
 			<type>1</type>
 			<locationURI>PARENT-2-PROJECT_LOC/Appli/Core/Src/app_power.c</locationURI>

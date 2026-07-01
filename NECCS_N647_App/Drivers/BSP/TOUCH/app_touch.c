@@ -1,5 +1,6 @@
 #include "TOUCH/app_touch.h"
 
+#include "app_i2c2_bus.h"
 #include "main.h"
 #include "stm32n6xx_hal.h"
 
@@ -29,13 +30,9 @@
 #define APP_TOUCH_GT_INVERT_Y 0U
 #endif
 
-#define APP_TOUCH_SCL_GPIO_PORT GPIOD
-#define APP_TOUCH_SCL_GPIO_PIN  GPIO_PIN_14
-#define APP_TOUCH_SDA_GPIO_PORT GPIOD
-#define APP_TOUCH_SDA_GPIO_PIN  GPIO_PIN_4
+#define APP_TOUCH_I2C_TIMEOUT_MS        50U
 
-#define APP_TOUCH_FT_CMD_WR             0x70U
-#define APP_TOUCH_FT_CMD_RD             0x71U
+#define APP_TOUCH_FT_ADDR7              0x38U
 #define APP_TOUCH_FT_REG_MODE           0x00U
 #define APP_TOUCH_FT_REG_POINTS         0x02U
 #define APP_TOUCH_FT_REG_TP1            0x03U
@@ -44,8 +41,8 @@
 #define APP_TOUCH_FT_REG_LIB_VERSION    0xA1U
 #define APP_TOUCH_FT_REG_G_MODE         0xA4U
 
-#define APP_TOUCH_GT_CMD_WR             0x28U
-#define APP_TOUCH_GT_CMD_RD             0x29U
+#define APP_TOUCH_GT_ADDR7_LOW          0x14U
+#define APP_TOUCH_GT_ADDR7_HIGH         0x5DU
 #define APP_TOUCH_GT_REG_CTRL           0x8040U
 #define APP_TOUCH_GT_REG_PID            0x8140U
 #define APP_TOUCH_GT_REG_STATUS         0x814EU
@@ -59,131 +56,8 @@
 
 static AppTouchSnapshot_t g_touch;
 static uint8_t g_pins_ready;
+static uint8_t g_gt_address7;
 static uint32_t g_next_init_retry_ms;
-
-static void touch_delay(void)
-{
-  for (volatile uint32_t i = 0; i < 80U; ++i)
-  {
-    __NOP();
-  }
-}
-
-static void scl_write(uint8_t high)
-{
-  HAL_GPIO_WritePin(APP_TOUCH_SCL_GPIO_PORT,
-                    APP_TOUCH_SCL_GPIO_PIN,
-                    high ? GPIO_PIN_SET : GPIO_PIN_RESET);
-}
-
-static void sda_write(uint8_t high)
-{
-  HAL_GPIO_WritePin(APP_TOUCH_SDA_GPIO_PORT,
-                    APP_TOUCH_SDA_GPIO_PIN,
-                    high ? GPIO_PIN_SET : GPIO_PIN_RESET);
-}
-
-static uint8_t sda_read(void)
-{
-  return (HAL_GPIO_ReadPin(APP_TOUCH_SDA_GPIO_PORT, APP_TOUCH_SDA_GPIO_PIN) == GPIO_PIN_SET) ? 1U : 0U;
-}
-
-static void i2c_start(void)
-{
-  sda_write(1U);
-  scl_write(1U);
-  touch_delay();
-  sda_write(0U);
-  touch_delay();
-  scl_write(0U);
-  touch_delay();
-}
-
-static void i2c_stop(void)
-{
-  scl_write(0U);
-  sda_write(0U);
-  touch_delay();
-  scl_write(1U);
-  touch_delay();
-  sda_write(1U);
-  touch_delay();
-}
-
-static uint8_t i2c_wait_ack(void)
-{
-  uint32_t timeout = 0U;
-
-  sda_write(1U);
-  touch_delay();
-  scl_write(1U);
-  touch_delay();
-
-  while (sda_read() != 0U)
-  {
-    ++timeout;
-    if (timeout > 250U)
-    {
-      scl_write(0U);
-      return 0U;
-    }
-  }
-
-  scl_write(0U);
-  touch_delay();
-  return 1U;
-}
-
-static void i2c_ack(uint8_t ack)
-{
-  scl_write(0U);
-  sda_write(ack ? 0U : 1U);
-  touch_delay();
-  scl_write(1U);
-  touch_delay();
-  scl_write(0U);
-  sda_write(1U);
-  touch_delay();
-}
-
-static uint8_t i2c_send_byte(uint8_t value)
-{
-  for (uint32_t bit = 0U; bit < 8U; ++bit)
-  {
-    scl_write(0U);
-    sda_write((value & 0x80U) ? 1U : 0U);
-    value <<= 1;
-    touch_delay();
-    scl_write(1U);
-    touch_delay();
-  }
-
-  scl_write(0U);
-  return i2c_wait_ack();
-}
-
-static uint8_t i2c_read_byte(uint8_t ack)
-{
-  uint8_t value = 0U;
-
-  sda_write(1U);
-  for (uint32_t bit = 0U; bit < 8U; ++bit)
-  {
-    value <<= 1;
-    scl_write(0U);
-    touch_delay();
-    scl_write(1U);
-    touch_delay();
-    if (sda_read() != 0U)
-    {
-      value |= 1U;
-    }
-  }
-
-  scl_write(0U);
-  i2c_ack(ack);
-  return value;
-}
 
 static void touch_pins_init(void)
 {
@@ -194,15 +68,8 @@ static void touch_pins_init(void)
     return;
   }
 
-  __HAL_RCC_GPIOD_CLK_ENABLE();
   __HAL_RCC_GPIOE_CLK_ENABLE();
   __HAL_RCC_GPIOQ_CLK_ENABLE();
-
-  gpio.Pin = APP_TOUCH_SCL_GPIO_PIN | APP_TOUCH_SDA_GPIO_PIN;
-  gpio.Mode = GPIO_MODE_OUTPUT_OD;
-  gpio.Pull = GPIO_PULLUP;
-  gpio.Speed = GPIO_SPEED_FREQ_HIGH;
-  HAL_GPIO_Init(GPIOD, &gpio);
 
   gpio.Pin = CTP_RST_Pin;
   gpio.Mode = GPIO_MODE_OUTPUT_PP;
@@ -216,116 +83,214 @@ static void touch_pins_init(void)
   gpio.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(CTP_INT_GPIO_Port, &gpio);
 
-  sda_write(1U);
-  scl_write(1U);
   HAL_GPIO_WritePin(CTP_RST_GPIO_Port, CTP_RST_Pin, GPIO_PIN_SET);
   g_pins_ready = 1U;
 }
 
-static void touch_reset(void)
+static void touch_int_input(void)
 {
+  GPIO_InitTypeDef gpio = {0};
+
+  gpio.Pin = CTP_INT_Pin;
+  gpio.Mode = GPIO_MODE_INPUT;
+  gpio.Pull = GPIO_NOPULL;
+  gpio.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(CTP_INT_GPIO_Port, &gpio);
+}
+
+static void touch_int_output(GPIO_PinState state)
+{
+  GPIO_InitTypeDef gpio = {0};
+
+  HAL_GPIO_WritePin(CTP_INT_GPIO_Port, CTP_INT_Pin, state);
+
+  gpio.Pin = CTP_INT_Pin;
+  gpio.Mode = GPIO_MODE_OUTPUT_PP;
+  gpio.Pull = GPIO_NOPULL;
+  gpio.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(CTP_INT_GPIO_Port, &gpio);
+
+  HAL_GPIO_WritePin(CTP_INT_GPIO_Port, CTP_INT_Pin, state);
+}
+
+static void touch_reset_plain(void)
+{
+  touch_int_input();
   HAL_GPIO_WritePin(CTP_RST_GPIO_Port, CTP_RST_Pin, GPIO_PIN_RESET);
   HAL_Delay(10U);
   HAL_GPIO_WritePin(CTP_RST_GPIO_Port, CTP_RST_Pin, GPIO_PIN_SET);
   HAL_Delay(80U);
 }
 
-static uint8_t ft_write_reg(uint8_t reg, const uint8_t *data, uint32_t len)
+static void touch_reset_with_int(GPIO_PinState int_state)
 {
-  i2c_start();
-  if ((i2c_send_byte(APP_TOUCH_FT_CMD_WR) == 0U) || (i2c_send_byte(reg) == 0U))
+  HAL_GPIO_WritePin(CTP_RST_GPIO_Port, CTP_RST_Pin, GPIO_PIN_RESET);
+  touch_int_output(int_state);
+  HAL_Delay(10U);
+  HAL_GPIO_WritePin(CTP_RST_GPIO_Port, CTP_RST_Pin, GPIO_PIN_SET);
+  HAL_Delay(10U);
+  touch_int_input();
+  HAL_Delay(80U);
+}
+
+static uint8_t i2c_status_ok(HAL_StatusTypeDef status)
+{
+  g_touch.last_hal_status = (uint32_t)status;
+  return (status == HAL_OK) ? 1U : 0U;
+}
+
+static uint8_t touch_i2c_mem_write8(uint8_t address7,
+                                    uint8_t reg,
+                                    const uint8_t *data,
+                                    uint32_t len)
+{
+  HAL_StatusTypeDef status;
+
+  if ((data == NULL) || (len == 0U) || (len > 0xFFFFU))
   {
-    i2c_stop();
+    g_touch.last_error = APP_TOUCH_ERR_BAD_ARGUMENT;
     return 0U;
   }
 
-  for (uint32_t i = 0U; i < len; ++i)
+  if (AppI2C2_Lock(APP_TOUCH_I2C_TIMEOUT_MS) == 0U)
   {
-    if (i2c_send_byte(data[i]) == 0U)
-    {
-      i2c_stop();
-      return 0U;
-    }
+    g_touch.last_hal_status = (uint32_t)HAL_BUSY;
+    return 0U;
   }
 
-  i2c_stop();
-  return 1U;
+  status = HAL_I2C_Mem_Write(&hi2c2,
+                             (uint16_t)(address7 << 1),
+                             reg,
+                             I2C_MEMADD_SIZE_8BIT,
+                             (uint8_t *)data,
+                             (uint16_t)len,
+                             APP_TOUCH_I2C_TIMEOUT_MS);
+  AppI2C2_Unlock();
+
+  return i2c_status_ok(status);
+}
+
+static uint8_t touch_i2c_mem_read8(uint8_t address7,
+                                   uint8_t reg,
+                                   uint8_t *data,
+                                   uint32_t len)
+{
+  HAL_StatusTypeDef status;
+
+  if ((data == NULL) || (len == 0U) || (len > 0xFFFFU))
+  {
+    g_touch.last_error = APP_TOUCH_ERR_BAD_ARGUMENT;
+    return 0U;
+  }
+
+  if (AppI2C2_Lock(APP_TOUCH_I2C_TIMEOUT_MS) == 0U)
+  {
+    g_touch.last_hal_status = (uint32_t)HAL_BUSY;
+    return 0U;
+  }
+
+  status = HAL_I2C_Mem_Read(&hi2c2,
+                            (uint16_t)(address7 << 1),
+                            reg,
+                            I2C_MEMADD_SIZE_8BIT,
+                            data,
+                            (uint16_t)len,
+                            APP_TOUCH_I2C_TIMEOUT_MS);
+  AppI2C2_Unlock();
+
+  return i2c_status_ok(status);
+}
+
+static uint8_t touch_i2c_mem_write16(uint8_t address7,
+                                     uint16_t reg,
+                                     const uint8_t *data,
+                                     uint32_t len)
+{
+  HAL_StatusTypeDef status;
+
+  if ((data == NULL) || (len == 0U) || (len > 0xFFFFU))
+  {
+    g_touch.last_error = APP_TOUCH_ERR_BAD_ARGUMENT;
+    return 0U;
+  }
+
+  if (AppI2C2_Lock(APP_TOUCH_I2C_TIMEOUT_MS) == 0U)
+  {
+    g_touch.last_hal_status = (uint32_t)HAL_BUSY;
+    return 0U;
+  }
+
+  status = HAL_I2C_Mem_Write(&hi2c2,
+                             (uint16_t)(address7 << 1),
+                             reg,
+                             I2C_MEMADD_SIZE_16BIT,
+                             (uint8_t *)data,
+                             (uint16_t)len,
+                             APP_TOUCH_I2C_TIMEOUT_MS);
+  AppI2C2_Unlock();
+
+  return i2c_status_ok(status);
+}
+
+static uint8_t touch_i2c_mem_read16(uint8_t address7,
+                                    uint16_t reg,
+                                    uint8_t *data,
+                                    uint32_t len)
+{
+  HAL_StatusTypeDef status;
+
+  if ((data == NULL) || (len == 0U) || (len > 0xFFFFU))
+  {
+    g_touch.last_error = APP_TOUCH_ERR_BAD_ARGUMENT;
+    return 0U;
+  }
+
+  if (AppI2C2_Lock(APP_TOUCH_I2C_TIMEOUT_MS) == 0U)
+  {
+    g_touch.last_hal_status = (uint32_t)HAL_BUSY;
+    return 0U;
+  }
+
+  status = HAL_I2C_Mem_Read(&hi2c2,
+                            (uint16_t)(address7 << 1),
+                            reg,
+                            I2C_MEMADD_SIZE_16BIT,
+                            data,
+                            (uint16_t)len,
+                            APP_TOUCH_I2C_TIMEOUT_MS);
+  AppI2C2_Unlock();
+
+  return i2c_status_ok(status);
+}
+
+static uint8_t ft_write_reg(uint8_t reg, const uint8_t *data, uint32_t len)
+{
+  return touch_i2c_mem_write8(APP_TOUCH_FT_ADDR7, reg, data, len);
 }
 
 static uint8_t ft_read_reg(uint8_t reg, uint8_t *data, uint32_t len)
 {
-  i2c_start();
-  if ((i2c_send_byte(APP_TOUCH_FT_CMD_WR) == 0U) || (i2c_send_byte(reg) == 0U))
-  {
-    i2c_stop();
-    return 0U;
-  }
+  return touch_i2c_mem_read8(APP_TOUCH_FT_ADDR7, reg, data, len);
+}
 
-  i2c_start();
-  if (i2c_send_byte(APP_TOUCH_FT_CMD_RD) == 0U)
-  {
-    i2c_stop();
-    return 0U;
-  }
+static uint8_t gt_write_reg_at(uint8_t address7, uint16_t reg, const uint8_t *data, uint32_t len)
+{
+  return touch_i2c_mem_write16(address7, reg, data, len);
+}
 
-  for (uint32_t i = 0U; i < len; ++i)
-  {
-    data[i] = i2c_read_byte((i + 1U) < len);
-  }
-
-  i2c_stop();
-  return 1U;
+static uint8_t gt_read_reg_at(uint8_t address7, uint16_t reg, uint8_t *data, uint32_t len)
+{
+  return touch_i2c_mem_read16(address7, reg, data, len);
 }
 
 static uint8_t gt_write_reg(uint16_t reg, const uint8_t *data, uint32_t len)
 {
-  i2c_start();
-  if ((i2c_send_byte(APP_TOUCH_GT_CMD_WR) == 0U) ||
-      (i2c_send_byte((uint8_t)(reg >> 8)) == 0U) ||
-      (i2c_send_byte((uint8_t)(reg & 0xFFU)) == 0U))
-  {
-    i2c_stop();
-    return 0U;
-  }
-
-  for (uint32_t i = 0U; i < len; ++i)
-  {
-    if (i2c_send_byte(data[i]) == 0U)
-    {
-      i2c_stop();
-      return 0U;
-    }
-  }
-
-  i2c_stop();
-  return 1U;
+  return gt_write_reg_at(g_gt_address7, reg, data, len);
 }
 
 static uint8_t gt_read_reg(uint16_t reg, uint8_t *data, uint32_t len)
 {
-  i2c_start();
-  if ((i2c_send_byte(APP_TOUCH_GT_CMD_WR) == 0U) ||
-      (i2c_send_byte((uint8_t)(reg >> 8)) == 0U) ||
-      (i2c_send_byte((uint8_t)(reg & 0xFFU)) == 0U))
-  {
-    i2c_stop();
-    return 0U;
-  }
-
-  i2c_start();
-  if (i2c_send_byte(APP_TOUCH_GT_CMD_RD) == 0U)
-  {
-    i2c_stop();
-    return 0U;
-  }
-
-  for (uint32_t i = 0U; i < len; ++i)
-  {
-    data[i] = i2c_read_byte((i + 1U) < len);
-  }
-
-  i2c_stop();
-  return 1U;
+  return gt_read_reg_at(g_gt_address7, reg, data, len);
 }
 
 static uint16_t clamp_coord(uint32_t value, uint16_t limit)
@@ -373,7 +338,9 @@ static uint8_t ft_try_init(void)
   uint8_t value;
   uint8_t version[2] = {0U, 0U};
 
-  touch_reset();
+  touch_reset_plain();
+  g_touch.address7 = APP_TOUCH_FT_ADDR7;
+  g_gt_address7 = 0U;
 
   value = 0U;
   if (ft_write_reg(APP_TOUCH_FT_REG_MODE, &value, 1U) == 0U)
@@ -419,14 +386,15 @@ static uint8_t gt_pid_looks_valid(const uint8_t *pid)
   return valid;
 }
 
-static uint8_t gt_try_init(void)
+static uint8_t gt_try_init_at(uint8_t address7, GPIO_PinState int_state)
 {
   uint8_t pid[4] = {0U, 0U, 0U, 0U};
   uint8_t value;
 
-  touch_reset();
+  touch_reset_with_int(int_state);
+  g_touch.address7 = address7;
 
-  if (gt_read_reg(APP_TOUCH_GT_REG_PID, pid, 4U) == 0U)
+  if (gt_read_reg_at(address7, APP_TOUCH_GT_REG_PID, pid, 4U) == 0U)
   {
     return 0U;
   }
@@ -437,15 +405,33 @@ static uint8_t gt_try_init(void)
   }
 
   value = 0x02U;
-  (void)gt_write_reg(APP_TOUCH_GT_REG_CTRL, &value, 1U);
+  (void)gt_write_reg_at(address7, APP_TOUCH_GT_REG_CTRL, &value, 1U);
   HAL_Delay(10U);
   value = 0U;
-  (void)gt_write_reg(APP_TOUCH_GT_REG_CTRL, &value, 1U);
+  (void)gt_write_reg_at(address7, APP_TOUCH_GT_REG_CTRL, &value, 1U);
 
+  g_gt_address7 = address7;
+  g_touch.address7 = address7;
   g_touch.ic = APP_TOUCH_IC_GT9XXX;
   g_touch.ready = 1U;
   g_touch.last_error = APP_TOUCH_ERR_NONE;
   return 1U;
+}
+
+static uint8_t gt_try_init(void)
+{
+  if (gt_try_init_at(APP_TOUCH_GT_ADDR7_LOW, GPIO_PIN_RESET) != 0U)
+  {
+    return 1U;
+  }
+
+  if (gt_try_init_at(APP_TOUCH_GT_ADDR7_HIGH, GPIO_PIN_SET) != 0U)
+  {
+    return 1U;
+  }
+
+  g_gt_address7 = 0U;
+  return 0U;
 }
 
 static uint8_t ft_sample(uint16_t *x, uint16_t *y)
@@ -513,7 +499,16 @@ static uint8_t gt_sample(uint16_t *x, uint16_t *y)
   }
 
   count = status & 0x0FU;
-  if ((count == 0U) || (count > 10U))
+  if (count == 0U)
+  {
+    (void)gt_write_reg(APP_TOUCH_GT_REG_STATUS, &clear, 1U);
+    g_touch.down = 0U;
+    g_touch.touch_count = 0U;
+    g_touch.last_error = APP_TOUCH_ERR_NONE;
+    return 0U;
+  }
+
+  if (count > 10U)
   {
     (void)gt_write_reg(APP_TOUCH_GT_REG_STATUS, &clear, 1U);
     g_touch.down = 0U;
@@ -553,6 +548,7 @@ uint8_t AppTouch_Init(void)
   ++g_touch.init_attempts;
   g_touch.ready = 0U;
   g_touch.ic = APP_TOUCH_IC_NONE;
+  g_touch.address7 = 0U;
   g_touch.last_error = APP_TOUCH_ERR_NO_DEVICE;
 
   if (ft_try_init() != 0U)

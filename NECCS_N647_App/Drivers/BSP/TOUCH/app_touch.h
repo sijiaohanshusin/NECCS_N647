@@ -23,6 +23,8 @@ typedef struct
   uint8_t down;
   uint8_t touch_count;
   uint8_t int_pin;
+  uint8_t address7;
+  uint8_t reserved[3];
   AppTouchIc_t ic;
   uint16_t raw_x;
   uint16_t raw_y;
@@ -32,6 +34,7 @@ typedef struct
   uint32_t sample_count;
   uint32_t error_count;
   uint32_t last_error;
+  uint32_t last_hal_status;
 } AppTouchSnapshot_t;
 
 uint8_t AppTouch_Init(void);

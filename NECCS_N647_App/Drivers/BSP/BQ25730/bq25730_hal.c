@@ -1,4 +1,5 @@
 #include "bq25730_hal.h"
+#include "app_i2c2_bus.h"
 
 static uint32_t BQ25730_HAL_GetTimeout(const BQ25730_HAL_BusContextTypeDef *context)
 {
@@ -54,6 +55,11 @@ BQ25730_StatusTypeDef BQ25730_HAL_WriteReg(void *context,
         return BQ25730_INVALID_ARGUMENT;
     }
 
+    if (AppI2C2_Lock(BQ25730_HAL_GetTimeout(hal_context)) == 0U)
+    {
+        return BQ25730_IO_ERROR;
+    }
+
     hal_status = HAL_I2C_Mem_Write(hal_context->hi2c,
                                    (uint16_t)(address7 << 1),
                                    reg,
@@ -61,6 +67,7 @@ BQ25730_StatusTypeDef BQ25730_HAL_WriteReg(void *context,
                                    (uint8_t *)data,
                                    length,
                                    BQ25730_HAL_GetTimeout(hal_context));
+    AppI2C2_Unlock();
 
     return (hal_status == HAL_OK) ? BQ25730_OK : BQ25730_IO_ERROR;
 }
@@ -82,6 +89,11 @@ BQ25730_StatusTypeDef BQ25730_HAL_ReadReg(void *context,
         return BQ25730_INVALID_ARGUMENT;
     }
 
+    if (AppI2C2_Lock(BQ25730_HAL_GetTimeout(hal_context)) == 0U)
+    {
+        return BQ25730_IO_ERROR;
+    }
+
     hal_status = HAL_I2C_Mem_Read(hal_context->hi2c,
                                   (uint16_t)(address7 << 1),
                                   reg,
@@ -89,6 +101,7 @@ BQ25730_StatusTypeDef BQ25730_HAL_ReadReg(void *context,
                                   data,
                                   length,
                                   BQ25730_HAL_GetTimeout(hal_context));
+    AppI2C2_Unlock();
 
     return (hal_status == HAL_OK) ? BQ25730_OK : BQ25730_IO_ERROR;
 }

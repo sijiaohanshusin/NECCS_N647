@@ -24,6 +24,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "app_bringup_thread.h"
+#include "app_i2c2_bus.h"
 #include "app_media.h"
 
 /* USER CODE END Includes */
@@ -70,16 +71,20 @@ UINT App_ThreadX_Init(VOID *memory_ptr)
 
   /* USER CODE END App_ThreadX_MEM_POOL */
   /* USER CODE BEGIN App_ThreadX_Init */
-  ret = tx_thread_create(&app_bringup_thread,
-                         "app_bringup",
-                         App_BringUpThreadEntry,
-                         0U,
-                         app_bringup_thread_stack,
-                         APP_BRINGUP_THREAD_STACK_SIZE,
-                         APP_BRINGUP_THREAD_PRIORITY,
-                         APP_BRINGUP_THREAD_PRIORITY,
-                         TX_NO_TIME_SLICE,
-                         TX_AUTO_START);
+  ret = AppI2C2_BusInit();
+  if (ret == TX_SUCCESS)
+  {
+    ret = tx_thread_create(&app_bringup_thread,
+                           "app_bringup",
+                           App_BringUpThreadEntry,
+                           0U,
+                           app_bringup_thread_stack,
+                           APP_BRINGUP_THREAD_STACK_SIZE,
+                           APP_BRINGUP_THREAD_PRIORITY,
+                           APP_BRINGUP_THREAD_PRIORITY,
+                           TX_NO_TIME_SLICE,
+                           TX_AUTO_START);
+  }
   if (ret == TX_SUCCESS)
   {
     ret = AppMedia_Init(memory_ptr);

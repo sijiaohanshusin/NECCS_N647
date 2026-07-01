@@ -14,7 +14,15 @@ else
 NECCS_OBJECTS_LIST_TEXT :=
 endif
 
+NECCS_NEEDS_FALLBACK :=
 ifeq ($(findstring ./Application/User/Core/app_boot_diag.o,$(NECCS_OBJECTS_LIST_TEXT)),)
+NECCS_NEEDS_FALLBACK := 1
+endif
+ifeq ($(findstring ./Application/User/Core/app_i2c2_bus.o,$(NECCS_OBJECTS_LIST_TEXT)),)
+NECCS_NEEDS_FALLBACK := 1
+endif
+
+ifneq ($(NECCS_NEEDS_FALLBACK),)
 NECCS_OBJS_BEFORE_FALLBACK := $(OBJS)
 
 -include Application/User/AZURE_RTOS/App/subdir.mk
@@ -46,6 +54,7 @@ NECCS_MANUAL_FALLBACK_OBJS := \
 ./Application/User/Core/app_audio_frame.o \
 ./Application/User/Core/app_boot_diag.o \
 ./Application/User/Core/app_bringup_thread.o \
+./Application/User/Core/app_i2c2_bus.o \
 ./Application/User/Core/app_media.o \
 ./Application/User/Core/app_media_jpeg.o \
 ./Application/User/Core/app_mic_array.o \
@@ -62,6 +71,7 @@ C_DEPS += \
 ./Application/User/Core/app_audio_frame.d \
 ./Application/User/Core/app_boot_diag.d \
 ./Application/User/Core/app_bringup_thread.d \
+./Application/User/Core/app_i2c2_bus.d \
 ./Application/User/Core/app_media.d \
 ./Application/User/Core/app_media_jpeg.d \
 ./Application/User/Core/app_mic_array.d \
@@ -88,6 +98,9 @@ Application/User/Core/app_boot_diag.o: $(NECCS_CORE_SRC_DIR)/app_boot_diag.c ../
 	arm-none-eabi-gcc "$<" $(NECCS_RELEASE_CFLAGS) -MF"$(@:%.o=%.d)" -MT"$@" -o "$@"
 
 Application/User/Core/app_bringup_thread.o: $(NECCS_CORE_SRC_DIR)/app_bringup_thread.c ../makefile.defs
+	arm-none-eabi-gcc "$<" $(NECCS_RELEASE_CFLAGS) -MF"$(@:%.o=%.d)" -MT"$@" -o "$@"
+
+Application/User/Core/app_i2c2_bus.o: $(NECCS_CORE_SRC_DIR)/app_i2c2_bus.c ../makefile.defs
 	arm-none-eabi-gcc "$<" $(NECCS_RELEASE_CFLAGS) -MF"$(@:%.o=%.d)" -MT"$@" -o "$@"
 
 Application/User/Core/app_media.o: $(NECCS_CORE_SRC_DIR)/app_media.c ../makefile.defs
