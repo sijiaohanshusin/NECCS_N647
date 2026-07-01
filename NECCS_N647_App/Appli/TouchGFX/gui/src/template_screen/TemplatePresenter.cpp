@@ -37,6 +37,31 @@ void TemplatePresenter::selectProfile(uint8_t profile)
     model->setActiveProfile(profile);
 }
 
+void TemplatePresenter::requestScreenshot()
+{
+    model->requestScreenshot();
+}
+
+void TemplatePresenter::toggleRecording()
+{
+    model->toggleRecording();
+}
+
+void TemplatePresenter::refreshMedia()
+{
+    model->refreshMedia();
+}
+
+void TemplatePresenter::selectNextMedia()
+{
+    model->selectNextMedia();
+}
+
+void TemplatePresenter::readSelectedMedia()
+{
+    model->readSelectedMedia();
+}
+
 void TemplatePresenter::uiSnapshotUpdated(const AppUiSnapshot& snapshot)
 {
     view.updateSnapshot(snapshot);

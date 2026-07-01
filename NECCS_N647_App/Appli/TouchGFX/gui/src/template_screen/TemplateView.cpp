@@ -23,6 +23,8 @@ const char* screenName(uint8_t screen)
         return "PERF";
     case APP_UI_SCREEN_SETTINGS:
         return "SET";
+    case APP_UI_SCREEN_MEDIA:
+        return "MEDIA";
     default:
         return "IMAGE";
     }
@@ -75,6 +77,19 @@ const char* powerStateName(uint8_t state)
     }
 }
 
+const char* selectedMediaName(uint8_t type)
+{
+    switch (type)
+    {
+    case 1U:
+        return "BMP";
+    case 2U:
+        return "AVI";
+    default:
+        return "NONE";
+    }
+}
+
 touchgfx::colortype levelColor(uint8_t level)
 {
     if (level > 82U)
@@ -114,6 +129,7 @@ void setupLabel(AppTextLabel& label,
 TemplateView::TemplateView()
     : navPressedCallback(this, &TemplateView::onNavPressed),
       profilePressedCallback(this, &TemplateView::onProfilePressed),
+      mediaPressedCallback(this, &TemplateView::onMediaPressed),
       activeScreen(APP_UI_SCREEN_IMAGE),
       activeProfile(APP_UI_PROFILE_BALANCED)
 {
@@ -127,6 +143,7 @@ void TemplateView::setupScreen()
     setupMicPage();
     setupPerfPage();
     setupSettingsPage();
+    setupMediaPage();
     setupDetails();
     refreshVisibility();
     refreshNavigation();
@@ -175,21 +192,21 @@ void TemplateView::setupStaticUi()
 
 void TemplateView::setupNavigation()
 {
-    const char* labels[NavCount] = {"IMAGE", "MICS", "PERF", "SET"};
+    const char* labels[NavCount] = {"IMAGE", "MICS", "PERF", "SET", "MEDIA"};
 
     for (uint32_t i = 0U; i < NavCount; ++i)
     {
-        const int16_t y = static_cast<int16_t>(92 + (i * 72));
-        navButton[i].setPosition(18, y, 112, 50);
+        const int16_t y = static_cast<int16_t>(88 + (i * 62));
+        navButton[i].setPosition(18, y, 112, 46);
         navButton[i].setColor(rgb(29, 34, 37));
         navButton[i].setBorderColor(rgb(54, 62, 66));
         navButton[i].setBorderSize(2);
         add(navButton[i]);
 
-        setupLabel(navLabel[i], 28, static_cast<int16_t>(y + 13), 92, 24, 2, labels[i], rgb(219, 226, 220), rgb(29, 34, 37), AppTextLabel::ALIGN_CENTER);
+        setupLabel(navLabel[i], 28, static_cast<int16_t>(y + 11), 92, 24, 2, labels[i], rgb(219, 226, 220), rgb(29, 34, 37), AppTextLabel::ALIGN_CENTER);
         add(navLabel[i]);
 
-        navTouch[i].setPosition(18, y, 112, 50);
+        navTouch[i].setPosition(18, y, 112, 46);
         navTouch[i].setAction(navPressedCallback);
         add(navTouch[i]);
     }
@@ -275,6 +292,54 @@ void TemplateView::setupSettingsPage()
     }
 }
 
+void TemplateView::setupMediaPage()
+{
+    const char* initial[MediaLabelCount] = {
+        "SD WAIT",
+        "FS UNMOUNTED",
+        "SPACE -- / -- MB",
+        "SCREEN 00000 BMP",
+        "VIDEO 00000 AVI",
+        "REC 00:00 F0000 DROP0",
+        "SEL NONE",
+        "LAST NONE",
+        "READ 0B ERR 0",
+        "FORMAT READY"
+    };
+
+    for (uint32_t i = 0U; i < MediaLabelCount; ++i)
+    {
+        setupLabel(mediaLabel[i],
+                   190,
+                   static_cast<int16_t>(142 + (i * 32)),
+                   520,
+                   24,
+                   1,
+                   initial[i],
+                   (i < 2U) ? rgb(161, 221, 206) : rgb(216, 222, 216),
+                   rgb(20, 23, 26));
+        add(mediaLabel[i]);
+    }
+
+    const char* actions[MediaActionCount] = {"SHOT", "REC", "NEXT", "READ", "REFR"};
+    for (uint32_t i = 0U; i < MediaActionCount; ++i)
+    {
+        const int16_t x = static_cast<int16_t>(190 + (i * 104));
+        mediaButton[i].setPosition(x, 520, 88, 34);
+        mediaButton[i].setColor(rgb(33, 38, 41));
+        mediaButton[i].setBorderColor(rgb(58, 66, 68));
+        mediaButton[i].setBorderSize(2);
+        add(mediaButton[i]);
+
+        setupLabel(mediaButtonLabel[i], static_cast<int16_t>(x + 6), 529, 76, 16, 1, actions[i], rgb(223, 230, 224), rgb(33, 38, 41), AppTextLabel::ALIGN_CENTER);
+        add(mediaButtonLabel[i]);
+
+        mediaTouch[i].setPosition(x, 520, 88, 34);
+        mediaTouch[i].setAction(mediaPressedCallback);
+        add(mediaTouch[i]);
+    }
+}
+
 void TemplateView::setupDetails()
 {
     const char* initial[DetailCount] = {
@@ -351,9 +416,13 @@ void TemplateView::updateSnapshot(const AppUiSnapshot& snapshot)
     {
         refreshPerfPage(snapshot);
     }
-    else
+    else if (activeScreen == APP_UI_SCREEN_SETTINGS)
     {
         refreshSettingsPage(snapshot);
+    }
+    else
+    {
+        refreshMediaPage(snapshot);
     }
 }
 
@@ -363,6 +432,7 @@ void TemplateView::refreshVisibility()
     const bool micVisible = (activeScreen == APP_UI_SCREEN_MICS);
     const bool perfVisible = (activeScreen == APP_UI_SCREEN_PERF);
     const bool settingsVisible = (activeScreen == APP_UI_SCREEN_SETTINGS);
+    const bool mediaVisible = (activeScreen == APP_UI_SCREEN_MEDIA);
 
     heatMap.setVisible(imageVisible);
     heatMap.invalidate();
@@ -397,6 +467,21 @@ void TemplateView::refreshVisibility()
     {
         settingsLabel[i].setVisible(settingsVisible);
         settingsLabel[i].invalidate();
+    }
+
+    for (uint32_t i = 0U; i < MediaLabelCount; ++i)
+    {
+        mediaLabel[i].setVisible(mediaVisible);
+        mediaLabel[i].invalidate();
+    }
+    for (uint32_t i = 0U; i < MediaActionCount; ++i)
+    {
+        mediaButton[i].setVisible(mediaVisible);
+        mediaTouch[i].setVisible(mediaVisible);
+        mediaButtonLabel[i].setVisible(mediaVisible);
+        mediaButton[i].invalidate();
+        mediaTouch[i].invalidate();
+        mediaButtonLabel[i].invalidate();
     }
 }
 
@@ -570,6 +655,96 @@ void TemplateView::refreshSettingsPage(const AppUiSnapshot& snapshot)
     settingsLabel[2].setText(text);
 }
 
+void TemplateView::refreshMediaPage(const AppUiSnapshot& snapshot)
+{
+    char text[96];
+    const bool sdReady = ((snapshot.mediaFlags & APP_UI_MEDIA_FLAG_SD_READY) != 0U);
+    const bool mounted = ((snapshot.mediaFlags & APP_UI_MEDIA_FLAG_FS_MOUNTED) != 0U);
+    const bool formatted = ((snapshot.mediaFlags & APP_UI_MEDIA_FLAG_FORMATTED) != 0U);
+    const bool recording = ((snapshot.mediaFlags & APP_UI_MEDIA_FLAG_RECORDING) != 0U);
+    const bool busy = ((snapshot.mediaFlags & APP_UI_MEDIA_FLAG_BUSY) != 0U);
+    const uint32_t minutes = snapshot.mediaRecordSeconds / 60U;
+    const uint32_t seconds = snapshot.mediaRecordSeconds % 60U;
+
+    mediaLabel[0].setText(sdReady ? "SD READY" : "SD WAIT");
+    mediaLabel[0].setColors(sdReady ? rgb(161, 221, 206) : rgb(226, 172, 62), rgb(20, 23, 26));
+
+    (void)snprintf(text, sizeof(text), "FS %s%s", mounted ? "MOUNTED" : "UNMOUNTED", formatted ? " FORMAT" : "");
+    mediaLabel[1].setText(text);
+    mediaLabel[1].setColors(mounted ? rgb(161, 221, 206) : rgb(225, 145, 102), rgb(20, 23, 26));
+
+    (void)snprintf(text, sizeof(text), "SPACE %lu / %lu MB",
+                   static_cast<unsigned long>(snapshot.mediaFreeMb),
+                   static_cast<unsigned long>(snapshot.mediaTotalMb));
+    mediaLabel[2].setText(text);
+
+    (void)snprintf(text, sizeof(text), "SCREEN %05lu BMP",
+                   static_cast<unsigned long>(snapshot.mediaScreenshots));
+    mediaLabel[3].setText(text);
+
+    (void)snprintf(text, sizeof(text), "VIDEO %05lu AVI",
+                   static_cast<unsigned long>(snapshot.mediaVideos));
+    mediaLabel[4].setText(text);
+
+    (void)snprintf(text, sizeof(text), "REC %02lu:%02lu F%04lu DROP%lu",
+                   static_cast<unsigned long>(minutes),
+                   static_cast<unsigned long>(seconds),
+                   static_cast<unsigned long>(snapshot.mediaRecordFrames),
+                   static_cast<unsigned long>(snapshot.mediaDroppedFrames));
+    mediaLabel[5].setText(text);
+    mediaLabel[5].setColors(recording ? rgb(225, 91, 63) : rgb(216, 222, 216), rgb(20, 23, 26));
+
+    if (snapshot.mediaSelectedFile[0] != '\0')
+    {
+        (void)snprintf(text, sizeof(text), "SEL %s %s",
+                       selectedMediaName(snapshot.mediaSelectedType),
+                       snapshot.mediaSelectedFile);
+    }
+    else
+    {
+        (void)snprintf(text, sizeof(text), "SEL %s", selectedMediaName(snapshot.mediaSelectedType));
+    }
+    mediaLabel[6].setText(text);
+
+    if (snapshot.mediaLastFile[0] != '\0')
+    {
+        (void)snprintf(text, sizeof(text), "LAST %s", snapshot.mediaLastFile);
+    }
+    else
+    {
+        (void)snprintf(text, sizeof(text), "LAST NONE");
+    }
+    mediaLabel[7].setText(text);
+
+    (void)snprintf(text, sizeof(text), "READ %luB ERR %lu",
+                   static_cast<unsigned long>(snapshot.mediaLastReadBytes),
+                   static_cast<unsigned long>(snapshot.mediaLastError));
+    mediaLabel[8].setText(text);
+    mediaLabel[8].setColors((snapshot.mediaLastError == 0U) ? rgb(216, 222, 216) : rgb(225, 145, 102), rgb(20, 23, 26));
+
+    (void)snprintf(text, sizeof(text), "%s %s",
+                   busy ? "BUSY" : "IDLE",
+                   mounted ? "MEDIA READY" : "WAIT MEDIA");
+    mediaLabel[9].setText(text);
+
+    mediaButtonLabel[1].setText(recording ? "STOP" : "REC");
+
+    for (uint32_t i = 0U; i < MediaActionCount; ++i)
+    {
+        const bool primary = ((i == 0U) || (i == 1U));
+        const touchgfx::colortype buttonColor = busy ? rgb(46, 48, 48) :
+                                                (recording && (i == 1U) ? rgb(88, 45, 42) :
+                                                (primary ? rgb(45, 67, 67) : rgb(33, 38, 41)));
+        const touchgfx::colortype borderColor = busy ? rgb(72, 76, 76) :
+                                                (recording && (i == 1U) ? rgb(225, 91, 63) :
+                                                (primary ? rgb(109, 212, 186) : rgb(58, 66, 68)));
+        mediaButton[i].setColor(buttonColor);
+        mediaButton[i].setBorderColor(borderColor);
+        mediaButton[i].invalidate();
+        mediaButtonLabel[i].setColors(busy ? rgb(166, 174, 170) : rgb(223, 230, 224), buttonColor, true);
+    }
+}
+
 void TemplateView::onNavPressed(const touchgfx::AbstractButton& source)
 {
     for (uint32_t i = 0U; i < NavCount; ++i)
@@ -589,6 +764,37 @@ void TemplateView::onProfilePressed(const touchgfx::AbstractButton& source)
         if (&source == &profileTouch[i])
         {
             presenter->selectProfile(static_cast<uint8_t>(i));
+            return;
+        }
+    }
+}
+
+void TemplateView::onMediaPressed(const touchgfx::AbstractButton& source)
+{
+    for (uint32_t i = 0U; i < MediaActionCount; ++i)
+    {
+        if (&source == &mediaTouch[i])
+        {
+            if (i == 0U)
+            {
+                presenter->requestScreenshot();
+            }
+            else if (i == 1U)
+            {
+                presenter->toggleRecording();
+            }
+            else if (i == 2U)
+            {
+                presenter->selectNextMedia();
+            }
+            else if (i == 3U)
+            {
+                presenter->readSelectedMedia();
+            }
+            else
+            {
+                presenter->refreshMedia();
+            }
             return;
         }
     }

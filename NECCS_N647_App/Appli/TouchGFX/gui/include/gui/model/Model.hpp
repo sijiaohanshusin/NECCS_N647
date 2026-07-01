@@ -22,7 +22,8 @@ enum AppUiScreen
     APP_UI_SCREEN_IMAGE = 0,
     APP_UI_SCREEN_MICS = 1,
     APP_UI_SCREEN_PERF = 2,
-    APP_UI_SCREEN_SETTINGS = 3
+    APP_UI_SCREEN_SETTINGS = 3,
+    APP_UI_SCREEN_MEDIA = 4
 };
 
 enum AppUiProfile
@@ -52,12 +53,32 @@ enum AppUiPowerFlag
     APP_UI_POWER_FLAG_CHARGER_FAULT = 0x00000010UL
 };
 
+enum AppUiMediaFlag
+{
+    APP_UI_MEDIA_FLAG_CARD_PRESENT = 0x00000001UL,
+    APP_UI_MEDIA_FLAG_SD_READY = 0x00000002UL,
+    APP_UI_MEDIA_FLAG_FS_MOUNTED = 0x00000004UL,
+    APP_UI_MEDIA_FLAG_FORMATTED = 0x00000008UL,
+    APP_UI_MEDIA_FLAG_RECORDING = 0x00000010UL,
+    APP_UI_MEDIA_FLAG_BUSY = 0x00000020UL
+};
+
 struct AppUiSnapshot
 {
     uint32_t frameSeq;
     uint32_t powerFlags;
     uint32_t batteryMv;
     uint32_t systemMv;
+    uint32_t mediaFlags;
+    uint32_t mediaLastError;
+    uint32_t mediaScreenshots;
+    uint32_t mediaVideos;
+    uint32_t mediaRecordFrames;
+    uint32_t mediaDroppedFrames;
+    uint32_t mediaRecordSeconds;
+    uint32_t mediaLastReadBytes;
+    uint32_t mediaFreeMb;
+    uint32_t mediaTotalMb;
     int32_t batteryCurrentMa;
     uint32_t powerPinState;
     uint16_t touchX;
@@ -72,6 +93,7 @@ struct AppUiSnapshot
     uint8_t activeScreen;
     uint8_t activeProfile;
     uint8_t powerState;
+    uint8_t mediaSelectedType;
     uint8_t batteryPct;
     uint8_t touchReady;
     uint8_t touchDown;
@@ -82,6 +104,8 @@ struct AppUiSnapshot
     uint8_t heat[81];
     uint8_t micLevel[32];
     uint8_t perfLoad[5];
+    char mediaLastFile[32];
+    char mediaSelectedFile[32];
 };
 
 /**
@@ -119,6 +143,11 @@ public:
 
     void setActiveScreen(uint8_t screen);
     void setActiveProfile(uint8_t profile);
+    void requestScreenshot();
+    void toggleRecording();
+    void refreshMedia();
+    void selectNextMedia();
+    void readSelectedMedia();
 
     const AppUiSnapshot& getSnapshot() const
     {

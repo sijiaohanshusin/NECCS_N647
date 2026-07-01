@@ -19,6 +19,7 @@
 extern "C"
 {
 #include "app_power.h"
+#include "app_media.h"
 #include "TOUCH/app_touch.h"
 }
 #else
@@ -61,6 +62,68 @@ static void AppPower_GetSnapshot(AppPowerSnapshot_t* snapshot)
         snapshot->state = APP_UI_POWER_STATE_UNKNOWN;
     }
 }
+
+typedef struct
+{
+    uint32_t flags;
+    uint32_t last_error;
+    uint32_t sd_status;
+    uint32_t mount_status;
+    uint32_t format_status;
+    uint32_t total_blocks;
+    uint32_t media_blocks;
+    uint32_t free_clusters;
+    uint32_t screenshots;
+    uint32_t videos;
+    uint32_t selected_index;
+    uint32_t selected_type;
+    uint32_t record_frames;
+    uint32_t dropped_frames;
+    uint32_t record_seconds;
+    uint32_t last_read_bytes;
+    uint64_t total_bytes;
+    uint64_t free_bytes;
+    char last_file[32];
+    char selected_file[32];
+} AppMediaStatus_t;
+
+static uint32_t AppMedia_RequestScreenshot()
+{
+    return 0U;
+}
+
+static uint32_t AppMedia_RequestRecordStart()
+{
+    return 0U;
+}
+
+static uint32_t AppMedia_RequestRecordStop()
+{
+    return 0U;
+}
+
+static uint32_t AppMedia_RequestRefresh()
+{
+    return 0U;
+}
+
+static uint32_t AppMedia_RequestSelectNext()
+{
+    return 0U;
+}
+
+static uint32_t AppMedia_RequestReadSelected()
+{
+    return 0U;
+}
+
+static void AppMedia_GetStatus(AppMediaStatus_t* status)
+{
+    if (status != 0)
+    {
+        memset(status, 0, sizeof(*status));
+    }
+}
 #endif
 
 namespace
@@ -68,6 +131,23 @@ namespace
 uint8_t clampPercent(uint32_t value)
 {
     return (value > 100U) ? 100U : static_cast<uint8_t>(value);
+}
+
+void copyFileName(char* destination, const char* source, uint32_t length)
+{
+    if ((destination == 0) || (length == 0U))
+    {
+        return;
+    }
+
+    if (source == 0)
+    {
+        destination[0] = '\0';
+        return;
+    }
+
+    strncpy(destination, source, length - 1U);
+    destination[length - 1U] = '\0';
 }
 }
 
@@ -80,6 +160,8 @@ Model::Model()
     snapshot.activeProfile = APP_UI_PROFILE_BALANCED;
     snapshot.uiFpsX10 = 200U;
     snapshot.srpMsX100 = 640U;
+    copyFileName(snapshot.mediaLastFile, "", sizeof(snapshot.mediaLastFile));
+    copyFileName(snapshot.mediaSelectedFile, "", sizeof(snapshot.mediaSelectedFile));
 }
 
 void Model::tick()
@@ -147,6 +229,23 @@ void Model::tick()
     snapshot.batteryPct = power.battery_percent;
     snapshot.powerState = power.state;
 
+    AppMediaStatus_t media;
+    memset(&media, 0, sizeof(media));
+    AppMedia_GetStatus(&media);
+    snapshot.mediaFlags = media.flags;
+    snapshot.mediaLastError = media.last_error;
+    snapshot.mediaScreenshots = media.screenshots;
+    snapshot.mediaVideos = media.videos;
+    snapshot.mediaRecordFrames = media.record_frames;
+    snapshot.mediaDroppedFrames = media.dropped_frames;
+    snapshot.mediaRecordSeconds = media.record_seconds;
+    snapshot.mediaLastReadBytes = media.last_read_bytes;
+    snapshot.mediaFreeMb = static_cast<uint32_t>(media.free_bytes / (1024ULL * 1024ULL));
+    snapshot.mediaTotalMb = static_cast<uint32_t>(media.total_bytes / (1024ULL * 1024ULL));
+    snapshot.mediaSelectedType = static_cast<uint8_t>(media.selected_type);
+    copyFileName(snapshot.mediaLastFile, media.last_file, sizeof(snapshot.mediaLastFile));
+    copyFileName(snapshot.mediaSelectedFile, media.selected_file, sizeof(snapshot.mediaSelectedFile));
+
     if ((modelListener != 0) && ((tickCount % 3U) == 0U))
     {
         modelListener->uiSnapshotUpdated(snapshot);
@@ -155,7 +254,7 @@ void Model::tick()
 
 void Model::setActiveScreen(uint8_t screen)
 {
-    if (screen <= APP_UI_SCREEN_SETTINGS)
+    if (screen <= APP_UI_SCREEN_MEDIA)
     {
         snapshot.activeScreen = screen;
         if (modelListener != 0)
@@ -163,6 +262,38 @@ void Model::setActiveScreen(uint8_t screen)
             modelListener->uiSnapshotUpdated(snapshot);
         }
     }
+}
+
+void Model::requestScreenshot()
+{
+    (void)AppMedia_RequestScreenshot();
+}
+
+void Model::toggleRecording()
+{
+    if ((snapshot.mediaFlags & APP_UI_MEDIA_FLAG_RECORDING) != 0U)
+    {
+        (void)AppMedia_RequestRecordStop();
+    }
+    else
+    {
+        (void)AppMedia_RequestRecordStart();
+    }
+}
+
+void Model::refreshMedia()
+{
+    (void)AppMedia_RequestRefresh();
+}
+
+void Model::selectNextMedia()
+{
+    (void)AppMedia_RequestSelectNext();
+}
+
+void Model::readSelectedMedia()
+{
+    (void)AppMedia_RequestReadSelected();
 }
 
 void Model::setActiveProfile(uint8_t profile)

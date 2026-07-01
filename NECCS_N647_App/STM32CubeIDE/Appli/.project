@@ -257,6 +257,16 @@
 			<locationURI>PARENT-2-PROJECT_LOC/Appli/Core/Src/app_mic_array.c</locationURI>
 		</link>
 		<link>
+			<name>Application/User/Core/app_media.c</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/Appli/Core/Src/app_media.c</locationURI>
+		</link>
+		<link>
+			<name>Application/User/Core/app_media_jpeg.c</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/Appli/Core/Src/app_media_jpeg.c</locationURI>
+		</link>
+		<link>
 			<name>Application/User/Core/app_threadx.c</name>
 			<type>1</type>
 			<locationURI>PARENT-2-PROJECT_LOC/Appli/Core/Src/app_threadx.c</locationURI>
@@ -380,6 +390,11 @@
 			<name>Drivers/CMSIS_DSP/TransformFunctions/arm_rfft_fast_init_f32.c</name>
 			<type>1</type>
 			<location>C:/Users/xiazhiyuan/STM32Cube/Repository/STM32Cube_FW_N6_V1.3.0/Drivers/CMSIS/DSP/Source/TransformFunctions/arm_rfft_fast_init_f32.c</location>
+		</link>
+		<link>
+			<name>Middlewares/filex/Core</name>
+			<type>2</type>
+			<locationURI>PARENT-2-PROJECT_LOC/Middlewares/ST/filex/common/src</locationURI>
 		</link>
 		<link>
 			<name>Middlewares/threadx/Core/tx_block_allocate.c</name>

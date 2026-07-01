@@ -16,6 +16,7 @@ extern "C" {
 
 #define SD_NAND_BLOCK_SIZE             512U
 #define SD_NAND_TIMEOUT_MS             5000U
+#define SD_NAND_FONT_RESERVED_BLOCKS   12313U
 
 #define SD_NAND_OK                     ((uint8_t)0U)
 #define SD_NAND_ERROR                  ((uint8_t)1U)

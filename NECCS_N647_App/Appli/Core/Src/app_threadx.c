@@ -24,6 +24,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "app_bringup_thread.h"
+#include "app_media.h"
 
 /* USER CODE END Includes */
 
@@ -79,6 +80,10 @@ UINT App_ThreadX_Init(VOID *memory_ptr)
                          APP_BRINGUP_THREAD_PRIORITY,
                          TX_NO_TIME_SLICE,
                          TX_AUTO_START);
+  if (ret == TX_SUCCESS)
+  {
+    ret = AppMedia_Init(memory_ptr);
+  }
   /* USER CODE END App_ThreadX_Init */
 
   return ret;

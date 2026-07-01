@@ -30,11 +30,12 @@ NECCS_OBJS_BEFORE_FALLBACK := $(OBJS)
 -include Drivers/CMSIS_DSP/ControllerFunctions/subdir.mk
 -include Drivers/CMSIS_DSP/StatisticsFunctions/subdir.mk
 -include Drivers/CMSIS_DSP/TransformFunctions/subdir.mk
+-include Middlewares/filex/Core/subdir.mk
 -include Middlewares/threadx/Core/subdir.mk
 
 NECCS_CORE_SRC_DIR := D:/Project/NECCS/Program/NECCS_N647/NECCS_N647_App/Appli/Core/Src
 NECCS_HAL_SRC_DIR := D:/Project/NECCS/Program/NECCS_N647/NECCS_N647_App/Drivers/STM32N6xx_HAL_Driver/Src
-NECCS_COMMON_INCLUDES := -I../../../Appli/Core/Inc -I../../../Secure_nsclib -I"D:/Project/NECCS/Program/NECCS_N647/NECCS_N647_App/Drivers/BSP" -IC:/Users/xiazhiyuan/STM32Cube/Repository/STM32Cube_FW_N6_V1.3.0/Drivers/CMSIS/DSP/Include -IC:/Users/xiazhiyuan/STM32Cube/Repository/STM32Cube_FW_N6_V1.3.0/Drivers/CMSIS/DSP/PrivateInclude -I../../../Appli/AZURE_RTOS/App -I../Application/User/ThreadSafe -I../../../Appli/TouchGFX/App -I../../../Appli/TouchGFX/target/generated -I../../../Appli/TouchGFX/target -I../../../Drivers/STM32N6xx_HAL_Driver/Inc -I../../../Drivers/CMSIS/Device/ST/STM32N6xx/Include -I../../../Drivers/STM32N6xx_HAL_Driver/Inc/Legacy -I../../../Middlewares/ST/threadx/common/inc -I../../../Middlewares/ST/threadx/ports/cortex_m55/gnu/inc -I../../../Drivers/CMSIS/Include -I../../../Middlewares/ST/touchgfx/framework/include -I../../../Appli/TouchGFX/generated/fonts/include -I../../../Appli/TouchGFX/generated/images/include -I../../../Appli/TouchGFX/generated/texts/include -I../../../Appli/TouchGFX/generated/videos/include -I../../../Appli/TouchGFX/gui/include
+NECCS_COMMON_INCLUDES := -I../../../Appli/Core/Inc -I../../../Secure_nsclib -I"D:/Project/NECCS/Program/NECCS_N647/NECCS_N647_App/Drivers/BSP" -IC:/Users/xiazhiyuan/STM32Cube/Repository/STM32Cube_FW_N6_V1.3.0/Drivers/CMSIS/DSP/Include -IC:/Users/xiazhiyuan/STM32Cube/Repository/STM32Cube_FW_N6_V1.3.0/Drivers/CMSIS/DSP/PrivateInclude -I../../../Appli/AZURE_RTOS/App -I../Application/User/ThreadSafe -I../../../Appli/TouchGFX/App -I../../../Appli/TouchGFX/target/generated -I../../../Appli/TouchGFX/target -I../../../Drivers/STM32N6xx_HAL_Driver/Inc -I../../../Drivers/CMSIS/Device/ST/STM32N6xx/Include -I../../../Drivers/STM32N6xx_HAL_Driver/Inc/Legacy -I../../../Middlewares/ST/threadx/common/inc -I../../../Middlewares/ST/filex/common/inc -I../../../Middlewares/ST/filex/ports/generic/inc -I../../../Middlewares/ST/threadx/ports/cortex_m55/gnu/inc -I../../../Drivers/CMSIS/Include -I../../../Middlewares/ST/touchgfx/framework/include -I../../../Appli/TouchGFX/generated/fonts/include -I../../../Appli/TouchGFX/generated/images/include -I../../../Appli/TouchGFX/generated/texts/include -I../../../Appli/TouchGFX/generated/videos/include -I../../../Appli/TouchGFX/gui/include
 NECCS_RELEASE_CFLAGS := -mcpu=cortex-m55 -std=gnu11 -DUSE_HAL_DRIVER -DSTM32N647xx -DTX_INCLUDE_USER_DEFINE_FILE -DTX_SINGLE_MODE_SECURE=1 -DSTM32_THREAD_SAFE_STRATEGY=2 -DARM_MATH_AUTOVECTORIZE -c $(NECCS_COMMON_INCLUDES) -Os -ffunction-sections -fdata-sections -Wall -fstack-usage -fcyclomatic-complexity -mcmse -MMD -MP --specs=nano.specs -mfpu=fpv5-d16 -mfloat-abi=hard -mthumb
 NECCS_RELEASE_ASFLAGS := -mcpu=cortex-m55 -DTX_INCLUDE_USER_DEFINE_FILE -DTX_SINGLE_MODE_SECURE=1 -c -I../../../Appli/Core/Inc -I../../../Appli/AZURE_RTOS/App -I../../../Secure_nsclib -IC:/Users/xiazhiyuan/STM32Cube/Repository/STM32Cube_FW_N6_V1.3.0/Drivers/STM32N6xx_HAL_Driver/Inc -IC:/Users/xiazhiyuan/STM32Cube/Repository/STM32Cube_FW_N6_V1.3.0/Drivers/CMSIS/Device/ST/STM32N6xx/Include -IC:/Users/xiazhiyuan/STM32Cube/Repository/STM32Cube_FW_N6_V1.3.0/Drivers/STM32N6xx_HAL_Driver/Inc/Legacy -IC:/Users/xiazhiyuan/STM32Cube/Repository/STM32Cube_FW_N6_V1.3.0/Middlewares/ST/threadx/common/inc -IC:/Users/xiazhiyuan/STM32Cube/Repository/STM32Cube_FW_N6_V1.3.0/Middlewares/ST/threadx/ports/cortex_m55/gnu/inc -IC:/Users/xiazhiyuan/STM32Cube/Repository/STM32Cube_FW_N6_V1.3.0/Drivers/CMSIS/Include -I../../../Appli/TouchGFX/App -I../../../Appli/TouchGFX/target/generated -I../../../Appli/TouchGFX/target -I../../../Drivers/STM32N6xx_HAL_Driver/Inc -I../../../Drivers/CMSIS/Device/ST/STM32N6xx/Include -I../../../Drivers/STM32N6xx_HAL_Driver/Inc/Legacy -I../../../Middlewares/ST/threadx/common/inc -I../../../Middlewares/ST/threadx/ports/cortex_m55/gnu/inc -I../../../Drivers/CMSIS/Include -I../../../Middlewares/ST/touchgfx/framework/include -I../../../Appli/TouchGFX/generated/fonts/include -I../../../Appli/TouchGFX/generated/images/include -I../../../Appli/TouchGFX/generated/texts/include -I../../../Appli/TouchGFX/generated/videos/include -I../../../Appli/TouchGFX/gui/include -x assembler-with-cpp -MMD -MP --specs=nano.specs -mfpu=fpv5-d16 -mfloat-abi=hard -mthumb
 
@@ -45,6 +46,8 @@ NECCS_MANUAL_FALLBACK_OBJS := \
 ./Application/User/Core/app_audio_frame.o \
 ./Application/User/Core/app_boot_diag.o \
 ./Application/User/Core/app_bringup_thread.o \
+./Application/User/Core/app_media.o \
+./Application/User/Core/app_media_jpeg.o \
 ./Application/User/Core/app_mic_array.o \
 ./Application/User/Core/app_threadx.o \
 ./Application/User/Core/tx_initialize_low_level.o \
@@ -59,6 +62,8 @@ C_DEPS += \
 ./Application/User/Core/app_audio_frame.d \
 ./Application/User/Core/app_boot_diag.d \
 ./Application/User/Core/app_bringup_thread.d \
+./Application/User/Core/app_media.d \
+./Application/User/Core/app_media_jpeg.d \
 ./Application/User/Core/app_mic_array.d \
 ./Application/User/Core/app_threadx.d \
 ./Drivers/STM32N6xx_HAL_Driver/stm32n6xx_hal_crc.d \
@@ -83,6 +88,12 @@ Application/User/Core/app_boot_diag.o: $(NECCS_CORE_SRC_DIR)/app_boot_diag.c ../
 	arm-none-eabi-gcc "$<" $(NECCS_RELEASE_CFLAGS) -MF"$(@:%.o=%.d)" -MT"$@" -o "$@"
 
 Application/User/Core/app_bringup_thread.o: $(NECCS_CORE_SRC_DIR)/app_bringup_thread.c ../makefile.defs
+	arm-none-eabi-gcc "$<" $(NECCS_RELEASE_CFLAGS) -MF"$(@:%.o=%.d)" -MT"$@" -o "$@"
+
+Application/User/Core/app_media.o: $(NECCS_CORE_SRC_DIR)/app_media.c ../makefile.defs
+	arm-none-eabi-gcc "$<" $(NECCS_RELEASE_CFLAGS) -MF"$(@:%.o=%.d)" -MT"$@" -o "$@"
+
+Application/User/Core/app_media_jpeg.o: $(NECCS_CORE_SRC_DIR)/app_media_jpeg.c ../makefile.defs
 	arm-none-eabi-gcc "$<" $(NECCS_RELEASE_CFLAGS) -MF"$(@:%.o=%.d)" -MT"$@" -o "$@"
 
 Application/User/Core/app_mic_array.o: $(NECCS_CORE_SRC_DIR)/app_mic_array.c ../makefile.defs

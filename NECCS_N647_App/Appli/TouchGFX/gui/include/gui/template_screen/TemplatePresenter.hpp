@@ -45,6 +45,11 @@ public:
 
     void selectScreen(uint8_t screen);
     void selectProfile(uint8_t profile);
+    void requestScreenshot();
+    void toggleRecording();
+    void refreshMedia();
+    void selectNextMedia();
+    void readSelectedMedia();
     virtual void uiSnapshotUpdated(const AppUiSnapshot& snapshot);
 
     virtual ~TemplatePresenter()

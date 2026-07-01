@@ -61,12 +61,14 @@ public:
     void updateSnapshot(const AppUiSnapshot& snapshot);
 
 private:
-    static const uint32_t NavCount = 4U;
+    static const uint32_t NavCount = 5U;
     static const uint32_t ProfileCount = 3U;
     static const uint32_t MicCount = 32U;
     static const uint32_t PerfCount = 5U;
     static const uint32_t DetailCount = 11U;
     static const uint32_t SettingsCount = 7U;
+    static const uint32_t MediaLabelCount = 10U;
+    static const uint32_t MediaActionCount = 5U;
 
     void setupStaticUi();
     void setupNavigation();
@@ -74,6 +76,7 @@ private:
     void setupMicPage();
     void setupPerfPage();
     void setupSettingsPage();
+    void setupMediaPage();
     void setupDetails();
     void refreshVisibility();
     void refreshNavigation();
@@ -83,8 +86,10 @@ private:
     void refreshMicPage(const AppUiSnapshot& snapshot);
     void refreshPerfPage(const AppUiSnapshot& snapshot);
     void refreshSettingsPage(const AppUiSnapshot& snapshot);
+    void refreshMediaPage(const AppUiSnapshot& snapshot);
     void onNavPressed(const touchgfx::AbstractButton& source);
     void onProfilePressed(const touchgfx::AbstractButton& source);
+    void onMediaPressed(const touchgfx::AbstractButton& source);
 
     touchgfx::Box background;
     touchgfx::Box topBar;
@@ -105,6 +110,7 @@ private:
     AppTextLabel pageTitleLabel;
     AppTextLabel detailLabel[DetailCount];
     AppTextLabel settingsLabel[SettingsCount];
+    AppTextLabel mediaLabel[MediaLabelCount];
 
     AppHeatMap heatMap;
     AppTextLabel heatMetricLabel[4];
@@ -116,8 +122,13 @@ private:
     touchgfx::Box perfFill[PerfCount];
     AppTextLabel perfLabel[PerfCount];
 
+    touchgfx::BoxWithBorder mediaButton[MediaActionCount];
+    touchgfx::TouchArea mediaTouch[MediaActionCount];
+    AppTextLabel mediaButtonLabel[MediaActionCount];
+
     touchgfx::Callback<TemplateView, const touchgfx::AbstractButton&> navPressedCallback;
     touchgfx::Callback<TemplateView, const touchgfx::AbstractButton&> profilePressedCallback;
+    touchgfx::Callback<TemplateView, const touchgfx::AbstractButton&> mediaPressedCallback;
 
     uint8_t activeScreen;
     uint8_t activeProfile;
