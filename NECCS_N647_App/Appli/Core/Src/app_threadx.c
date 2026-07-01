@@ -24,6 +24,7 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "app_bringup_thread.h"
+#include "app_debug_config.h"
 #include "app_i2c2_bus.h"
 #include "app_media.h"
 
@@ -87,7 +88,11 @@ UINT App_ThreadX_Init(VOID *memory_ptr)
   }
   if (ret == TX_SUCCESS)
   {
+#if APP_TEMP_BQ_DEBUG_MODE
+    /* Field BQ debug mode keeps SD/FileX out of the boot path. */
+#else
     ret = AppMedia_Init(memory_ptr);
+#endif
   }
   /* USER CODE END App_ThreadX_Init */
 

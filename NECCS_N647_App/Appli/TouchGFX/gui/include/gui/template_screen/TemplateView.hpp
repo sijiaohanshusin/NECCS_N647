@@ -66,7 +66,8 @@ private:
     static const uint32_t MicCount = 32U;
     static const uint32_t PerfCount = 5U;
     static const uint32_t DetailCount = 11U;
-    static const uint32_t SettingsCount = 7U;
+    static const uint32_t SettingsCount = 13U;
+    static const uint32_t BqModeButtonCount = 2U;
     static const uint32_t MediaLabelCount = 10U;
     static const uint32_t MediaActionCount = 5U;
 
@@ -90,6 +91,7 @@ private:
     void onNavPressed(const touchgfx::AbstractButton& source);
     void onProfilePressed(const touchgfx::AbstractButton& source);
     void onMediaPressed(const touchgfx::AbstractButton& source);
+    void onBqModePressed(const touchgfx::AbstractButton& source);
 
     touchgfx::Box background;
     touchgfx::Box topBar;
@@ -104,6 +106,9 @@ private:
     touchgfx::BoxWithBorder profileButton[ProfileCount];
     touchgfx::TouchArea profileTouch[ProfileCount];
     AppTextLabel profileLabel[ProfileCount];
+    touchgfx::BoxWithBorder bqModeButton[BqModeButtonCount];
+    touchgfx::TouchArea bqModeTouch[BqModeButtonCount];
+    AppTextLabel bqModeLabel[BqModeButtonCount];
 
     AppTextLabel titleLabel;
     AppTextLabel modeLabel;
@@ -129,6 +134,7 @@ private:
     touchgfx::Callback<TemplateView, const touchgfx::AbstractButton&> navPressedCallback;
     touchgfx::Callback<TemplateView, const touchgfx::AbstractButton&> profilePressedCallback;
     touchgfx::Callback<TemplateView, const touchgfx::AbstractButton&> mediaPressedCallback;
+    touchgfx::Callback<TemplateView, const touchgfx::AbstractButton&> bqModePressedCallback;
 
     uint8_t activeScreen;
     uint8_t activeProfile;

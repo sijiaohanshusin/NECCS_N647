@@ -50,6 +50,7 @@ public:
     void refreshMedia();
     void selectNextMedia();
     void readSelectedMedia();
+    void requestLowPowerMode(uint8_t enabled);
     virtual void uiSnapshotUpdated(const AppUiSnapshot& snapshot);
 
     virtual ~TemplatePresenter()

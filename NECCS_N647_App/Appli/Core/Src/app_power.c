@@ -1,5 +1,6 @@
 #include "app_power.h"
 
+#include "app_debug_config.h"
 #include "main.h"
 #include "BQ25730/bq25730_hal.h"
 
@@ -10,6 +11,8 @@
                                 BQ25730_ADC_CHANNEL_ICHG | \
                                 BQ25730_ADC_CHANNEL_IDCHG | \
                                 BQ25730_ADC_CHANNEL_IIN | \
+                                BQ25730_ADC_CHANNEL_PSYS | \
+                                BQ25730_ADC_CHANNEL_VBUS | \
                                 BQ25730_ADC_CHANNEL_CMPIN)
 
 #define APP_POWER_CHARGE_STATUS_MASK (BQ25730_CHARGER_STATUS_IN_PCHRG | \
@@ -38,6 +41,7 @@ typedef struct
 volatile int32_t g_app_bq25730_init_status = BQ25730_ERROR;
 volatile int32_t g_app_bq25730_probe_status = BQ25730_ERROR;
 volatile int32_t g_app_bq25730_last_i2c_status = BQ25730_ERROR;
+volatile int32_t g_app_bq25730_adc_status = BQ25730_ERROR;
 volatile int32_t g_app_bq25730_pin_read_status = BQ25730_ERROR;
 volatile uint32_t g_app_bq25730_manufacturer_id = 0U;
 volatile uint32_t g_app_bq25730_device_id = 0U;
@@ -45,11 +49,37 @@ volatile uint32_t g_app_bq25730_charger_status = 0U;
 volatile uint32_t g_app_bq25730_prochot_status = 0U;
 volatile uint32_t g_app_bq25730_pin_state = 0U;
 volatile uint32_t g_app_bq25730_refresh_count = 0U;
+volatile uint32_t g_app_bq25730_charge_option0 = 0U;
+volatile uint32_t g_app_bq25730_charge_option1 = 0U;
+volatile uint32_t g_app_bq25730_charge_option2 = 0U;
+volatile uint32_t g_app_bq25730_charge_option3 = 0U;
+volatile uint32_t g_app_bq25730_adc_option = 0U;
+volatile uint32_t g_app_bq25730_charge_voltage_reg = 0U;
+volatile uint32_t g_app_bq25730_charge_current_reg = 0U;
+volatile uint32_t g_app_bq25730_input_current_reg = 0U;
+volatile uint32_t g_app_bq25730_vsys_min_reg = 0U;
+volatile uint32_t g_app_bq25730_otg_voltage_reg = 0U;
+volatile uint32_t g_app_bq25730_otg_current_reg = 0U;
+volatile uint32_t g_app_bq25730_adc_raw_vbat = 0U;
+volatile uint32_t g_app_bq25730_adc_raw_vsys = 0U;
+volatile uint32_t g_app_bq25730_adc_raw_psys = 0U;
+volatile uint32_t g_app_bq25730_adc_raw_vbus = 0U;
+volatile uint32_t g_app_bq25730_adc_raw_ichg = 0U;
+volatile uint32_t g_app_bq25730_adc_raw_idchg = 0U;
+volatile uint32_t g_app_bq25730_adc_raw_iin = 0U;
+volatile uint32_t g_app_bq25730_adc_raw_cmpin = 0U;
+volatile int32_t g_app_bq25730_low_power_status = BQ25730_ERROR;
+volatile uint32_t g_app_bq25730_low_power_command_count = 0U;
+volatile uint32_t g_app_bq25730_low_power_enabled = 0U;
+volatile uint32_t g_app_bq25730_low_power_target = 0U;
+volatile uint32_t g_app_bq25730_low_power_request_pending = 0U;
 
 volatile uint32_t g_app_power_flags = 0U;
 volatile uint32_t g_app_power_state = APP_POWER_STATE_UNKNOWN;
 volatile uint32_t g_app_power_battery_mv = 0U;
 volatile uint32_t g_app_power_system_mv = 0U;
+volatile uint32_t g_app_power_input_voltage_mv = 0U;
+volatile uint32_t g_app_power_psys_mv = 0U;
 volatile uint32_t g_app_power_battery_percent = 0U;
 volatile uint32_t g_app_power_cmpin_mv = 0U;
 volatile int32_t g_app_power_battery_current_ma = 0;
@@ -97,6 +127,7 @@ static void AppPower_UpdateDebugGlobals(void)
   g_app_bq25730_init_status = g_app_power_snapshot.init_status;
   g_app_bq25730_probe_status = g_app_power_snapshot.probe_status;
   g_app_bq25730_last_i2c_status = g_app_power_snapshot.last_i2c_status;
+  g_app_bq25730_adc_status = g_app_power_snapshot.adc_status;
   g_app_bq25730_pin_read_status = g_app_power_snapshot.pin_read_status;
   g_app_bq25730_manufacturer_id = g_app_power_snapshot.manufacturer_id;
   g_app_bq25730_device_id = g_app_power_snapshot.device_id;
@@ -104,11 +135,37 @@ static void AppPower_UpdateDebugGlobals(void)
   g_app_bq25730_prochot_status = g_app_power_snapshot.prochot_status;
   g_app_bq25730_pin_state = g_app_power_snapshot.pin_state;
   g_app_bq25730_refresh_count = g_app_power_snapshot.update_count;
+  g_app_bq25730_charge_option0 = g_app_power_snapshot.charge_option0;
+  g_app_bq25730_charge_option1 = g_app_power_snapshot.charge_option1;
+  g_app_bq25730_charge_option2 = g_app_power_snapshot.charge_option2;
+  g_app_bq25730_charge_option3 = g_app_power_snapshot.charge_option3;
+  g_app_bq25730_adc_option = g_app_power_snapshot.adc_option;
+  g_app_bq25730_charge_voltage_reg = g_app_power_snapshot.charge_voltage_reg;
+  g_app_bq25730_charge_current_reg = g_app_power_snapshot.charge_current_reg;
+  g_app_bq25730_input_current_reg = g_app_power_snapshot.input_current_reg;
+  g_app_bq25730_vsys_min_reg = g_app_power_snapshot.vsys_min_reg;
+  g_app_bq25730_otg_voltage_reg = g_app_power_snapshot.otg_voltage_reg;
+  g_app_bq25730_otg_current_reg = g_app_power_snapshot.otg_current_reg;
+  g_app_bq25730_adc_raw_vbat = g_app_power_snapshot.adc_raw_vbat;
+  g_app_bq25730_adc_raw_vsys = g_app_power_snapshot.adc_raw_vsys;
+  g_app_bq25730_adc_raw_psys = g_app_power_snapshot.adc_raw_psys;
+  g_app_bq25730_adc_raw_vbus = g_app_power_snapshot.adc_raw_vbus;
+  g_app_bq25730_adc_raw_ichg = g_app_power_snapshot.adc_raw_ichg;
+  g_app_bq25730_adc_raw_idchg = g_app_power_snapshot.adc_raw_idchg;
+  g_app_bq25730_adc_raw_iin = g_app_power_snapshot.adc_raw_iin;
+  g_app_bq25730_adc_raw_cmpin = g_app_power_snapshot.adc_raw_cmpin;
+  g_app_bq25730_low_power_status = g_app_power_snapshot.low_power_status;
+  g_app_bq25730_low_power_command_count = g_app_power_snapshot.low_power_command_count;
+  g_app_bq25730_low_power_enabled = g_app_power_snapshot.low_power_enabled;
+  g_app_bq25730_low_power_target = g_app_power_snapshot.low_power_target;
+  g_app_bq25730_low_power_request_pending = g_app_power_snapshot.low_power_request_pending;
 
   g_app_power_flags = g_app_power_snapshot.flags;
   g_app_power_state = g_app_power_snapshot.state;
   g_app_power_battery_mv = g_app_power_snapshot.battery_mv;
   g_app_power_system_mv = g_app_power_snapshot.system_mv;
+  g_app_power_input_voltage_mv = g_app_power_snapshot.input_voltage_mv;
+  g_app_power_psys_mv = g_app_power_snapshot.psys_mv;
   g_app_power_battery_percent = g_app_power_snapshot.battery_percent;
   g_app_power_cmpin_mv = g_app_power_snapshot.cmpin_mv;
   g_app_power_battery_current_ma = g_app_power_snapshot.battery_current_ma;
@@ -121,7 +178,9 @@ static void AppPower_ResetSnapshot(void)
   g_app_power_snapshot.init_status = BQ25730_ERROR;
   g_app_power_snapshot.probe_status = BQ25730_ERROR;
   g_app_power_snapshot.last_i2c_status = BQ25730_ERROR;
+  g_app_power_snapshot.adc_status = BQ25730_ERROR;
   g_app_power_snapshot.pin_read_status = BQ25730_ERROR;
+  g_app_power_snapshot.low_power_status = BQ25730_ERROR;
   g_app_power_snapshot.remaining_mah_x1000 = -1;
   g_app_power_snapshot.state = APP_POWER_STATE_UNKNOWN;
   g_app_power_undervoltage_ms = 0U;
@@ -326,16 +385,48 @@ static void AppPower_UpdateRemainingCapacity(uint32_t elapsed_ms)
   }
 }
 
+static void AppPower_ClearAdcSnapshot(void)
+{
+  g_app_power_snapshot.flags &= ~APP_POWER_FLAG_ADC_VALID;
+  g_app_power_snapshot.battery_mv = 0U;
+  g_app_power_snapshot.system_mv = 0U;
+  g_app_power_snapshot.input_voltage_mv = 0U;
+  g_app_power_snapshot.psys_mv = 0U;
+  g_app_power_snapshot.charge_current_ma = 0U;
+  g_app_power_snapshot.discharge_current_ma = 0U;
+  g_app_power_snapshot.input_current_ma = 0U;
+  g_app_power_snapshot.cmpin_mv = 0U;
+  g_app_power_snapshot.battery_current_ma = 0;
+  g_app_power_snapshot.adc_raw_vbat = 0U;
+  g_app_power_snapshot.adc_raw_vsys = 0U;
+  g_app_power_snapshot.adc_raw_psys = 0U;
+  g_app_power_snapshot.adc_raw_vbus = 0U;
+  g_app_power_snapshot.adc_raw_ichg = 0U;
+  g_app_power_snapshot.adc_raw_idchg = 0U;
+  g_app_power_snapshot.adc_raw_iin = 0U;
+  g_app_power_snapshot.adc_raw_cmpin = 0U;
+}
+
 static void AppPower_RecordAdc(const BQ25730_AdcMeasurementsTypeDef *measurements,
                                uint32_t elapsed_ms)
 {
   g_app_power_snapshot.flags |= APP_POWER_FLAG_ADC_VALID;
   g_app_power_snapshot.battery_mv = measurements->battery_voltage_mv;
   g_app_power_snapshot.system_mv = measurements->system_voltage_mv;
+  g_app_power_snapshot.input_voltage_mv = measurements->input_voltage_mv;
+  g_app_power_snapshot.psys_mv = measurements->psys_voltage_mv;
   g_app_power_snapshot.charge_current_ma = measurements->charge_current_ma;
   g_app_power_snapshot.discharge_current_ma = measurements->discharge_current_ma;
   g_app_power_snapshot.input_current_ma = measurements->input_current_ma;
   g_app_power_snapshot.cmpin_mv = measurements->cmpin_voltage_mv;
+  g_app_power_snapshot.adc_raw_vbat = measurements->raw_vbat;
+  g_app_power_snapshot.adc_raw_vsys = measurements->raw_vsys;
+  g_app_power_snapshot.adc_raw_psys = measurements->raw_psys;
+  g_app_power_snapshot.adc_raw_vbus = measurements->raw_vbus;
+  g_app_power_snapshot.adc_raw_ichg = measurements->raw_ichg;
+  g_app_power_snapshot.adc_raw_idchg = measurements->raw_idchg;
+  g_app_power_snapshot.adc_raw_iin = measurements->raw_iin;
+  g_app_power_snapshot.adc_raw_cmpin = measurements->raw_cmpin;
 
   AppPower_UpdateBatteryCurrent();
   AppPower_UpdateRemainingCapacity(elapsed_ms);
@@ -359,12 +450,277 @@ static void AppPower_ReadPins(void)
   }
 }
 
-void AppPower_Init(void)
+static void AppPower_MarkBqOffline(BQ25730_StatusTypeDef status)
+{
+  g_app_power_snapshot.flags &= ~(APP_POWER_FLAG_BQ_PRESENT | APP_POWER_FLAG_ADC_VALID);
+  g_app_power_snapshot.probe_status = (int32_t)status;
+  g_app_power_snapshot.last_i2c_status = (int32_t)status;
+}
+
+static BQ25730_StatusTypeDef AppPower_ProbeDevice(void)
 {
   BQ25730_DeviceIdTypeDef device_id = {0U, 0U};
+  BQ25730_StatusTypeDef status;
+
+  if (g_app_power_snapshot.init_status != BQ25730_OK)
+  {
+    return BQ25730_ERROR;
+  }
+
+  status = BQ25730_Probe(&g_app_bq25730, &device_id);
+  g_app_power_snapshot.probe_status = (int32_t)status;
+  g_app_power_snapshot.last_i2c_status = (int32_t)status;
+  g_app_power_snapshot.manufacturer_id = device_id.manufacturer_id;
+  g_app_power_snapshot.device_id = device_id.device_id;
+
+  if (status == BQ25730_OK)
+  {
+    g_app_power_snapshot.flags |= APP_POWER_FLAG_BQ_PRESENT;
+  }
+  else
+  {
+    AppPower_MarkBqOffline(status);
+  }
+
+  return status;
+}
+
+static BQ25730_StatusTypeDef AppPower_ReadDebugRegister16(uint8_t reg,
+                                                          uint16_t *value)
+{
+  BQ25730_StatusTypeDef status;
+
+  status = BQ25730_ReadRegister16(&g_app_bq25730, reg, value);
+  g_app_power_snapshot.last_i2c_status = (int32_t)status;
+  if (status != BQ25730_OK)
+  {
+    AppPower_MarkBqOffline(status);
+  }
+
+  return status;
+}
+
+static void AppPower_ReadDebugRegisters(void)
+{
+  uint16_t value = 0U;
+
+  if (g_app_power_snapshot.probe_status != BQ25730_OK)
+  {
+    return;
+  }
+
+  if (AppPower_ReadDebugRegister16(BQ25730_REG_CHARGE_OPTION0, &value) != BQ25730_OK)
+  {
+    return;
+  }
+  g_app_power_snapshot.charge_option0 = value;
+  g_app_power_snapshot.low_power_enabled =
+    ((value & BQ25730_CHARGE_OPTION0_EN_LWPWR) != 0U) ? 1U : 0U;
+
+  if (AppPower_ReadDebugRegister16(BQ25730_REG_CHARGE_CURRENT, &g_app_power_snapshot.charge_current_reg) != BQ25730_OK)
+  {
+    return;
+  }
+  if (AppPower_ReadDebugRegister16(BQ25730_REG_CHARGE_VOLTAGE, &g_app_power_snapshot.charge_voltage_reg) != BQ25730_OK)
+  {
+    return;
+  }
+  if (AppPower_ReadDebugRegister16(BQ25730_REG_OTG_VOLTAGE, &g_app_power_snapshot.otg_voltage_reg) != BQ25730_OK)
+  {
+    return;
+  }
+  if (AppPower_ReadDebugRegister16(BQ25730_REG_OTG_CURRENT, &g_app_power_snapshot.otg_current_reg) != BQ25730_OK)
+  {
+    return;
+  }
+  if (AppPower_ReadDebugRegister16(BQ25730_REG_VSYS_MIN, &g_app_power_snapshot.vsys_min_reg) != BQ25730_OK)
+  {
+    return;
+  }
+  if (AppPower_ReadDebugRegister16(BQ25730_REG_IIN_HOST, &g_app_power_snapshot.input_current_reg) != BQ25730_OK)
+  {
+    return;
+  }
+  if (AppPower_ReadDebugRegister16(BQ25730_REG_CHARGE_OPTION1, &g_app_power_snapshot.charge_option1) != BQ25730_OK)
+  {
+    return;
+  }
+  if (AppPower_ReadDebugRegister16(BQ25730_REG_CHARGE_OPTION2, &g_app_power_snapshot.charge_option2) != BQ25730_OK)
+  {
+    return;
+  }
+  if (AppPower_ReadDebugRegister16(BQ25730_REG_CHARGE_OPTION3, &g_app_power_snapshot.charge_option3) != BQ25730_OK)
+  {
+    return;
+  }
+  (void)AppPower_ReadDebugRegister16(BQ25730_REG_ADC_OPTION, &g_app_power_snapshot.adc_option);
+}
+
+static void AppPower_DelayMs(uint32_t delay_ms)
+{
+  if (g_app_bq25730.bus.delay_ms != NULL)
+  {
+    g_app_bq25730.bus.delay_ms(g_app_bq25730.bus.context, delay_ms);
+  }
+}
+
+static BQ25730_StatusTypeDef AppPower_RestartAdc(void)
+{
+  BQ25730_StatusTypeDef status;
+
+  status = BQ25730_ConfigureAdc(&g_app_bq25730, APP_POWER_ADC_CHANNELS, 1U);
+  g_app_power_snapshot.adc_status = (int32_t)status;
+  g_app_power_snapshot.last_i2c_status = (int32_t)status;
+  if (status != BQ25730_OK)
+  {
+    AppPower_ClearAdcSnapshot();
+  }
+
+  return status;
+}
+
+static BQ25730_StatusTypeDef AppPower_ConfigureDetectedDevice(void)
+{
+  BQ25730_StatusTypeDef status;
+
+  status = BQ25730_SetOtgEnabled(&g_app_bq25730, 0U);
+  g_app_power_snapshot.last_i2c_status = (int32_t)status;
+  if (status == BQ25730_OK)
+  {
+    status = BQ25730_SetChargeVoltageMv(&g_app_bq25730, APP_POWER_3S_CHARGE_VOLTAGE_MV);
+    g_app_power_snapshot.last_i2c_status = (int32_t)status;
+  }
+  if (status == BQ25730_OK)
+  {
+    status = BQ25730_SetChargeCurrentMa(&g_app_bq25730, APP_POWER_DEFAULT_CHARGE_CURRENT_MA);
+    g_app_power_snapshot.last_i2c_status = (int32_t)status;
+  }
+  if (status == BQ25730_OK)
+  {
+    status = BQ25730_ConfigureComparatorLowOnLow(&g_app_bq25730);
+    g_app_power_snapshot.last_i2c_status = (int32_t)status;
+  }
+#if APP_TEMP_BQ_DEBUG_MODE
+  if (status == BQ25730_OK)
+  {
+    status = BQ25730_SetLowPowerMode(&g_app_bq25730, 0U);
+    g_app_power_snapshot.low_power_status = (int32_t)status;
+    g_app_power_snapshot.last_i2c_status = (int32_t)status;
+    g_app_power_snapshot.low_power_target = 0U;
+    if (status == BQ25730_OK)
+    {
+      g_app_power_snapshot.low_power_enabled = 0U;
+      AppPower_DelayMs(10U);
+    }
+  }
+#endif
+  if (status == BQ25730_OK)
+  {
+    (void)AppPower_RestartAdc();
+  }
+
+  if (status != BQ25730_OK)
+  {
+    AppPower_MarkBqOffline(status);
+  }
+
+  return status;
+}
+
+static void AppPower_ProcessLowPowerRequest(void)
+{
+  BQ25730_StatusTypeDef status;
+
+  if ((g_app_power_snapshot.low_power_request_pending == 0U) ||
+      (g_app_power_snapshot.probe_status != BQ25730_OK))
+  {
+    return;
+  }
+
+  g_app_power_snapshot.low_power_request_pending = 0U;
+  status = BQ25730_SetLowPowerMode(&g_app_bq25730,
+                                   g_app_power_snapshot.low_power_target);
+  g_app_power_snapshot.low_power_status = (int32_t)status;
+  g_app_power_snapshot.last_i2c_status = (int32_t)status;
+  g_app_power_snapshot.low_power_command_count++;
+
+  if (status == BQ25730_OK)
+  {
+    g_app_power_snapshot.low_power_enabled =
+      (g_app_power_snapshot.low_power_target == 0U) ? 0U : 1U;
+    if (g_app_power_snapshot.low_power_target == 0U)
+    {
+      AppPower_DelayMs(10U);
+      (void)AppPower_RestartAdc();
+    }
+    else
+    {
+      AppPower_ClearAdcSnapshot();
+    }
+  }
+  else
+  {
+    AppPower_MarkBqOffline(status);
+  }
+}
+
+static void AppPower_ReadLiveStatus(uint32_t elapsed_ms, uint8_t read_prochot)
+{
   BQ25730_AdcMeasurementsTypeDef measurements;
   uint16_t charger_status = 0U;
   uint16_t prochot_status = 0U;
+  BQ25730_StatusTypeDef status;
+
+  if (g_app_power_snapshot.probe_status != BQ25730_OK)
+  {
+    return;
+  }
+
+  status = BQ25730_ReadChargerStatus(&g_app_bq25730, &charger_status);
+  g_app_power_snapshot.last_i2c_status = (int32_t)status;
+  if (status != BQ25730_OK)
+  {
+    AppPower_MarkBqOffline(status);
+    return;
+  }
+  g_app_power_snapshot.charger_status = charger_status;
+
+  if (read_prochot != 0U)
+  {
+    status = BQ25730_ReadProchotStatus(&g_app_bq25730, &prochot_status);
+    g_app_power_snapshot.last_i2c_status = (int32_t)status;
+    if (status != BQ25730_OK)
+    {
+      AppPower_MarkBqOffline(status);
+      return;
+    }
+    g_app_power_snapshot.prochot_status = prochot_status;
+  }
+
+  if (g_app_power_snapshot.low_power_enabled != 0U)
+  {
+    g_app_power_snapshot.adc_status = BQ25730_ERROR;
+    AppPower_ClearAdcSnapshot();
+  }
+  else
+  {
+    status = BQ25730_ReadAdcMeasurements(&g_app_bq25730, &measurements);
+    g_app_power_snapshot.adc_status = (int32_t)status;
+    if (status == BQ25730_OK)
+    {
+      AppPower_RecordAdc(&measurements, elapsed_ms);
+    }
+    else
+    {
+      AppPower_ClearAdcSnapshot();
+    }
+  }
+
+  AppPower_ReadDebugRegisters();
+}
+
+void AppPower_Init(void)
+{
   BQ25730_StatusTypeDef status;
 
   AppPower_ResetSnapshot();
@@ -384,64 +740,14 @@ void AppPower_Init(void)
 
   AppPower_ReadPins();
 
-  status = BQ25730_Probe(&g_app_bq25730, &device_id);
-  g_app_power_snapshot.probe_status = (int32_t)status;
-  g_app_power_snapshot.last_i2c_status = (int32_t)status;
-  g_app_power_snapshot.manufacturer_id = device_id.manufacturer_id;
-  g_app_power_snapshot.device_id = device_id.device_id;
-  if (status != BQ25730_OK)
-  {
-    AppPower_ProcessUndervoltage(0U);
-    AppPower_UpdateState();
-    AppPower_UpdateDebugGlobals();
-    return;
-  }
-
-  g_app_power_snapshot.flags |= APP_POWER_FLAG_BQ_PRESENT;
-
-  status = BQ25730_SetOtgEnabled(&g_app_bq25730, 0U);
-  g_app_power_snapshot.last_i2c_status = (int32_t)status;
-
+  status = AppPower_ProbeDevice();
   if (status == BQ25730_OK)
   {
-    status = BQ25730_SetChargeVoltageMv(&g_app_bq25730, APP_POWER_3S_CHARGE_VOLTAGE_MV);
-    g_app_power_snapshot.last_i2c_status = (int32_t)status;
-  }
-  if (status == BQ25730_OK)
-  {
-    status = BQ25730_SetChargeCurrentMa(&g_app_bq25730, APP_POWER_DEFAULT_CHARGE_CURRENT_MA);
-    g_app_power_snapshot.last_i2c_status = (int32_t)status;
-  }
-  if (status == BQ25730_OK)
-  {
-    status = BQ25730_ConfigureComparatorLowOnLow(&g_app_bq25730);
-    g_app_power_snapshot.last_i2c_status = (int32_t)status;
-  }
-  if (status == BQ25730_OK)
-  {
-    status = BQ25730_ConfigureAdc(&g_app_bq25730, APP_POWER_ADC_CHANNELS, 1U);
-    g_app_power_snapshot.last_i2c_status = (int32_t)status;
-  }
-
-  status = BQ25730_ReadChargerStatus(&g_app_bq25730, &charger_status);
-  g_app_power_snapshot.last_i2c_status = (int32_t)status;
-  if (status == BQ25730_OK)
-  {
-    g_app_power_snapshot.charger_status = charger_status;
-  }
-
-  status = BQ25730_ReadProchotStatus(&g_app_bq25730, &prochot_status);
-  g_app_power_snapshot.last_i2c_status = (int32_t)status;
-  if (status == BQ25730_OK)
-  {
-    g_app_power_snapshot.prochot_status = prochot_status;
-  }
-
-  status = BQ25730_ReadAdcMeasurements(&g_app_bq25730, &measurements);
-  g_app_power_snapshot.last_i2c_status = (int32_t)status;
-  if (status == BQ25730_OK)
-  {
-    AppPower_RecordAdc(&measurements, 0U);
+    status = AppPower_ConfigureDetectedDevice();
+    if (status == BQ25730_OK)
+    {
+      AppPower_ReadLiveStatus(0U, 1U);
+    }
   }
 
   AppPower_ProcessUndervoltage(0U);
@@ -451,33 +757,23 @@ void AppPower_Init(void)
 
 void AppPower_Poll(uint32_t elapsed_ms)
 {
-  BQ25730_AdcMeasurementsTypeDef measurements;
-  uint16_t charger_status = 0U;
   BQ25730_StatusTypeDef status;
 
   AppPower_ReadPins();
 
-  if (g_app_power_snapshot.probe_status == BQ25730_OK)
+  if ((g_app_power_snapshot.init_status == BQ25730_OK) &&
+      (g_app_power_snapshot.probe_status != BQ25730_OK))
   {
-    status = BQ25730_ReadChargerStatus(&g_app_bq25730, &charger_status);
-    g_app_power_snapshot.last_i2c_status = (int32_t)status;
+    status = AppPower_ProbeDevice();
     if (status == BQ25730_OK)
     {
-      g_app_power_snapshot.charger_status = charger_status;
-    }
-
-    status = BQ25730_ReadAdcMeasurements(&g_app_bq25730, &measurements);
-    g_app_power_snapshot.last_i2c_status = (int32_t)status;
-    if (status == BQ25730_OK)
-    {
-      AppPower_RecordAdc(&measurements, elapsed_ms);
-    }
-    else
-    {
-      g_app_power_snapshot.flags &= ~APP_POWER_FLAG_ADC_VALID;
+      (void)AppPower_ConfigureDetectedDevice();
+      AppPower_ReadLiveStatus(0U, 1U);
     }
   }
 
+  AppPower_ProcessLowPowerRequest();
+  AppPower_ReadLiveStatus(elapsed_ms, 0U);
   AppPower_ProcessUndervoltage(elapsed_ms);
   AppPower_UpdateState();
   g_app_power_snapshot.update_count++;
@@ -519,4 +815,13 @@ int32_t AppPower_SetCharging(uint8_t enabled, uint32_t current_ma)
   AppPower_UpdateDebugGlobals();
 
   return (int32_t)status;
+}
+
+int32_t AppPower_RequestLowPowerMode(uint8_t enabled)
+{
+  g_app_power_snapshot.low_power_target = (enabled == 0U) ? 0U : 1U;
+  g_app_power_snapshot.low_power_request_pending = 1U;
+  AppPower_UpdateDebugGlobals();
+
+  return (g_app_power_snapshot.probe_status == BQ25730_OK) ? BQ25730_OK : BQ25730_ERROR;
 }

@@ -45,28 +45,30 @@ extern "C" {
 #define BQ25730_REG_CHARGE_OPTION4            0x3CU
 #define BQ25730_REG_VMIN_ACTIVE_PROTECTION    0x3EU
 
+#define BQ25730_CHARGE_OPTION0_EN_LWPWR       0x8000U
+
 #define BQ25730_PIN_STATE_PROCHOT             0x00000001UL
 #define BQ25730_PIN_STATE_CHRG_OK             0x00000002UL
 #define BQ25730_PIN_STATE_OTG_VAP             0x00000004UL
 #define BQ25730_PIN_STATE_CMPOUT              0x00000008UL
 #define BQ25730_PIN_STATE_PG                  0x00000010UL
 
-#define BQ25730_CHARGER_STATUS_IN_OTG         0x0001U
-#define BQ25730_CHARGER_STATUS_IN_PCHRG       0x0002U
-#define BQ25730_CHARGER_STATUS_IN_FCHRG       0x0004U
-#define BQ25730_CHARGER_STATUS_IN_IIN_DPM     0x0008U
-#define BQ25730_CHARGER_STATUS_IN_VINDPM      0x0010U
-#define BQ25730_CHARGER_STATUS_IN_VAP         0x0020U
-#define BQ25730_CHARGER_STATUS_ICO_DONE       0x0040U
-#define BQ25730_CHARGER_STATUS_STAT_AC        0x0080U
-#define BQ25730_CHARGER_STATUS_FAULT_OTG_UVP  0x0100U
-#define BQ25730_CHARGER_STATUS_FAULT_OTG_OVP  0x0200U
-#define BQ25730_CHARGER_STATUS_FORCE_CONV_OFF 0x0400U
-#define BQ25730_CHARGER_STATUS_FAULT_VSYS_UVP 0x0800U
-#define BQ25730_CHARGER_STATUS_FAULT_SYSOVP   0x1000U
-#define BQ25730_CHARGER_STATUS_FAULT_ACOC     0x2000U
-#define BQ25730_CHARGER_STATUS_FAULT_BATOC    0x4000U
-#define BQ25730_CHARGER_STATUS_FAULT_ACOV     0x8000U
+#define BQ25730_CHARGER_STATUS_FAULT_OTG_UVP  0x0001U
+#define BQ25730_CHARGER_STATUS_FAULT_OTG_OVP  0x0002U
+#define BQ25730_CHARGER_STATUS_FORCE_CONV_OFF 0x0004U
+#define BQ25730_CHARGER_STATUS_FAULT_VSYS_UVP 0x0008U
+#define BQ25730_CHARGER_STATUS_FAULT_SYSOVP   0x0010U
+#define BQ25730_CHARGER_STATUS_FAULT_ACOC     0x0020U
+#define BQ25730_CHARGER_STATUS_FAULT_BATOC    0x0040U
+#define BQ25730_CHARGER_STATUS_FAULT_ACOV     0x0080U
+#define BQ25730_CHARGER_STATUS_IN_OTG         0x0100U
+#define BQ25730_CHARGER_STATUS_IN_PCHRG       0x0200U
+#define BQ25730_CHARGER_STATUS_IN_FCHRG       0x0400U
+#define BQ25730_CHARGER_STATUS_IN_IIN_DPM     0x0800U
+#define BQ25730_CHARGER_STATUS_IN_VINDPM      0x1000U
+#define BQ25730_CHARGER_STATUS_IN_VAP         0x2000U
+#define BQ25730_CHARGER_STATUS_ICO_DONE       0x4000U
+#define BQ25730_CHARGER_STATUS_STAT_AC        0x8000U
 
 #define BQ25730_ADC_CHANNEL_VBAT              0x0001U
 #define BQ25730_ADC_CHANNEL_VSYS              0x0002U
@@ -134,6 +136,8 @@ typedef struct
 {
     uint8_t vbat;
     uint8_t vsys;
+    uint8_t psys;
+    uint8_t vbus;
     uint8_t ichg;
     uint8_t idchg;
     uint8_t iin;
@@ -144,10 +148,20 @@ typedef struct
 {
     uint32_t battery_voltage_mv;
     uint32_t system_voltage_mv;
+    uint32_t psys_voltage_mv;
+    uint32_t input_voltage_mv;
     uint32_t charge_current_ma;
     uint32_t discharge_current_ma;
     uint32_t input_current_ma;
     uint32_t cmpin_voltage_mv;
+    uint8_t raw_vbat;
+    uint8_t raw_vsys;
+    uint8_t raw_psys;
+    uint8_t raw_vbus;
+    uint8_t raw_ichg;
+    uint8_t raw_idchg;
+    uint8_t raw_iin;
+    uint8_t raw_cmpin;
 } BQ25730_AdcMeasurementsTypeDef;
 
 BQ25730_StatusTypeDef BQ25730_Init(BQ25730_HandleTypeDef *handle,
@@ -190,6 +204,12 @@ BQ25730_StatusTypeDef BQ25730_SetOtgCurrentMa(BQ25730_HandleTypeDef *handle,
 
 BQ25730_StatusTypeDef BQ25730_SetOtgEnabled(BQ25730_HandleTypeDef *handle,
                                             uint8_t enabled);
+
+BQ25730_StatusTypeDef BQ25730_ReadChargeOption0(BQ25730_HandleTypeDef *handle,
+                                                uint16_t *charge_option0);
+
+BQ25730_StatusTypeDef BQ25730_SetLowPowerMode(BQ25730_HandleTypeDef *handle,
+                                              uint8_t enabled);
 
 BQ25730_StatusTypeDef BQ25730_ConfigureAdc(BQ25730_HandleTypeDef *handle,
                                            uint16_t adc_channels,

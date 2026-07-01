@@ -22,7 +22,7 @@ const char* screenName(uint8_t screen)
     case APP_UI_SCREEN_PERF:
         return "PERF";
     case APP_UI_SCREEN_SETTINGS:
-        return "SET";
+        return "BQ";
     case APP_UI_SCREEN_MEDIA:
         return "MEDIA";
     default:
@@ -107,6 +107,34 @@ touchgfx::colortype levelColor(uint8_t level)
     return rgb(43, 73, 78);
 }
 
+static const uint32_t BQ_PIN_PROCHOT = 0x01U;
+static const uint32_t BQ_PIN_CHRG_OK = 0x02U;
+static const uint32_t BQ_PIN_OTG_VAP = 0x04U;
+static const uint32_t BQ_PIN_CMPOUT = 0x08U;
+static const uint32_t BQ_PIN_PG = 0x10U;
+
+static const uint16_t BQ_FAULT_OTG_UVP = 0x0001U;
+static const uint16_t BQ_FAULT_OTG_OVP = 0x0002U;
+static const uint16_t BQ_FORCE_CONV_OFF = 0x0004U;
+static const uint16_t BQ_FAULT_VSYS_UVP = 0x0008U;
+static const uint16_t BQ_FAULT_SYSOVP = 0x0010U;
+static const uint16_t BQ_FAULT_ACOC = 0x0020U;
+static const uint16_t BQ_FAULT_BATOC = 0x0040U;
+static const uint16_t BQ_FAULT_ACOV = 0x0080U;
+static const uint16_t BQ_STAT_IN_OTG = 0x0100U;
+static const uint16_t BQ_STAT_IN_PCHRG = 0x0200U;
+static const uint16_t BQ_STAT_IN_FCHRG = 0x0400U;
+static const uint16_t BQ_STAT_IN_IIN_DPM = 0x0800U;
+static const uint16_t BQ_STAT_IN_VINDPM = 0x1000U;
+static const uint16_t BQ_STAT_IN_VAP = 0x2000U;
+static const uint16_t BQ_STAT_AC = 0x8000U;
+static const uint16_t BQ_CHRG_OK_PULLDOWN_MASK = BQ_FORCE_CONV_OFF |
+                                                 BQ_FAULT_VSYS_UVP |
+                                                 BQ_FAULT_SYSOVP |
+                                                 BQ_FAULT_ACOC |
+                                                 BQ_FAULT_BATOC |
+                                                 BQ_FAULT_ACOV;
+
 void setupLabel(AppTextLabel& label,
                 int16_t x,
                 int16_t y,
@@ -130,6 +158,7 @@ TemplateView::TemplateView()
     : navPressedCallback(this, &TemplateView::onNavPressed),
       profilePressedCallback(this, &TemplateView::onProfilePressed),
       mediaPressedCallback(this, &TemplateView::onMediaPressed),
+      bqModePressedCallback(this, &TemplateView::onBqModePressed),
       activeScreen(APP_UI_SCREEN_IMAGE),
       activeProfile(APP_UI_PROFILE_BALANCED)
 {
@@ -192,7 +221,7 @@ void TemplateView::setupStaticUi()
 
 void TemplateView::setupNavigation()
 {
-    const char* labels[NavCount] = {"IMAGE", "MICS", "PERF", "SET", "MEDIA"};
+    const char* labels[NavCount] = {"IMAGE", "MICS", "PERF", "BQ", "MEDIA"};
 
     for (uint32_t i = 0U; i < NavCount; ++i)
     {
@@ -278,17 +307,52 @@ void TemplateView::setupPerfPage()
 
 void TemplateView::setupSettingsPage()
 {
-    setupLabel(settingsLabel[0], 190, 150, 420, 28, 2, "MODE WIDE32 48K", rgb(235, 239, 232), rgb(20, 23, 26));
-    setupLabel(settingsLabel[1], 190, 194, 420, 28, 2, "NFFT 256 BINS 3..42", rgb(192, 199, 194), rgb(20, 23, 26));
-    setupLabel(settingsLabel[2], 190, 238, 420, 28, 2, "PAIRS BAL 160", rgb(192, 199, 194), rgb(20, 23, 26));
-    setupLabel(settingsLabel[3], 190, 282, 420, 28, 2, "GRID 9X9 TOP3 FINE", rgb(192, 199, 194), rgb(20, 23, 26));
-    setupLabel(settingsLabel[4], 190, 326, 420, 28, 2, "SOURCE SYNTH", rgb(225, 145, 102), rgb(20, 23, 26));
-    setupLabel(settingsLabel[5], 190, 370, 420, 28, 2, "CORE16 192K LOCKED", rgb(121, 132, 135), rgb(20, 23, 26));
-    setupLabel(settingsLabel[6], 190, 414, 450, 28, 2, "REAL CAPTURE WAITS PCMD", rgb(121, 132, 135), rgb(20, 23, 26));
+    const char* initial[SettingsCount] = {
+        "I2C WAIT INIT -- PROBE -- LAST -- ADC --",
+        "ID M-- D-- UPD 000000 STATE --",
+        "CHRG PIN0 AC0 FLT0 WANT LOW",
+        "VBUS --.--V VBAT --.--V VSYS --.--V",
+        "FAULT ACOV0 ACOC0 SYS0 VSYS0",
+        "FAULT BATOC0 OTGUV0 OTGOV0 FORCE0",
+        "PIN PRO0 CHG0 OTG0 CMP0 PG0 RAW 0x00",
+        "MODE OTG0 VAP0 VINDPM0 IINDPM0",
+        "OPT0 0x0000 LPOFF ADC 0x0000",
+        "VCHG 0x0000 ICHG 0x0000 IIN 0x0000",
+        "VSYSMIN 0x0000 OTGV 0x0000 OTGI 0x0000",
+        "RAWADC BAT00 SYS00 BUS00 PSY00",
+        "CMD TARGET -- STAT -- COUNT 0"
+    };
 
     for (uint32_t i = 0U; i < SettingsCount; ++i)
     {
+        setupLabel(settingsLabel[i],
+                   190,
+                   static_cast<int16_t>(132 + (i * 28)),
+                   536,
+                   24,
+                   1,
+                   initial[i],
+                   (i == 0U) ? rgb(226, 172, 62) : rgb(216, 222, 216),
+                   rgb(20, 23, 26));
         add(settingsLabel[i]);
+    }
+
+    const char* modeLabels[BqModeButtonCount] = {"LOW PWR", "NORMAL"};
+    for (uint32_t i = 0U; i < BqModeButtonCount; ++i)
+    {
+        const int16_t x = static_cast<int16_t>(190 + (i * 150));
+        bqModeButton[i].setPosition(x, 512, 132, 42);
+        bqModeButton[i].setColor(rgb(33, 38, 41));
+        bqModeButton[i].setBorderColor(rgb(58, 66, 68));
+        bqModeButton[i].setBorderSize(2);
+        add(bqModeButton[i]);
+
+        setupLabel(bqModeLabel[i], static_cast<int16_t>(x + 8), 525, 116, 18, 1, modeLabels[i], rgb(223, 230, 224), rgb(33, 38, 41), AppTextLabel::ALIGN_CENTER);
+        add(bqModeLabel[i]);
+
+        bqModeTouch[i].setPosition(x, 512, 132, 42);
+        bqModeTouch[i].setAction(bqModePressedCallback);
+        add(bqModeTouch[i]);
     }
 }
 
@@ -468,6 +532,15 @@ void TemplateView::refreshVisibility()
         settingsLabel[i].setVisible(settingsVisible);
         settingsLabel[i].invalidate();
     }
+    for (uint32_t i = 0U; i < BqModeButtonCount; ++i)
+    {
+        bqModeButton[i].setVisible(settingsVisible);
+        bqModeTouch[i].setVisible(settingsVisible);
+        bqModeLabel[i].setVisible(settingsVisible);
+        bqModeButton[i].invalidate();
+        bqModeTouch[i].invalidate();
+        bqModeLabel[i].invalidate();
+    }
 
     for (uint32_t i = 0U; i < MediaLabelCount; ++i)
     {
@@ -488,7 +561,14 @@ void TemplateView::refreshVisibility()
 void TemplateView::refreshNavigation()
 {
     char text[40];
-    (void)snprintf(text, sizeof(text), "SRP PHAT %s", screenName(activeScreen));
+    if (activeScreen == APP_UI_SCREEN_SETTINGS)
+    {
+        (void)snprintf(text, sizeof(text), "BQ25730 DEBUG");
+    }
+    else
+    {
+        (void)snprintf(text, sizeof(text), "SRP PHAT %s", screenName(activeScreen));
+    }
     pageTitleLabel.setText(text);
 
     for (uint32_t i = 0U; i < NavCount; ++i)
@@ -528,12 +608,19 @@ void TemplateView::refreshDetails(const AppUiSnapshot& snapshot)
     char text[48];
     const bool powerReady = ((snapshot.powerFlags & APP_UI_POWER_FLAG_BQ_PRESENT) != 0U);
     const bool adcReady = ((snapshot.powerFlags & APP_UI_POWER_FLAG_ADC_VALID) != 0U);
+    const bool i2cOk = (powerReady &&
+                        (snapshot.powerProbeStatus == 0) &&
+                        (snapshot.powerLastI2cStatus == 0));
+    const bool statAc = ((snapshot.chargerStatus & BQ_STAT_AC) != 0U);
+    const bool chrgOkPin = ((snapshot.powerPinState & BQ_PIN_CHRG_OK) != 0U);
     const bool powerFault = ((snapshot.powerState == APP_UI_POWER_STATE_FAULT) ||
                              (snapshot.powerState == APP_UI_POWER_STATE_UNDERVOLTAGE));
+    const touchgfx::colortype dotColor = powerFault ? rgb(225, 91, 63) :
+                                         (i2cOk ? rgb(82, 196, 126) :
+                                         (adcReady ? rgb(109, 212, 186) :
+                                         (snapshot.touchReady ? rgb(109, 212, 186) : rgb(226, 172, 62))));
 
-    statusDot.setColor(powerFault ? rgb(225, 91, 63) :
-                       (adcReady ? rgb(82, 196, 126) :
-                       (snapshot.touchReady ? rgb(109, 212, 186) : rgb(226, 172, 62))));
+    statusDot.setColor(dotColor);
     statusDot.invalidate();
 
     (void)snprintf(text, sizeof(text), "POWER %s", powerStateName(snapshot.powerState));
@@ -579,9 +666,11 @@ void TemplateView::refreshDetails(const AppUiSnapshot& snapshot)
                    static_cast<unsigned long>(snapshot.uiFpsX10 / 10U),
                    static_cast<unsigned long>(snapshot.uiFpsX10 % 10U));
     detailLabel[9].setText(text);
-    (void)snprintf(text, sizeof(text), "BQ 0x%04X PIN %02lX",
-                   static_cast<unsigned int>(snapshot.chargerStatus),
-                   static_cast<unsigned long>(snapshot.powerPinState & 0xFFU));
+    (void)snprintf(text, sizeof(text), "BQ %s AC%u CHG%u 0x%04X",
+                   i2cOk ? "OK" : "NO",
+                   statAc ? 1U : 0U,
+                   chrgOkPin ? 1U : 0U,
+                   static_cast<unsigned int>(snapshot.chargerStatus));
     detailLabel[10].setText(text);
 }
 
@@ -647,12 +736,148 @@ void TemplateView::refreshPerfPage(const AppUiSnapshot& snapshot)
 
 void TemplateView::refreshSettingsPage(const AppUiSnapshot& snapshot)
 {
-    char text[48];
-    (void)snprintf(text, sizeof(text), "PAIRS %s %u",
-                   profileName(snapshot.activeProfile),
-                   (snapshot.activeProfile == APP_UI_PROFILE_FAST) ? 96U :
-                   ((snapshot.activeProfile == APP_UI_PROFILE_QUALITY) ? 240U : 160U));
+    char text[96];
+    const bool powerReady = ((snapshot.powerFlags & APP_UI_POWER_FLAG_BQ_PRESENT) != 0U);
+    const bool adcReady = ((snapshot.powerFlags & APP_UI_POWER_FLAG_ADC_VALID) != 0U);
+    const bool i2cOk = (powerReady &&
+                        (snapshot.powerProbeStatus == 0) &&
+                        (snapshot.powerLastI2cStatus == 0));
+    const uint16_t chargerStatus = snapshot.chargerStatus;
+    const bool statAc = ((chargerStatus & BQ_STAT_AC) != 0U);
+    const bool chrgOkPin = ((snapshot.powerPinState & BQ_PIN_CHRG_OK) != 0U);
+    const bool chrgOkFault = ((chargerStatus & BQ_CHRG_OK_PULLDOWN_MASK) != 0U);
+    const bool chrgOkShouldRelease = (statAc && !chrgOkFault);
+    const bool chrgOkMismatch = (chrgOkShouldRelease && !chrgOkPin);
+    const uint32_t pin = snapshot.powerPinState;
+
+    (void)snprintf(text, sizeof(text), "I2C %s INIT %ld PROBE %ld LAST %ld ADC %ld",
+                   i2cOk ? "OK" : "DOWN",
+                   static_cast<long>(snapshot.powerInitStatus),
+                   static_cast<long>(snapshot.powerProbeStatus),
+                   static_cast<long>(snapshot.powerLastI2cStatus),
+                   static_cast<long>(snapshot.powerAdcStatus));
+    settingsLabel[0].setText(text);
+    settingsLabel[0].setColors(i2cOk ? rgb(161, 221, 206) : rgb(225, 145, 102), rgb(20, 23, 26));
+
+    (void)snprintf(text, sizeof(text), "ID M%02X D%02X UPD %06lu STATE %s",
+                   snapshot.bqManufacturerId,
+                   snapshot.bqDeviceId,
+                   static_cast<unsigned long>(snapshot.powerUpdateCount),
+                   powerStateName(snapshot.powerState));
+    settingsLabel[1].setText(text);
+
+    (void)snprintf(text, sizeof(text), "CHRG PIN%u AC%u FLT%u WANT %s",
+                   chrgOkPin ? 1U : 0U,
+                   statAc ? 1U : 0U,
+                   chrgOkFault ? 1U : 0U,
+                   chrgOkShouldRelease ? "HI" : "LOW");
     settingsLabel[2].setText(text);
+    settingsLabel[2].setColors(chrgOkMismatch ? rgb(225, 91, 63) :
+                               (chrgOkShouldRelease ? rgb(161, 221, 206) : rgb(226, 172, 62)),
+                               rgb(20, 23, 26));
+
+    if (adcReady)
+    {
+        (void)snprintf(text, sizeof(text), "VBUS %lu.%02luV VBAT %lu.%02luV VSYS %lu.%02luV",
+                       static_cast<unsigned long>(snapshot.inputVoltageMv / 1000U),
+                       static_cast<unsigned long>((snapshot.inputVoltageMv % 1000U) / 10U),
+                       static_cast<unsigned long>(snapshot.batteryMv / 1000U),
+                       static_cast<unsigned long>((snapshot.batteryMv % 1000U) / 10U),
+                       static_cast<unsigned long>(snapshot.systemMv / 1000U),
+                       static_cast<unsigned long>((snapshot.systemMv % 1000U) / 10U));
+    }
+    else
+    {
+        (void)snprintf(text, sizeof(text), "VBUS --.--V VBAT --.--V VSYS --.--V ADC %ld",
+                       static_cast<long>(snapshot.powerAdcStatus));
+    }
+    settingsLabel[3].setText(text);
+    settingsLabel[3].setColors(adcReady ? rgb(216, 222, 216) : rgb(226, 172, 62), rgb(20, 23, 26));
+
+    (void)snprintf(text, sizeof(text), "FAULT ACOV%u ACOC%u SYS%u VSYS%u",
+                   ((chargerStatus & BQ_FAULT_ACOV) != 0U) ? 1U : 0U,
+                   ((chargerStatus & BQ_FAULT_ACOC) != 0U) ? 1U : 0U,
+                   ((chargerStatus & BQ_FAULT_SYSOVP) != 0U) ? 1U : 0U,
+                   ((chargerStatus & BQ_FAULT_VSYS_UVP) != 0U) ? 1U : 0U);
+    settingsLabel[4].setText(text);
+
+    (void)snprintf(text, sizeof(text), "FAULT BATOC%u OTGUV%u OTGOV%u FORCE%u",
+                   ((chargerStatus & BQ_FAULT_BATOC) != 0U) ? 1U : 0U,
+                   ((chargerStatus & BQ_FAULT_OTG_UVP) != 0U) ? 1U : 0U,
+                   ((chargerStatus & BQ_FAULT_OTG_OVP) != 0U) ? 1U : 0U,
+                   ((chargerStatus & BQ_FORCE_CONV_OFF) != 0U) ? 1U : 0U);
+    settingsLabel[5].setText(text);
+
+    (void)snprintf(text, sizeof(text), "PIN PRO%u CHG%u OTG%u CMP%u PG%u RAW 0x%02lX",
+                   ((pin & BQ_PIN_PROCHOT) != 0U) ? 1U : 0U,
+                   ((pin & BQ_PIN_CHRG_OK) != 0U) ? 1U : 0U,
+                   ((pin & BQ_PIN_OTG_VAP) != 0U) ? 1U : 0U,
+                   ((pin & BQ_PIN_CMPOUT) != 0U) ? 1U : 0U,
+                   ((pin & BQ_PIN_PG) != 0U) ? 1U : 0U,
+                   static_cast<unsigned long>(pin & 0xFFU));
+    settingsLabel[6].setText(text);
+
+    (void)snprintf(text, sizeof(text), "MODE OTG%u VAP%u VINDPM%u IINDPM%u CHG%u%u",
+                   ((chargerStatus & BQ_STAT_IN_OTG) != 0U) ? 1U : 0U,
+                   ((chargerStatus & BQ_STAT_IN_VAP) != 0U) ? 1U : 0U,
+                   ((chargerStatus & BQ_STAT_IN_VINDPM) != 0U) ? 1U : 0U,
+                   ((chargerStatus & BQ_STAT_IN_IIN_DPM) != 0U) ? 1U : 0U,
+                   ((chargerStatus & BQ_STAT_IN_PCHRG) != 0U) ? 1U : 0U,
+                   ((chargerStatus & BQ_STAT_IN_FCHRG) != 0U) ? 1U : 0U);
+    settingsLabel[7].setText(text);
+
+    (void)snprintf(text, sizeof(text), "OPT0 0x%04X LP%s ADC 0x%04X",
+                   static_cast<unsigned int>(snapshot.bqChargeOption0),
+                   snapshot.bqLowPowerEnabled ? "ON" : "OFF",
+                   static_cast<unsigned int>(snapshot.bqAdcOption));
+    settingsLabel[8].setText(text);
+
+    (void)snprintf(text, sizeof(text), "VCHG 0x%04X ICHG 0x%04X IIN 0x%04X",
+                   static_cast<unsigned int>(snapshot.bqChargeVoltageReg),
+                   static_cast<unsigned int>(snapshot.bqChargeCurrentReg),
+                   static_cast<unsigned int>(snapshot.bqInputCurrentReg));
+    settingsLabel[9].setText(text);
+
+    (void)snprintf(text, sizeof(text), "VSYSMIN 0x%04X OTGV 0x%04X OTGI 0x%04X",
+                   static_cast<unsigned int>(snapshot.bqVsysMinReg),
+                   static_cast<unsigned int>(snapshot.bqOtgVoltageReg),
+                   static_cast<unsigned int>(snapshot.bqOtgCurrentReg));
+    settingsLabel[10].setText(text);
+
+    (void)snprintf(text, sizeof(text), "RAWADC BAT%02X SYS%02X BUS%02X PSY%02X",
+                   static_cast<unsigned int>(snapshot.bqAdcRawVbat),
+                   static_cast<unsigned int>(snapshot.bqAdcRawVsys),
+                   static_cast<unsigned int>(snapshot.bqAdcRawVbus),
+                   static_cast<unsigned int>(snapshot.bqAdcRawPsys));
+    settingsLabel[11].setText(text);
+
+    (void)snprintf(text, sizeof(text), "CMD %s TARGET %s STAT %ld CNT %lu",
+                   snapshot.bqLowPowerRequestPending ? "PEND" : "IDLE",
+                   snapshot.bqLowPowerTarget ? "LOW" : "NORMAL",
+                   static_cast<long>(snapshot.bqLowPowerStatus),
+                   static_cast<unsigned long>(snapshot.bqLowPowerCommandCount));
+    settingsLabel[12].setText(text);
+
+    for (uint32_t i = 0U; i < BqModeButtonCount; ++i)
+    {
+        const bool pending = ((snapshot.bqLowPowerRequestPending != 0U) &&
+                              (((i == 0U) && (snapshot.bqLowPowerTarget != 0U)) ||
+                               ((i == 1U) && (snapshot.bqLowPowerTarget == 0U))));
+        const bool selected = (i2cOk &&
+                               (((i == 0U) && (snapshot.bqLowPowerEnabled != 0U)) ||
+                                ((i == 1U) && (snapshot.bqLowPowerEnabled == 0U))));
+        const touchgfx::colortype buttonColor = !i2cOk ? rgb(46, 48, 48) :
+                                                (pending ? rgb(88, 68, 40) :
+                                                (selected ? rgb(58, 82, 74) : rgb(33, 38, 41)));
+        const touchgfx::colortype borderColor = !i2cOk ? rgb(72, 76, 76) :
+                                                (pending ? rgb(226, 172, 62) :
+                                                (selected ? rgb(109, 212, 186) : rgb(58, 66, 68)));
+
+        bqModeButton[i].setColor(buttonColor);
+        bqModeButton[i].setBorderColor(borderColor);
+        bqModeButton[i].invalidate();
+        bqModeLabel[i].setColors(!i2cOk ? rgb(166, 174, 170) : rgb(223, 230, 224), buttonColor, true);
+    }
 }
 
 void TemplateView::refreshMediaPage(const AppUiSnapshot& snapshot)
@@ -795,6 +1020,18 @@ void TemplateView::onMediaPressed(const touchgfx::AbstractButton& source)
             {
                 presenter->refreshMedia();
             }
+            return;
+        }
+    }
+}
+
+void TemplateView::onBqModePressed(const touchgfx::AbstractButton& source)
+{
+    for (uint32_t i = 0U; i < BqModeButtonCount; ++i)
+    {
+        if (&source == &bqModeTouch[i])
+        {
+            presenter->requestLowPowerMode((i == 0U) ? 1U : 0U);
             return;
         }
     }

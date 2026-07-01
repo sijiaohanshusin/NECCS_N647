@@ -23,6 +23,8 @@
 
 #define BQ25730_ADC_VBAT_VSYS_OFFSET_MV     2880U
 #define BQ25730_ADC_VBAT_VSYS_STEP_MV       64U
+#define BQ25730_ADC_VBUS_STEP_MV            96U
+#define BQ25730_ADC_PSYS_STEP_MV            12U
 #define BQ25730_ADC_ICHG_STEP_MA            128U
 #define BQ25730_ADC_IDCHG_STEP_MA           512U
 #define BQ25730_ADC_IIN_STEP_MA             100U
@@ -377,6 +379,21 @@ BQ25730_StatusTypeDef BQ25730_SetOtgEnabled(BQ25730_HandleTypeDef *handle,
     return BQ25730_OK;
 }
 
+BQ25730_StatusTypeDef BQ25730_ReadChargeOption0(BQ25730_HandleTypeDef *handle,
+                                                uint16_t *charge_option0)
+{
+    return BQ25730_ReadRegister16(handle, BQ25730_REG_CHARGE_OPTION0, charge_option0);
+}
+
+BQ25730_StatusTypeDef BQ25730_SetLowPowerMode(BQ25730_HandleTypeDef *handle,
+                                              uint8_t enabled)
+{
+    return BQ25730_UpdateRegister16(handle,
+                                    BQ25730_REG_CHARGE_OPTION0,
+                                    BQ25730_CHARGE_OPTION0_EN_LWPWR,
+                                    (enabled == 0U) ? 0U : BQ25730_CHARGE_OPTION0_EN_LWPWR);
+}
+
 BQ25730_StatusTypeDef BQ25730_ReadChargerStatus(BQ25730_HandleTypeDef *handle,
                                                 uint16_t *charger_status)
 {
@@ -436,6 +453,14 @@ BQ25730_StatusTypeDef BQ25730_ReadAdcRaw(BQ25730_HandleTypeDef *handle,
     raw->vbat = (uint8_t)(value & 0x00FFU);
     raw->vsys = (uint8_t)((value >> 8U) & 0x00FFU);
 
+    status = BQ25730_ReadRegister16(handle, BQ25730_REG_ADCVBUS_PSYS, &value);
+    if (status != BQ25730_OK)
+    {
+        return status;
+    }
+    raw->psys = (uint8_t)(value & 0x00FFU);
+    raw->vbus = (uint8_t)((value >> 8U) & 0x00FFU);
+
     status = BQ25730_ReadRegister16(handle, BQ25730_REG_ADCIBAT, &value);
     if (status != BQ25730_OK)
     {
@@ -476,10 +501,20 @@ BQ25730_StatusTypeDef BQ25730_ReadAdcMeasurements(BQ25730_HandleTypeDef *handle,
                                        ((uint32_t)raw.vbat * BQ25730_ADC_VBAT_VSYS_STEP_MV);
     measurements->system_voltage_mv = BQ25730_ADC_VBAT_VSYS_OFFSET_MV +
                                       ((uint32_t)raw.vsys * BQ25730_ADC_VBAT_VSYS_STEP_MV);
+    measurements->psys_voltage_mv = (uint32_t)raw.psys * BQ25730_ADC_PSYS_STEP_MV;
+    measurements->input_voltage_mv = (uint32_t)raw.vbus * BQ25730_ADC_VBUS_STEP_MV;
     measurements->charge_current_ma = (uint32_t)raw.ichg * BQ25730_ADC_ICHG_STEP_MA;
     measurements->discharge_current_ma = (uint32_t)raw.idchg * BQ25730_ADC_IDCHG_STEP_MA;
     measurements->input_current_ma = (uint32_t)raw.iin * BQ25730_ADC_IIN_STEP_MA;
     measurements->cmpin_voltage_mv = (uint32_t)raw.cmpin * BQ25730_ADC_CMPIN_STEP_MV;
+    measurements->raw_vbat = raw.vbat;
+    measurements->raw_vsys = raw.vsys;
+    measurements->raw_psys = raw.psys;
+    measurements->raw_vbus = raw.vbus;
+    measurements->raw_ichg = raw.ichg;
+    measurements->raw_idchg = raw.idchg;
+    measurements->raw_iin = raw.iin;
+    measurements->raw_cmpin = raw.cmpin;
 
     return BQ25730_OK;
 }

@@ -62,6 +62,11 @@ void TemplatePresenter::readSelectedMedia()
     model->readSelectedMedia();
 }
 
+void TemplatePresenter::requestLowPowerMode(uint8_t enabled)
+{
+    model->requestLowPowerMode(enabled);
+}
+
 void TemplatePresenter::uiSnapshotUpdated(const AppUiSnapshot& snapshot)
 {
     view.updateSnapshot(snapshot);

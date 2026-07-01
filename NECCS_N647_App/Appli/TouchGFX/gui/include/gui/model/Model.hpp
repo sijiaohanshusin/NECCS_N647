@@ -69,6 +69,8 @@ struct AppUiSnapshot
     uint32_t powerFlags;
     uint32_t batteryMv;
     uint32_t systemMv;
+    uint32_t inputVoltageMv;
+    uint32_t psysMv;
     uint32_t mediaFlags;
     uint32_t mediaLastError;
     uint32_t mediaScreenshots;
@@ -79,8 +81,28 @@ struct AppUiSnapshot
     uint32_t mediaLastReadBytes;
     uint32_t mediaFreeMb;
     uint32_t mediaTotalMb;
+    uint32_t powerUpdateCount;
+    uint32_t bqLowPowerCommandCount;
     int32_t batteryCurrentMa;
+    int32_t powerInitStatus;
+    int32_t powerProbeStatus;
+    int32_t powerLastI2cStatus;
+    int32_t powerAdcStatus;
+    int32_t powerPinReadStatus;
+    int32_t bqLowPowerStatus;
     uint32_t powerPinState;
+    uint16_t bqChargeOption0;
+    uint16_t bqChargeOption1;
+    uint16_t bqChargeOption2;
+    uint16_t bqChargeOption3;
+    uint16_t bqAdcOption;
+    uint16_t bqChargeVoltageReg;
+    uint16_t bqChargeCurrentReg;
+    uint16_t bqInputCurrentReg;
+    uint16_t bqVsysMinReg;
+    uint16_t bqOtgVoltageReg;
+    uint16_t bqOtgCurrentReg;
+    uint16_t prochotStatus;
     uint16_t touchX;
     uint16_t touchY;
     uint16_t touchRawX;
@@ -95,6 +117,19 @@ struct AppUiSnapshot
     uint8_t powerState;
     uint8_t mediaSelectedType;
     uint8_t batteryPct;
+    uint8_t bqManufacturerId;
+    uint8_t bqDeviceId;
+    uint8_t bqLowPowerEnabled;
+    uint8_t bqLowPowerTarget;
+    uint8_t bqLowPowerRequestPending;
+    uint8_t bqAdcRawVbat;
+    uint8_t bqAdcRawVsys;
+    uint8_t bqAdcRawPsys;
+    uint8_t bqAdcRawVbus;
+    uint8_t bqAdcRawIchg;
+    uint8_t bqAdcRawIdchg;
+    uint8_t bqAdcRawIin;
+    uint8_t bqAdcRawCmpin;
     uint8_t touchReady;
     uint8_t touchDown;
     uint8_t touchIc;
@@ -148,6 +183,7 @@ public:
     void refreshMedia();
     void selectNextMedia();
     void readSelectedMedia();
+    void requestLowPowerMode(uint8_t enabled);
 
     const AppUiSnapshot& getSnapshot() const
     {

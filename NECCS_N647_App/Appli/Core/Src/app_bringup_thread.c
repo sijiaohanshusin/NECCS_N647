@@ -1,6 +1,7 @@
 #include "app_bringup_thread.h"
 
 #include "app_boot_diag.h"
+#include "app_debug_config.h"
 #include "app_media.h"
 #include "app_power.h"
 #include "main.h"
@@ -18,6 +19,14 @@ volatile uint32_t g_app_sd_card_block0_read_status = SD_NAND_ERROR_NOT_READY;
 
 static void App_BringUpMirrorMediaStatus(void)
 {
+#if APP_TEMP_BQ_DEBUG_MODE
+  g_app_sd_card_present = 0U;
+  g_app_sd_card_init_status = SD_NAND_ERROR_NOT_READY;
+  g_app_sd_card_block_count = 0U;
+  g_app_sd_card_block_size = 0U;
+  g_app_sd_card_capacity_bytes = 0U;
+  g_app_sd_card_block0_read_status = SD_NAND_ERROR_NOT_READY;
+#else
   AppMediaStatus_t media_status;
 
   AppMedia_GetStatus(&media_status);
@@ -46,6 +55,7 @@ static void App_BringUpMirrorMediaStatus(void)
   g_app_sd_card_block0_read_status = ((media_status.flags & APP_MEDIA_FLAG_FS_MOUNTED) != 0U) ?
                                      SD_NAND_OK :
                                      SD_NAND_ERROR_NOT_READY;
+#endif
 }
 
 void App_BringUpThreadEntry(ULONG thread_input)

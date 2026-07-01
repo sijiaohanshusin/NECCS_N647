@@ -18,11 +18,14 @@
 #if defined(STM32N647xx)
 extern "C"
 {
+#include "app_debug_config.h"
 #include "app_power.h"
 #include "app_media.h"
 #include "TOUCH/app_touch.h"
 }
 #else
+#define APP_TEMP_BQ_DEBUG_MODE 0U
+
 typedef struct
 {
     uint8_t ready;
@@ -45,13 +48,48 @@ static void AppTouch_GetSnapshot(AppTouchSnapshot_t* snapshot)
 typedef struct
 {
     uint32_t flags;
+    uint32_t update_count;
     uint32_t battery_mv;
     uint32_t system_mv;
+    uint32_t input_voltage_mv;
+    uint32_t psys_mv;
     int32_t battery_current_ma;
     uint16_t charger_status;
+    uint16_t prochot_status;
+    uint16_t charge_option0;
+    uint16_t charge_option1;
+    uint16_t charge_option2;
+    uint16_t charge_option3;
+    uint16_t adc_option;
+    uint16_t charge_voltage_reg;
+    uint16_t charge_current_reg;
+    uint16_t input_current_reg;
+    uint16_t vsys_min_reg;
+    uint16_t otg_voltage_reg;
+    uint16_t otg_current_reg;
     uint32_t pin_state;
+    uint32_t low_power_command_count;
+    int32_t init_status;
+    int32_t probe_status;
+    int32_t last_i2c_status;
+    int32_t adc_status;
+    int32_t pin_read_status;
+    int32_t low_power_status;
+    uint8_t manufacturer_id;
+    uint8_t device_id;
     uint8_t battery_percent;
     uint8_t state;
+    uint8_t low_power_enabled;
+    uint8_t low_power_target;
+    uint8_t low_power_request_pending;
+    uint8_t adc_raw_vbat;
+    uint8_t adc_raw_vsys;
+    uint8_t adc_raw_psys;
+    uint8_t adc_raw_vbus;
+    uint8_t adc_raw_ichg;
+    uint8_t adc_raw_idchg;
+    uint8_t adc_raw_iin;
+    uint8_t adc_raw_cmpin;
 } AppPowerSnapshot_t;
 
 static void AppPower_GetSnapshot(AppPowerSnapshot_t* snapshot)
@@ -61,6 +99,12 @@ static void AppPower_GetSnapshot(AppPowerSnapshot_t* snapshot)
         memset(snapshot, 0, sizeof(*snapshot));
         snapshot->state = APP_UI_POWER_STATE_UNKNOWN;
     }
+}
+
+static int32_t AppPower_RequestLowPowerMode(uint8_t enabled)
+{
+    (void)enabled;
+    return 0;
 }
 
 typedef struct
@@ -156,7 +200,11 @@ Model::Model()
       tickCount(0U)
 {
     memset(&snapshot, 0, sizeof(snapshot));
+#if APP_TEMP_BQ_DEBUG_MODE
+    snapshot.activeScreen = APP_UI_SCREEN_SETTINGS;
+#else
     snapshot.activeScreen = APP_UI_SCREEN_IMAGE;
+#endif
     snapshot.activeProfile = APP_UI_PROFILE_BALANCED;
     snapshot.uiFpsX10 = 200U;
     snapshot.srpMsX100 = 640U;
@@ -221,13 +269,48 @@ void Model::tick()
     memset(&power, 0, sizeof(power));
     AppPower_GetSnapshot(&power);
     snapshot.powerFlags = power.flags;
+    snapshot.powerUpdateCount = power.update_count;
     snapshot.batteryMv = power.battery_mv;
     snapshot.systemMv = power.system_mv;
+    snapshot.inputVoltageMv = power.input_voltage_mv;
+    snapshot.psysMv = power.psys_mv;
     snapshot.batteryCurrentMa = power.battery_current_ma;
     snapshot.chargerStatus = power.charger_status;
+    snapshot.prochotStatus = power.prochot_status;
     snapshot.powerPinState = power.pin_state;
     snapshot.batteryPct = power.battery_percent;
     snapshot.powerState = power.state;
+    snapshot.powerInitStatus = power.init_status;
+    snapshot.powerProbeStatus = power.probe_status;
+    snapshot.powerLastI2cStatus = power.last_i2c_status;
+    snapshot.powerAdcStatus = power.adc_status;
+    snapshot.powerPinReadStatus = power.pin_read_status;
+    snapshot.bqManufacturerId = power.manufacturer_id;
+    snapshot.bqDeviceId = power.device_id;
+    snapshot.bqChargeOption0 = power.charge_option0;
+    snapshot.bqChargeOption1 = power.charge_option1;
+    snapshot.bqChargeOption2 = power.charge_option2;
+    snapshot.bqChargeOption3 = power.charge_option3;
+    snapshot.bqAdcOption = power.adc_option;
+    snapshot.bqChargeVoltageReg = power.charge_voltage_reg;
+    snapshot.bqChargeCurrentReg = power.charge_current_reg;
+    snapshot.bqInputCurrentReg = power.input_current_reg;
+    snapshot.bqVsysMinReg = power.vsys_min_reg;
+    snapshot.bqOtgVoltageReg = power.otg_voltage_reg;
+    snapshot.bqOtgCurrentReg = power.otg_current_reg;
+    snapshot.bqLowPowerStatus = power.low_power_status;
+    snapshot.bqLowPowerCommandCount = power.low_power_command_count;
+    snapshot.bqLowPowerEnabled = power.low_power_enabled;
+    snapshot.bqLowPowerTarget = power.low_power_target;
+    snapshot.bqLowPowerRequestPending = power.low_power_request_pending;
+    snapshot.bqAdcRawVbat = power.adc_raw_vbat;
+    snapshot.bqAdcRawVsys = power.adc_raw_vsys;
+    snapshot.bqAdcRawPsys = power.adc_raw_psys;
+    snapshot.bqAdcRawVbus = power.adc_raw_vbus;
+    snapshot.bqAdcRawIchg = power.adc_raw_ichg;
+    snapshot.bqAdcRawIdchg = power.adc_raw_idchg;
+    snapshot.bqAdcRawIin = power.adc_raw_iin;
+    snapshot.bqAdcRawCmpin = power.adc_raw_cmpin;
 
     AppMediaStatus_t media;
     memset(&media, 0, sizeof(media));
@@ -294,6 +377,11 @@ void Model::selectNextMedia()
 void Model::readSelectedMedia()
 {
     (void)AppMedia_RequestReadSelected();
+}
+
+void Model::requestLowPowerMode(uint8_t enabled)
+{
+    (void)AppPower_RequestLowPowerMode(enabled);
 }
 
 void Model::setActiveProfile(uint8_t profile)
