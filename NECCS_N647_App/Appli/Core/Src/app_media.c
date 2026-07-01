@@ -145,6 +145,11 @@ static uint32_t post_command(AppMediaCommand_t command)
     return APP_MEDIA_ERROR_QUEUE_FULL;
   }
 
+  status_lock();
+  s_status.flags |= APP_MEDIA_FLAG_BUSY;
+  s_status.last_error = APP_MEDIA_ERROR_NONE;
+  status_unlock();
+
   return APP_MEDIA_ERROR_NONE;
 }
 
@@ -316,9 +321,12 @@ static UINT mount_or_format_media(void)
 {
   UINT status;
   uint32_t media_blocks;
+  uint32_t preserved_flags;
+  uint8_t sd_status;
 
   status_lock();
-  s_status.flags = 0U;
+  preserved_flags = s_status.flags & (APP_MEDIA_FLAG_BUSY | APP_MEDIA_FLAG_RECORDING);
+  s_status.flags = preserved_flags;
   s_status.sd_status = sd_nand_is_inserted();
   s_status.total_blocks = sd_nand_get_block_count();
   s_status.media_blocks = 0U;
@@ -329,7 +337,11 @@ static UINT mount_or_format_media(void)
   }
   status_unlock();
 
-  if (sd_nand_init() != SD_NAND_OK)
+  sd_status = sd_nand_init();
+  status_lock();
+  s_status.sd_status = sd_status;
+  status_unlock();
+  if (sd_status != SD_NAND_OK)
   {
     status_set_error(APP_MEDIA_ERROR_SD_INIT);
     return FX_IO_ERROR;

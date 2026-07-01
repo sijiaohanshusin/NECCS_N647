@@ -1,6 +1,7 @@
 #include "app_bringup_thread.h"
 
 #include "app_boot_diag.h"
+#include "app_media.h"
 #include "app_power.h"
 #include "main.h"
 #include "./LED/led.h"
@@ -15,7 +16,37 @@ volatile uint32_t g_app_sd_card_block_size = 0U;
 volatile uint64_t g_app_sd_card_capacity_bytes = 0U;
 volatile uint32_t g_app_sd_card_block0_read_status = SD_NAND_ERROR_NOT_READY;
 
-static uint8_t g_app_sd_card_probe_block[SD_NAND_BLOCK_SIZE] __attribute__((aligned(32)));
+static void App_BringUpMirrorMediaStatus(void)
+{
+  AppMediaStatus_t media_status;
+
+  AppMedia_GetStatus(&media_status);
+
+  g_app_sd_card_present = ((media_status.flags & APP_MEDIA_FLAG_CARD_PRESENT) != 0U) ? 1U : 0U;
+  if ((media_status.flags & APP_MEDIA_FLAG_SD_READY) != 0U)
+  {
+    g_app_sd_card_init_status = SD_NAND_OK;
+  }
+  else if (media_status.last_error == APP_MEDIA_ERROR_SD_INIT)
+  {
+    g_app_sd_card_init_status = SD_NAND_ERROR;
+  }
+  else if (media_status.sd_status == SD_NAND_ERROR_NO_CARD)
+  {
+    g_app_sd_card_init_status = SD_NAND_ERROR_NO_CARD;
+  }
+  else
+  {
+    g_app_sd_card_init_status = SD_NAND_ERROR_NOT_READY;
+  }
+
+  g_app_sd_card_block_count = media_status.total_blocks;
+  g_app_sd_card_block_size = (media_status.total_blocks != 0U) ? SD_NAND_BLOCK_SIZE : 0U;
+  g_app_sd_card_capacity_bytes = ((uint64_t)media_status.total_blocks) * ((uint64_t)SD_NAND_BLOCK_SIZE);
+  g_app_sd_card_block0_read_status = ((media_status.flags & APP_MEDIA_FLAG_FS_MOUNTED) != 0U) ?
+                                     SD_NAND_OK :
+                                     SD_NAND_ERROR_NOT_READY;
+}
 
 void App_BringUpThreadEntry(ULONG thread_input)
 {
@@ -23,28 +54,13 @@ void App_BringUpThreadEntry(ULONG thread_input)
   App_BootDiag_SetStage(APP_BOOT_STAGE_BRINGUP_THREAD_ENTER);
 
   AppPower_Init();
-
-  g_app_sd_card_present = sd_nand_is_inserted();
-  if (g_app_sd_card_present != 0U)
-  {
-    g_app_sd_card_init_status = sd_nand_init();
-    if (g_app_sd_card_init_status == SD_NAND_OK)
-    {
-      g_app_sd_card_block_count = sd_nand_get_block_count();
-      g_app_sd_card_block_size = sd_nand_get_block_size();
-      g_app_sd_card_capacity_bytes = sd_nand_get_capacity_bytes();
-      g_app_sd_card_block0_read_status = sd_nand_read_block0(g_app_sd_card_probe_block);
-    }
-  }
-  else
-  {
-    g_app_sd_card_init_status = SD_NAND_ERROR_NO_CARD;
-  }
+  App_BringUpMirrorMediaStatus();
 
   while (1)
   {
     App_BootDiag_SetStage(APP_BOOT_STAGE_BRINGUP_THREAD_LOOP);
     g_app_boot_diag.bringup_loop_count++;
+    App_BringUpMirrorMediaStatus();
     AppPower_Poll(1000U);
     LED0_TOGGLE();
     tx_thread_sleep(APP_HEARTBEAT_TICKS);

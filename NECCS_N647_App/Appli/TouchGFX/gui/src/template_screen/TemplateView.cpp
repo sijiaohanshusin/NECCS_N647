@@ -321,7 +321,7 @@ void TemplateView::setupMediaPage()
         add(mediaLabel[i]);
     }
 
-    const char* actions[MediaActionCount] = {"SHOT", "REC", "NEXT", "READ", "REFR"};
+    const char* actions[MediaActionCount] = {"SHOT BMP", "REC AVI", "NEXT", "READ", "SYNC"};
     for (uint32_t i = 0U; i < MediaActionCount; ++i)
     {
         const int16_t x = static_cast<int16_t>(190 + (i * 104));
@@ -727,7 +727,7 @@ void TemplateView::refreshMediaPage(const AppUiSnapshot& snapshot)
                    mounted ? "MEDIA READY" : "WAIT MEDIA");
     mediaLabel[9].setText(text);
 
-    mediaButtonLabel[1].setText(recording ? "STOP" : "REC");
+    mediaButtonLabel[1].setText(recording ? "STOP" : "REC AVI");
 
     for (uint32_t i = 0U; i < MediaActionCount; ++i)
     {

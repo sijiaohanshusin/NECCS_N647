@@ -37,7 +37,7 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define APP_BRINGUP_THREAD_STACK_SIZE  4096U
-#define APP_BRINGUP_THREAD_PRIORITY    8U
+#define APP_BRINGUP_THREAD_PRIORITY    18U
 
 /* USER CODE END PD */
 
