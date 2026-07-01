@@ -52,21 +52,6 @@ static void sd_nand_clean_cache(const void *addr, uint32_t len)
   __DSB();
 }
 
-static void sd_nand_invalidate_cache(void *addr, uint32_t len)
-{
-  void *aligned_addr = NULL;
-  int32_t aligned_len = 0;
-
-  if (len == 0U)
-  {
-    return;
-  }
-
-  sd_nand_cache_span(addr, len, &aligned_addr, &aligned_len);
-  SCB_InvalidateDCache_by_Addr(aligned_addr, aligned_len);
-  __DSB();
-}
-
 static uint8_t sd_nand_wait_transfer(uint32_t timeout_ms)
 {
   const uint32_t start = HAL_GetTick();
@@ -142,18 +127,12 @@ uint8_t sd_nand_read_disk(uint8_t *buf, uint32_t address, uint32_t count)
     return res;
   }
 
-  sd_nand_clean_cache(buf, bytes);
-  sd_nand_invalidate_cache(buf, bytes);
-
   if (HAL_SD_ReadBlocks(&hsd2, buf, address, count, SD_NAND_TIMEOUT_MS) != HAL_OK)
   {
     return SD_NAND_ERROR;
   }
 
-  res = sd_nand_wait_transfer(SD_NAND_TIMEOUT_MS);
-  sd_nand_invalidate_cache(buf, bytes);
-
-  return res;
+  return sd_nand_wait_transfer(SD_NAND_TIMEOUT_MS);
 }
 
 uint8_t sd_nand_write_disk(uint8_t *buf, uint32_t address, uint32_t count)

@@ -19,6 +19,7 @@
 #define APP_MEDIA_THREAD_PRIORITY         12U
 #define APP_MEDIA_QUEUE_LENGTH            8U
 #define APP_MEDIA_FILEX_CACHE_SIZE        (16U * SD_NAND_BLOCK_SIZE)
+#define APP_MEDIA_FORMAT_SECTORS_CLUSTER  32U
 
 #define APP_MEDIA_FB_WIDTH                1024U
 #define APP_MEDIA_FB_HEIGHT               600U
@@ -66,6 +67,7 @@ static FX_MEDIA s_media;
 static FX_FILE s_work_file;
 static FX_FILE s_record_file;
 static uint8_t s_filex_cache[APP_MEDIA_FILEX_CACHE_SIZE] __attribute__((aligned(32)));
+static uint8_t s_boot_sector[SD_NAND_BLOCK_SIZE] __attribute__((aligned(32)));
 static uint8_t s_bmp_row[APP_MEDIA_FB_WIDTH * 3U] __attribute__((aligned(32)));
 static uint8_t s_jpeg_buffer[APP_MEDIA_JPEG_MAX_BYTES] __attribute__((aligned(32)));
 static AppMediaAviIndex_t s_avi_index[APP_MEDIA_MAX_VIDEO_FRAMES];
@@ -159,12 +161,25 @@ static void put_u16_le(uint8_t *buffer, uint16_t value)
   buffer[1] = (uint8_t)(value >> 8);
 }
 
+static uint16_t get_u16_le(const uint8_t *buffer)
+{
+  return (uint16_t)(((uint16_t)buffer[1] << 8) | (uint16_t)buffer[0]);
+}
+
 static void put_u32_le(uint8_t *buffer, uint32_t value)
 {
   buffer[0] = (uint8_t)value;
   buffer[1] = (uint8_t)(value >> 8);
   buffer[2] = (uint8_t)(value >> 16);
   buffer[3] = (uint8_t)(value >> 24);
+}
+
+static uint32_t get_u32_le(const uint8_t *buffer)
+{
+  return (((uint32_t)buffer[3]) << 24) |
+         (((uint32_t)buffer[2]) << 16) |
+         (((uint32_t)buffer[1]) << 8) |
+         ((uint32_t)buffer[0]);
 }
 
 static uint32_t app_media_visible_blocks(void)
@@ -177,6 +192,61 @@ static uint32_t app_media_visible_blocks(void)
   }
 
   return total_blocks - SD_NAND_FONT_RESERVED_BLOCKS;
+}
+
+static uint32_t app_media_boot_sector_matches(uint32_t media_blocks)
+{
+  static const uint8_t volume_label[11] = {'N', 'E', 'C', 'C', 'S', ' ', ' ', ' ', ' ', ' ', ' '};
+  uint32_t total_sectors;
+  uint8_t sectors_per_cluster;
+
+  if (sd_nand_read_disk(s_boot_sector, 0U, 1U) != SD_NAND_OK)
+  {
+    return 0U;
+  }
+
+  if ((s_boot_sector[510] != 0x55U) || (s_boot_sector[511] != 0xAAU))
+  {
+    return 0U;
+  }
+  if ((s_boot_sector[0] != 0xEBU) || (s_boot_sector[2] != 0x90U))
+  {
+    return 0U;
+  }
+  if (get_u16_le(&s_boot_sector[FX_BYTES_SECTOR]) != SD_NAND_BLOCK_SIZE)
+  {
+    return 0U;
+  }
+  if ((s_boot_sector[FX_NUMBER_OF_FATS] != 1U) ||
+      (get_u16_le(&s_boot_sector[FX_ROOT_DIR_ENTRIES]) != 0U) ||
+      (s_boot_sector[FX_BOOT_SIG_32] != 0x29U) ||
+      (get_u32_le(&s_boot_sector[FX_SECTORS_PER_FAT_32]) == 0U))
+  {
+    return 0U;
+  }
+
+  sectors_per_cluster = s_boot_sector[FX_SECTORS_CLUSTER];
+  if ((sectors_per_cluster != 8U) && (sectors_per_cluster != APP_MEDIA_FORMAT_SECTORS_CLUSTER))
+  {
+    return 0U;
+  }
+
+  total_sectors = get_u16_le(&s_boot_sector[FX_SECTORS]);
+  if (total_sectors == 0U)
+  {
+    total_sectors = get_u32_le(&s_boot_sector[FX_HUGE_SECTORS]);
+  }
+  if (total_sectors != media_blocks)
+  {
+    return 0U;
+  }
+
+  if (memcmp(&s_boot_sector[FX_VOLUME_LABEL_32], volume_label, sizeof(volume_label)) != 0)
+  {
+    return 0U;
+  }
+
+  return 1U;
 }
 
 static void update_space_status(void)
@@ -361,12 +431,19 @@ static UINT mount_or_format_media(void)
   s_status.total_bytes = (uint64_t)media_blocks * (uint64_t)SD_NAND_BLOCK_SIZE;
   status_unlock();
 
-  status = fx_media_open(&s_media,
-                         (CHAR *)"NECCS_SD",
-                         AppMedia_FileXDriver,
-                         FX_NULL,
-                         s_filex_cache,
-                         sizeof(s_filex_cache));
+  if (app_media_boot_sector_matches(media_blocks) != 0U)
+  {
+    status = fx_media_open(&s_media,
+                           (CHAR *)"NECCS_SD",
+                           AppMedia_FileXDriver,
+                           FX_NULL,
+                           s_filex_cache,
+                           sizeof(s_filex_cache));
+  }
+  else
+  {
+    status = FX_MEDIA_INVALID;
+  }
   status_lock();
   s_status.mount_status = status;
   status_unlock();
@@ -384,7 +461,7 @@ static UINT mount_or_format_media(void)
                              0U,
                              media_blocks,
                              SD_NAND_BLOCK_SIZE,
-                             8U,
+                             APP_MEDIA_FORMAT_SECTORS_CLUSTER,
                              1U,
                              1U);
     status_lock();
@@ -1140,6 +1217,19 @@ static void AppMedia_FileXDriver(FX_MEDIA *media_ptr)
     break;
 
   case FX_DRIVER_BOOT_READ:
+    sector = 0U;
+    sectors = 1U;
+    buffer = media_ptr->fx_media_driver_buffer;
+    if (media_blocks == 0U)
+    {
+      status = FX_IO_ERROR;
+    }
+    else if (sd_nand_read_disk(buffer, sector, sectors) != SD_NAND_OK)
+    {
+      status = FX_IO_ERROR;
+    }
+    break;
+
   case FX_DRIVER_READ:
     sector = (uint32_t)media_ptr->fx_media_driver_logical_sector;
     sectors = media_ptr->fx_media_driver_sectors;
@@ -1159,6 +1249,27 @@ static void AppMedia_FileXDriver(FX_MEDIA *media_ptr)
     break;
 
   case FX_DRIVER_BOOT_WRITE:
+    sector = 0U;
+    sectors = 1U;
+    buffer = media_ptr->fx_media_driver_buffer;
+    if (media_blocks == 0U)
+    {
+      status = FX_IO_ERROR;
+    }
+    else if (sd_nand_write_disk(buffer, sector, sectors) != SD_NAND_OK)
+    {
+      status = FX_IO_ERROR;
+    }
+    else if (sd_nand_read_disk(s_boot_sector, sector, sectors) != SD_NAND_OK)
+    {
+      status = FX_IO_ERROR;
+    }
+    else if (memcmp(s_boot_sector, buffer, SD_NAND_BLOCK_SIZE) != 0)
+    {
+      status = FX_IO_ERROR;
+    }
+    break;
+
   case FX_DRIVER_WRITE:
     sector = (uint32_t)media_ptr->fx_media_driver_logical_sector;
     sectors = media_ptr->fx_media_driver_sectors;
