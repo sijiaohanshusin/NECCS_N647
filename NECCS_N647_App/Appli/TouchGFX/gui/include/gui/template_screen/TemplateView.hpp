@@ -111,6 +111,7 @@ private:
     AppTextLabel detailLabel[DetailCount];
     AppTextLabel settingsLabel[SettingsCount];
     AppTextLabel mediaLabel[MediaLabelCount];
+    AppRgb565Preview mediaPreview;
 
     AppHeatMap heatMap;
     AppTextLabel heatMetricLabel[4];
@@ -132,6 +133,7 @@ private:
 
     uint8_t activeScreen;
     uint8_t activeProfile;
+    uint32_t mediaPreviewGeneration;
 };
 
 #endif // TEMPLATE_VIEW_HPP

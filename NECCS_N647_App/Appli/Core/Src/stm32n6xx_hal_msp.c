@@ -176,6 +176,38 @@ void HAL_DMA2D_MspDeInit(DMA2D_HandleTypeDef* hdma2d)
 
 }
 
+#ifdef HAL_JPEG_MODULE_ENABLED
+/**
+  * @brief JPEG MSP Initialization
+  * @param hjpeg: JPEG handle pointer
+  * @retval None
+  */
+void HAL_JPEG_MspInit(JPEG_HandleTypeDef* hjpeg)
+{
+  if(hjpeg->Instance==JPEG)
+  {
+    __HAL_RCC_JPEG_CLK_ENABLE();
+    __HAL_RCC_JPEG_FORCE_RESET();
+    __HAL_RCC_JPEG_RELEASE_RESET();
+  }
+}
+
+/**
+  * @brief JPEG MSP De-Initialization
+  * @param hjpeg: JPEG handle pointer
+  * @retval None
+  */
+void HAL_JPEG_MspDeInit(JPEG_HandleTypeDef* hjpeg)
+{
+  if(hjpeg->Instance==JPEG)
+  {
+    __HAL_RCC_JPEG_FORCE_RESET();
+    __HAL_RCC_JPEG_RELEASE_RESET();
+    __HAL_RCC_JPEG_CLK_DISABLE();
+  }
+}
+#endif /* HAL_JPEG_MODULE_ENABLED */
+
 /**
   * @brief I2C MSP Initialization
   * This function configures the hardware resources used in this example

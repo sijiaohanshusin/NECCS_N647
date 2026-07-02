@@ -131,7 +131,8 @@ TemplateView::TemplateView()
       profilePressedCallback(this, &TemplateView::onProfilePressed),
       mediaPressedCallback(this, &TemplateView::onMediaPressed),
       activeScreen(APP_UI_SCREEN_IMAGE),
-      activeProfile(APP_UI_PROFILE_BALANCED)
+      activeProfile(APP_UI_PROFILE_BALANCED),
+      mediaPreviewGeneration(0U)
 {
 }
 
@@ -312,7 +313,7 @@ void TemplateView::setupMediaPage()
         setupLabel(mediaLabel[i],
                    190,
                    static_cast<int16_t>(142 + (i * 32)),
-                   520,
+                   224,
                    24,
                    1,
                    initial[i],
@@ -320,6 +321,10 @@ void TemplateView::setupMediaPage()
                    rgb(20, 23, 26));
         add(mediaLabel[i]);
     }
+
+    mediaPreview.setPosition(432, 142, 318, 244);
+    mediaPreview.setColors(rgb(14, 16, 18), rgb(58, 66, 68));
+    add(mediaPreview);
 
     const char* actions[MediaActionCount] = {"SHOT BMP", "REC AVI", "NEXT", "READ", "SYNC"};
     for (uint32_t i = 0U; i < MediaActionCount; ++i)
@@ -474,6 +479,8 @@ void TemplateView::refreshVisibility()
         mediaLabel[i].setVisible(mediaVisible);
         mediaLabel[i].invalidate();
     }
+    mediaPreview.setVisible(mediaVisible);
+    mediaPreview.invalidate();
     for (uint32_t i = 0U; i < MediaActionCount; ++i)
     {
         mediaButton[i].setVisible(mediaVisible);
@@ -666,6 +673,16 @@ void TemplateView::refreshMediaPage(const AppUiSnapshot& snapshot)
     const uint32_t minutes = snapshot.mediaRecordSeconds / 60U;
     const uint32_t seconds = snapshot.mediaRecordSeconds % 60U;
 
+    mediaPreview.setSource(snapshot.mediaPreviewPixels,
+                           snapshot.mediaPreviewWidth,
+                           snapshot.mediaPreviewHeight,
+                           (snapshot.mediaPreviewValid != 0U));
+    if (mediaPreviewGeneration != snapshot.mediaPreviewGeneration)
+    {
+        mediaPreviewGeneration = snapshot.mediaPreviewGeneration;
+        mediaPreview.invalidate();
+    }
+
     mediaLabel[0].setText(sdReady ? "SD READY" : "SD WAIT");
     mediaLabel[0].setColors(sdReady ? rgb(161, 221, 206) : rgb(226, 172, 62), rgb(20, 23, 26));
 
@@ -722,9 +739,19 @@ void TemplateView::refreshMediaPage(const AppUiSnapshot& snapshot)
     mediaLabel[8].setText(text);
     mediaLabel[8].setColors((snapshot.mediaLastError == 0U) ? rgb(216, 222, 216) : rgb(225, 145, 102), rgb(20, 23, 26));
 
-    (void)snprintf(text, sizeof(text), "%s %s",
-                   busy ? "BUSY" : "IDLE",
-                   mounted ? "MEDIA READY" : "WAIT MEDIA");
+    if (snapshot.mediaPreviewValid != 0U)
+    {
+        (void)snprintf(text, sizeof(text), "VIEW %s F%lu/%lu",
+                       selectedMediaName(snapshot.mediaPreviewType),
+                       static_cast<unsigned long>(snapshot.mediaPreviewFrameIndex),
+                       static_cast<unsigned long>(snapshot.mediaPreviewFrameCount));
+    }
+    else
+    {
+        (void)snprintf(text, sizeof(text), "%s %s",
+                       busy ? "BUSY" : "IDLE",
+                       mounted ? "MEDIA READY" : "WAIT MEDIA");
+    }
     mediaLabel[9].setText(text);
 
     mediaButtonLabel[1].setText(recording ? "STOP" : "REC AVI");

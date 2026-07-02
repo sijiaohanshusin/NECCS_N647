@@ -445,3 +445,86 @@ touchgfx::Rect AppHeatMap::getSolidRect() const
 {
     return touchgfx::Rect(0, 0, getWidth(), getHeight());
 }
+
+AppRgb565Preview::AppRgb565Preview()
+    : source(0),
+      sourceWidth(0U),
+      sourceHeight(0U),
+      backgroundColor(touchgfx::Color::getColorFromRGB(14, 16, 18)),
+      borderColor(touchgfx::Color::getColorFromRGB(58, 66, 68)),
+      sourceValid(false)
+{
+}
+
+void AppRgb565Preview::setSource(const uint16_t* pixels, uint16_t width, uint16_t height, bool valid)
+{
+    const bool nextValid = valid && (pixels != 0) && (width != 0U) && (height != 0U);
+    if ((source != pixels) || (sourceWidth != width) || (sourceHeight != height) || (sourceValid != nextValid))
+    {
+        source = pixels;
+        sourceWidth = width;
+        sourceHeight = height;
+        sourceValid = nextValid;
+        invalidate();
+    }
+}
+
+void AppRgb565Preview::setColors(touchgfx::colortype background, touchgfx::colortype border)
+{
+    backgroundColor = background;
+    borderColor = border;
+    invalidate();
+}
+
+void AppRgb565Preview::draw(const touchgfx::Rect& area) const
+{
+    fillLocalRect(*this, area, touchgfx::Rect(0, 0, getWidth(), getHeight()), backgroundColor);
+    fillLocalRect(*this, area, touchgfx::Rect(0, 0, getWidth(), 2), borderColor);
+    fillLocalRect(*this, area, touchgfx::Rect(0, static_cast<int16_t>(getHeight() - 2), getWidth(), 2), borderColor);
+    fillLocalRect(*this, area, touchgfx::Rect(0, 0, 2, getHeight()), borderColor);
+    fillLocalRect(*this, area, touchgfx::Rect(static_cast<int16_t>(getWidth() - 2), 0, 2, getHeight()), borderColor);
+
+    if (!sourceValid || (getWidth() <= 4) || (getHeight() <= 4))
+    {
+        return;
+    }
+
+    const touchgfx::Rect viewport(2, 2, static_cast<int16_t>(getWidth() - 4), static_cast<int16_t>(getHeight() - 4));
+    const touchgfx::Rect dirty = viewport & area;
+    if (dirty.isEmpty())
+    {
+        return;
+    }
+
+    touchgfx::HAL* hal = touchgfx::HAL::getInstance();
+    if (hal == 0)
+    {
+        return;
+    }
+
+    uint16_t* framebuffer = hal->lockFrameBufferForRenderingMethod(touchgfx::HAL::SOFTWARE);
+    if (framebuffer != 0)
+    {
+        touchgfx::Rect absolute = getAbsoluteRect();
+        const uint32_t framebufferWidth = touchgfx::HAL::FRAME_BUFFER_WIDTH;
+
+        for (int16_t y = dirty.y; y < dirty.bottom(); ++y)
+        {
+            const uint32_t srcY = (static_cast<uint32_t>(y - viewport.y) * sourceHeight) / static_cast<uint32_t>(viewport.height);
+            uint16_t* dst = &framebuffer[(static_cast<uint32_t>(absolute.y + y) * framebufferWidth) + static_cast<uint32_t>(absolute.x + dirty.x)];
+
+            for (int16_t x = dirty.x; x < dirty.right(); ++x)
+            {
+                const uint32_t srcX = (static_cast<uint32_t>(x - viewport.x) * sourceWidth) / static_cast<uint32_t>(viewport.width);
+                *dst++ = source[(srcY * sourceWidth) + srcX];
+            }
+        }
+    }
+
+    hal->unlockFrameBuffer();
+}
+
+touchgfx::Rect AppRgb565Preview::getSolidRect() const
+{
+    return touchgfx::Rect(0, 0, getWidth(), getHeight());
+}

@@ -60,7 +60,8 @@ enum AppUiMediaFlag
     APP_UI_MEDIA_FLAG_FS_MOUNTED = 0x00000004UL,
     APP_UI_MEDIA_FLAG_FORMATTED = 0x00000008UL,
     APP_UI_MEDIA_FLAG_RECORDING = 0x00000010UL,
-    APP_UI_MEDIA_FLAG_BUSY = 0x00000020UL
+    APP_UI_MEDIA_FLAG_BUSY = 0x00000020UL,
+    APP_UI_MEDIA_FLAG_PREVIEW_VALID = 0x00000040UL
 };
 
 struct AppUiSnapshot
@@ -79,6 +80,10 @@ struct AppUiSnapshot
     uint32_t mediaLastReadBytes;
     uint32_t mediaFreeMb;
     uint32_t mediaTotalMb;
+    uint32_t mediaPreviewGeneration;
+    uint32_t mediaPreviewFrameIndex;
+    uint32_t mediaPreviewFrameCount;
+    const uint16_t* mediaPreviewPixels;
     int32_t batteryCurrentMa;
     uint32_t powerPinState;
     uint16_t touchX;
@@ -88,12 +93,16 @@ struct AppUiSnapshot
     uint16_t srpMsX100;
     uint16_t uiFpsX10;
     uint16_t chargerStatus;
+    uint16_t mediaPreviewWidth;
+    uint16_t mediaPreviewHeight;
     int16_t thetaDeg;
     int16_t phiDeg;
     uint8_t activeScreen;
     uint8_t activeProfile;
     uint8_t powerState;
     uint8_t mediaSelectedType;
+    uint8_t mediaPreviewValid;
+    uint8_t mediaPreviewType;
     uint8_t batteryPct;
     uint8_t touchReady;
     uint8_t touchDown;

@@ -31,6 +31,8 @@
 #define APP_MEDIA_RECORD_FPS              5U
 #define APP_MEDIA_RECORD_PERIOD_TICKS     (TX_TIMER_TICKS_PER_SECOND / APP_MEDIA_RECORD_FPS)
 #define APP_MEDIA_JPEG_MAX_BYTES          (384U * 1024U)
+#define APP_MEDIA_JPEG_DECODE_MAX_BYTES   (APP_MEDIA_PREVIEW_WIDTH * APP_MEDIA_PREVIEW_HEIGHT)
+#define APP_MEDIA_JPEG_TIMEOUT_MS         1000U
 #define APP_MEDIA_MAX_VIDEO_FRAMES        1800U
 #define APP_MEDIA_BMP_ROWS_PER_WRITE      64U
 #define APP_MEDIA_MIN_FREE_AFTER_WRITE    (1024ULL * 1024ULL)
@@ -56,6 +58,13 @@ typedef struct
   uint32_t size;
 } AppMediaAviIndex_t;
 
+typedef struct
+{
+  uint32_t width;
+  uint32_t height;
+  uint32_t components;
+} AppMediaJpegInfo_t;
+
 static TX_THREAD s_media_thread;
 static TX_QUEUE s_media_queue;
 static TX_MUTEX s_media_status_mutex;
@@ -71,13 +80,19 @@ static uint8_t s_filex_cache[APP_MEDIA_FILEX_CACHE_SIZE] __attribute__((aligned(
 static uint8_t s_boot_sector[SD_NAND_BLOCK_SIZE] __attribute__((aligned(32)));
 static uint8_t s_bmp_row[APP_MEDIA_FB_WIDTH * 3U * APP_MEDIA_BMP_ROWS_PER_WRITE] __attribute__((aligned(32)));
 static uint8_t s_jpeg_buffer[APP_MEDIA_JPEG_MAX_BYTES] __attribute__((aligned(32)));
+static uint8_t s_jpeg_decode_buffer[APP_MEDIA_JPEG_DECODE_MAX_BYTES] __attribute__((section(".EXTRAM"), aligned(32)));
+static uint16_t s_preview_buffer[APP_MEDIA_PREVIEW_WIDTH * APP_MEDIA_PREVIEW_HEIGHT] __attribute__((section(".EXTRAM"), aligned(32)));
 static AppMediaAviIndex_t s_avi_index[APP_MEDIA_MAX_VIDEO_FRAMES];
 
 static AppMediaStatus_t s_status;
+static JPEG_HandleTypeDef s_jpeg_handle;
 static uint32_t s_media_mounted = 0U;
+static uint32_t s_jpeg_ready = 0U;
 static uint32_t s_recording = 0U;
 static uint32_t s_next_screenshot = 1U;
 static uint32_t s_next_video = 1U;
+static uint32_t s_video_play_frame = 0U;
+static uint32_t s_video_play_frame_count = 0U;
 static uint32_t s_record_file_pos = 0U;
 static uint32_t s_record_started_tick = 0U;
 static uint32_t s_record_last_frame_tick = 0U;
@@ -86,6 +101,7 @@ static uint32_t s_avi_avih_frames_offset = 0U;
 static uint32_t s_avi_strh_frames_offset = 0U;
 static uint32_t s_avi_movi_size_offset = 0U;
 static uint32_t s_avi_movi_data_start = 0U;
+static char s_video_play_path[APP_MEDIA_FILE_NAME_LEN];
 
 static void AppMedia_ThreadEntry(ULONG thread_input);
 static void AppMedia_FileXDriver(FX_MEDIA *media_ptr);
@@ -136,6 +152,80 @@ static void status_set_file(char *target, const char *source)
 
   (void)strncpy(target, source, APP_MEDIA_FILE_NAME_LEN - 1U);
   target[APP_MEDIA_FILE_NAME_LEN - 1U] = '\0';
+}
+
+static uint32_t media_min_u32(uint32_t a, uint32_t b)
+{
+  return (a < b) ? a : b;
+}
+
+static uint16_t gray_to_rgb565(uint8_t value)
+{
+  return (uint16_t)(((uint16_t)(value & 0xF8U) << 8) |
+                    ((uint16_t)(value & 0xFCU) << 3) |
+                    ((uint16_t)value >> 3));
+}
+
+static void clean_preview_cache(void)
+{
+  SCB_CleanDCache_by_Addr((void *)s_preview_buffer, (int32_t)sizeof(s_preview_buffer));
+  __DSB();
+}
+
+static void reset_video_playback(void)
+{
+  s_video_play_frame = 0U;
+  s_video_play_frame_count = 0U;
+  status_set_file(s_video_play_path, "");
+}
+
+static void preview_clear(void)
+{
+  memset(s_preview_buffer, 0, sizeof(s_preview_buffer));
+  clean_preview_cache();
+
+  status_lock();
+  s_status.flags &= ~APP_MEDIA_FLAG_PREVIEW_VALID;
+  s_status.preview_generation++;
+  s_status.preview_type = APP_MEDIA_SELECTED_NONE;
+  s_status.preview_width = 0U;
+  s_status.preview_height = 0U;
+  s_status.preview_frame_index = 0U;
+  s_status.preview_frame_count = 0U;
+  status_unlock();
+}
+
+static void preview_commit(uint32_t type, uint32_t frame_index, uint32_t frame_count)
+{
+  clean_preview_cache();
+
+  status_lock();
+  s_status.flags |= APP_MEDIA_FLAG_PREVIEW_VALID;
+  s_status.preview_generation++;
+  s_status.preview_type = type;
+  s_status.preview_width = APP_MEDIA_PREVIEW_WIDTH;
+  s_status.preview_height = APP_MEDIA_PREVIEW_HEIGHT;
+  s_status.preview_frame_index = frame_index;
+  s_status.preview_frame_count = frame_count;
+  status_unlock();
+}
+
+static UINT file_read_exact(FX_FILE *file, void *buffer, ULONG bytes, uint32_t *bytes_read)
+{
+  ULONG actual = 0U;
+  UINT status = fx_file_read(file, buffer, bytes, &actual);
+
+  if (bytes_read != NULL)
+  {
+    *bytes_read += actual;
+  }
+
+  if (status != FX_SUCCESS)
+  {
+    return status;
+  }
+
+  return (actual == bytes) ? FX_SUCCESS : FX_END_OF_FILE;
 }
 
 static uint32_t post_command(AppMediaCommand_t command)
@@ -353,7 +443,7 @@ static void select_latest(void)
   if (s_status.videos != 0U)
   {
     s_status.selected_type = APP_MEDIA_SELECTED_VIDEO;
-    s_status.selected_index = s_status.videos - 1U;
+    s_status.selected_index = s_status.screenshots + s_status.videos - 1U;
     make_video_path(s_status.videos, path, sizeof(path));
     status_set_file(s_status.selected_file, path);
   }
@@ -386,6 +476,8 @@ static void scan_media_files(void)
   s_next_screenshot = screenshots + 1U;
   s_next_video = videos + 1U;
   select_latest();
+  reset_video_playback();
+  preview_clear();
 }
 
 static UINT mount_or_format_media(void)
@@ -543,6 +635,29 @@ static void clean_framebuffer_cache(const uint16_t *framebuffer)
   __DSB();
 }
 
+static uint32_t ensure_jpeg_ready(void)
+{
+  if (s_jpeg_ready != 0U)
+  {
+    return APP_MEDIA_ERROR_NONE;
+  }
+
+  __HAL_RCC_JPEG_CLK_ENABLE();
+  __HAL_RCC_JPEG_FORCE_RESET();
+  __HAL_RCC_JPEG_RELEASE_RESET();
+
+  memset(&s_jpeg_handle, 0, sizeof(s_jpeg_handle));
+  s_jpeg_handle.Instance = JPEG;
+  if (HAL_JPEG_Init(&s_jpeg_handle) != HAL_OK)
+  {
+    status_set_error(APP_MEDIA_ERROR_JPEG);
+    return APP_MEDIA_ERROR_JPEG;
+  }
+
+  s_jpeg_ready = 1U;
+  return APP_MEDIA_ERROR_NONE;
+}
+
 static uint32_t write_bmp_screenshot(void)
 {
   char path[APP_MEDIA_FILE_NAME_LEN];
@@ -655,6 +770,8 @@ static uint32_t write_bmp_screenshot(void)
   s_status.last_error = APP_MEDIA_ERROR_NONE;
   status_unlock();
 
+  reset_video_playback();
+  preview_clear();
   s_next_screenshot++;
   update_space_status();
   return APP_MEDIA_ERROR_NONE;
@@ -989,10 +1106,12 @@ static uint32_t start_recording(void)
   status_set_file(s_status.last_file, path);
   status_set_file(s_status.selected_file, path);
   s_status.selected_type = APP_MEDIA_SELECTED_VIDEO;
-  s_status.selected_index = s_next_video - 1U;
+  s_status.selected_index = s_status.screenshots + s_next_video - 1U;
   s_status.last_error = APP_MEDIA_ERROR_NONE;
   status_unlock();
 
+  reset_video_playback();
+  preview_clear();
   return APP_MEDIA_ERROR_NONE;
 }
 
@@ -1024,6 +1143,8 @@ static uint32_t stop_recording(void)
   s_status.last_error = APP_MEDIA_ERROR_NONE;
   status_unlock();
 
+  reset_video_playback();
+  preview_clear();
   s_next_video++;
   update_space_status();
   return APP_MEDIA_ERROR_NONE;
@@ -1087,25 +1208,621 @@ static uint32_t select_next_file(void)
   s_status.last_error = APP_MEDIA_ERROR_NONE;
   status_unlock();
 
+  reset_video_playback();
+  preview_clear();
   return APP_MEDIA_ERROR_NONE;
+}
+
+static uint32_t jpeg_parse_info(const uint8_t *data, uint32_t size, AppMediaJpegInfo_t *info)
+{
+  uint32_t pos = 2U;
+
+  if ((data == NULL) || (info == NULL) || (size < 4U) ||
+      (data[0] != 0xFFU) || (data[1] != 0xD8U))
+  {
+    return APP_MEDIA_ERROR_INVALID_MEDIA;
+  }
+
+  memset(info, 0, sizeof(*info));
+
+  while ((pos + 4U) <= size)
+  {
+    uint8_t marker;
+    uint32_t segment_len;
+
+    while ((pos < size) && (data[pos] != 0xFFU))
+    {
+      pos++;
+    }
+    while ((pos < size) && (data[pos] == 0xFFU))
+    {
+      pos++;
+    }
+    if (pos >= size)
+    {
+      break;
+    }
+
+    marker = data[pos++];
+    if ((marker == 0xD8U) || (marker == 0xD9U))
+    {
+      continue;
+    }
+    if ((marker >= 0xD0U) && (marker <= 0xD7U))
+    {
+      continue;
+    }
+    if ((pos + 2U) > size)
+    {
+      return APP_MEDIA_ERROR_INVALID_MEDIA;
+    }
+
+    segment_len = ((uint32_t)data[pos] << 8) | (uint32_t)data[pos + 1U];
+    if ((segment_len < 2U) || ((pos + segment_len) > size))
+    {
+      return APP_MEDIA_ERROR_INVALID_MEDIA;
+    }
+
+    if (marker == 0xC0U)
+    {
+      if (segment_len < 8U)
+      {
+        return APP_MEDIA_ERROR_INVALID_MEDIA;
+      }
+      info->height = ((uint32_t)data[pos + 3U] << 8) | (uint32_t)data[pos + 4U];
+      info->width = ((uint32_t)data[pos + 5U] << 8) | (uint32_t)data[pos + 6U];
+      info->components = data[pos + 7U];
+      return APP_MEDIA_ERROR_NONE;
+    }
+
+    if (marker == 0xDAU)
+    {
+      break;
+    }
+
+    pos += segment_len;
+  }
+
+  return APP_MEDIA_ERROR_INVALID_MEDIA;
+}
+
+static uint32_t decode_jpeg_preview(uint32_t jpeg_size, uint32_t frame_index, uint32_t frame_count)
+{
+  AppMediaJpegInfo_t info;
+  uint32_t padded_size;
+  uint32_t mcu_cols;
+  uint32_t mcu_rows;
+  uint32_t output_bytes;
+  uint32_t dst_x0;
+  uint32_t dst_y0;
+  const uint8_t *src;
+
+  if (jpeg_parse_info(s_jpeg_buffer, jpeg_size, &info) != APP_MEDIA_ERROR_NONE)
+  {
+    preview_clear();
+    status_set_error(APP_MEDIA_ERROR_INVALID_MEDIA);
+    return APP_MEDIA_ERROR_INVALID_MEDIA;
+  }
+
+  if ((info.components != 1U) || (info.width == 0U) || (info.height == 0U) ||
+      (info.width > APP_MEDIA_PREVIEW_WIDTH) || (info.height > APP_MEDIA_PREVIEW_HEIGHT))
+  {
+    preview_clear();
+    status_set_error(APP_MEDIA_ERROR_UNSUPPORTED_FORMAT);
+    return APP_MEDIA_ERROR_UNSUPPORTED_FORMAT;
+  }
+
+  padded_size = (jpeg_size + 3U) & ~3UL;
+  if (padded_size > APP_MEDIA_JPEG_MAX_BYTES)
+  {
+    preview_clear();
+    status_set_error(APP_MEDIA_ERROR_INVALID_MEDIA);
+    return APP_MEDIA_ERROR_INVALID_MEDIA;
+  }
+  if (padded_size > jpeg_size)
+  {
+    memset(&s_jpeg_buffer[jpeg_size], 0xFF, padded_size - jpeg_size);
+  }
+
+  mcu_cols = (info.width + 7U) / 8U;
+  mcu_rows = (info.height + 7U) / 8U;
+  output_bytes = mcu_cols * mcu_rows * 64U;
+  if ((output_bytes == 0U) || (output_bytes > sizeof(s_jpeg_decode_buffer)))
+  {
+    preview_clear();
+    status_set_error(APP_MEDIA_ERROR_UNSUPPORTED_FORMAT);
+    return APP_MEDIA_ERROR_UNSUPPORTED_FORMAT;
+  }
+
+  if (ensure_jpeg_ready() != APP_MEDIA_ERROR_NONE)
+  {
+    preview_clear();
+    return APP_MEDIA_ERROR_JPEG;
+  }
+
+  memset(s_jpeg_decode_buffer, 0, output_bytes);
+  if (HAL_JPEG_Decode(&s_jpeg_handle,
+                      s_jpeg_buffer,
+                      padded_size,
+                      s_jpeg_decode_buffer,
+                      output_bytes,
+                      APP_MEDIA_JPEG_TIMEOUT_MS) != HAL_OK)
+  {
+    preview_clear();
+    status_set_error(APP_MEDIA_ERROR_JPEG);
+    return APP_MEDIA_ERROR_JPEG;
+  }
+
+  if ((s_jpeg_handle.Conf.ColorSpace != JPEG_GRAYSCALE_COLORSPACE) ||
+      (s_jpeg_handle.Conf.ImageWidth != info.width) ||
+      (s_jpeg_handle.Conf.ImageHeight != info.height))
+  {
+    preview_clear();
+    status_set_error(APP_MEDIA_ERROR_UNSUPPORTED_FORMAT);
+    return APP_MEDIA_ERROR_UNSUPPORTED_FORMAT;
+  }
+
+  memset(s_preview_buffer, 0, sizeof(s_preview_buffer));
+  dst_x0 = (APP_MEDIA_PREVIEW_WIDTH - info.width) / 2U;
+  dst_y0 = (APP_MEDIA_PREVIEW_HEIGHT - info.height) / 2U;
+  src = s_jpeg_decode_buffer;
+  for (uint32_t mcu_y = 0U; mcu_y < mcu_rows; ++mcu_y)
+  {
+    for (uint32_t mcu_x = 0U; mcu_x < mcu_cols; ++mcu_x)
+    {
+      for (uint32_t y = 0U; y < 8U; ++y)
+      {
+        const uint32_t dst_y = (mcu_y * 8U) + y;
+        if (dst_y >= info.height)
+        {
+          continue;
+        }
+
+        for (uint32_t x = 0U; x < 8U; ++x)
+        {
+          const uint32_t dst_x = (mcu_x * 8U) + x;
+          if (dst_x < info.width)
+          {
+            s_preview_buffer[((dst_y0 + dst_y) * APP_MEDIA_PREVIEW_WIDTH) + dst_x0 + dst_x] =
+              gray_to_rgb565(src[(y * 8U) + x]);
+          }
+        }
+      }
+      src += 64U;
+    }
+  }
+
+  preview_commit(APP_MEDIA_SELECTED_VIDEO, frame_index, frame_count);
+  return APP_MEDIA_ERROR_NONE;
+}
+
+static uint32_t load_bmp_preview(FX_FILE *file, uint32_t *bytes_read)
+{
+  uint8_t header[54];
+  uint32_t data_offset;
+  uint32_t dib_size;
+  uint32_t width;
+  uint32_t height;
+  uint32_t bpp;
+  uint32_t compression;
+  uint32_t row_stride;
+  uint32_t draw_width;
+  uint32_t draw_height;
+  uint32_t y_offset;
+  UINT status;
+
+  status = fx_file_seek(file, 0U);
+  if (status == FX_SUCCESS)
+  {
+    status = file_read_exact(file, header, sizeof(header), bytes_read);
+  }
+  if (status != FX_SUCCESS)
+  {
+    preview_clear();
+    status_set_error(APP_MEDIA_ERROR_FILE_READ);
+    return APP_MEDIA_ERROR_FILE_READ;
+  }
+
+  data_offset = get_u32_le(&header[10]);
+  dib_size = get_u32_le(&header[14]);
+  width = get_u32_le(&header[18]);
+  height = get_u32_le(&header[22]);
+  bpp = get_u16_le(&header[28]);
+  compression = get_u32_le(&header[30]);
+  if ((header[0] != 'B') || (header[1] != 'M') ||
+      (dib_size < 40U) || (width == 0U) || (height == 0U) ||
+      ((height & 0x80000000UL) != 0U) ||
+      (bpp != 24U) || (compression != 0U) ||
+      (width > APP_MEDIA_FB_WIDTH) ||
+      ((width * 3U) > sizeof(s_bmp_row)))
+  {
+    preview_clear();
+    status_set_error(APP_MEDIA_ERROR_UNSUPPORTED_FORMAT);
+    return APP_MEDIA_ERROR_UNSUPPORTED_FORMAT;
+  }
+
+  row_stride = (width * 3U + 3U) & ~3UL;
+  if (row_stride > sizeof(s_bmp_row))
+  {
+    preview_clear();
+    status_set_error(APP_MEDIA_ERROR_UNSUPPORTED_FORMAT);
+    return APP_MEDIA_ERROR_UNSUPPORTED_FORMAT;
+  }
+
+  draw_width = APP_MEDIA_PREVIEW_WIDTH;
+  draw_height = (height * draw_width) / width;
+  if (draw_height > APP_MEDIA_PREVIEW_HEIGHT)
+  {
+    draw_height = APP_MEDIA_PREVIEW_HEIGHT;
+    draw_width = (width * draw_height) / height;
+  }
+  if ((draw_width == 0U) || (draw_height == 0U))
+  {
+    preview_clear();
+    status_set_error(APP_MEDIA_ERROR_INVALID_MEDIA);
+    return APP_MEDIA_ERROR_INVALID_MEDIA;
+  }
+
+  memset(s_preview_buffer, 0, sizeof(s_preview_buffer));
+  y_offset = (APP_MEDIA_PREVIEW_HEIGHT - draw_height) / 2U;
+  for (uint32_t dst_y = 0U; dst_y < draw_height; ++dst_y)
+  {
+    const uint32_t src_y_top = (dst_y * height) / draw_height;
+    const uint32_t file_y = (height - 1U) - src_y_top;
+    const uint32_t x_offset = (APP_MEDIA_PREVIEW_WIDTH - draw_width) / 2U;
+    uint16_t *dst = &s_preview_buffer[((y_offset + dst_y) * APP_MEDIA_PREVIEW_WIDTH) + x_offset];
+
+    status = fx_file_seek(file, (ULONG64)data_offset + ((ULONG64)file_y * (ULONG64)row_stride));
+    if (status == FX_SUCCESS)
+    {
+      status = file_read_exact(file, s_bmp_row, row_stride, bytes_read);
+    }
+    if (status != FX_SUCCESS)
+    {
+      preview_clear();
+      status_set_error(APP_MEDIA_ERROR_FILE_READ);
+      return APP_MEDIA_ERROR_FILE_READ;
+    }
+
+    for (uint32_t dst_x = 0U; dst_x < draw_width; ++dst_x)
+    {
+      const uint32_t src_x = (dst_x * width) / draw_width;
+      const uint8_t *pixel = &s_bmp_row[src_x * 3U];
+      const uint8_t b = pixel[0];
+      const uint8_t g = pixel[1];
+      const uint8_t r = pixel[2];
+      dst[dst_x] = (uint16_t)(((uint16_t)(r & 0xF8U) << 8) |
+                              ((uint16_t)(g & 0xFCU) << 3) |
+                              ((uint16_t)b >> 3));
+    }
+  }
+
+  preview_commit(APP_MEDIA_SELECTED_SCREENSHOT, 0U, 1U);
+  return APP_MEDIA_ERROR_NONE;
+}
+
+static uint32_t avi_read_chunk_header(FX_FILE *file,
+                                      ULONG64 offset,
+                                      uint8_t tag[4],
+                                      uint32_t *chunk_size,
+                                      uint32_t *bytes_read)
+{
+  uint8_t header[8];
+  UINT status = fx_file_seek(file, offset);
+
+  if (status == FX_SUCCESS)
+  {
+    status = file_read_exact(file, header, sizeof(header), bytes_read);
+  }
+  if (status != FX_SUCCESS)
+  {
+    return APP_MEDIA_ERROR_FILE_READ;
+  }
+
+  memcpy(tag, header, 4U);
+  *chunk_size = get_u32_le(&header[4]);
+  return APP_MEDIA_ERROR_NONE;
+}
+
+static uint32_t avi_find_regions(FX_FILE *file,
+                                 ULONG64 file_size,
+                                 ULONG64 *movi_data_start,
+                                 ULONG64 *movi_end,
+                                 ULONG64 *idx1_start,
+                                 uint32_t *idx1_size,
+                                 uint32_t *bytes_read)
+{
+  uint8_t header[12];
+  ULONG64 offset = 12U;
+  UINT status;
+
+  *movi_data_start = 0U;
+  *movi_end = 0U;
+  *idx1_start = 0U;
+  *idx1_size = 0U;
+
+  status = fx_file_seek(file, 0U);
+  if (status == FX_SUCCESS)
+  {
+    status = file_read_exact(file, header, sizeof(header), bytes_read);
+  }
+  if (status != FX_SUCCESS)
+  {
+    return APP_MEDIA_ERROR_FILE_READ;
+  }
+  if ((memcmp(&header[0], "RIFF", 4U) != 0) || (memcmp(&header[8], "AVI ", 4U) != 0))
+  {
+    return APP_MEDIA_ERROR_INVALID_MEDIA;
+  }
+
+  while ((offset + 8U) <= file_size)
+  {
+    uint8_t tag[4];
+    uint32_t chunk_size;
+    ULONG64 payload_start;
+    ULONG64 payload_end;
+    ULONG64 next_offset;
+    uint32_t error = avi_read_chunk_header(file, offset, tag, &chunk_size, bytes_read);
+
+    if (error != APP_MEDIA_ERROR_NONE)
+    {
+      return error;
+    }
+
+    payload_start = offset + 8U;
+    payload_end = payload_start + chunk_size;
+    next_offset = payload_end + (chunk_size & 1U);
+    if ((payload_end > file_size) || (next_offset < offset))
+    {
+      return APP_MEDIA_ERROR_INVALID_MEDIA;
+    }
+
+    if ((memcmp(tag, "LIST", 4U) == 0) && (chunk_size >= 4U))
+    {
+      uint8_t list_type[4];
+      status = fx_file_seek(file, payload_start);
+      if (status == FX_SUCCESS)
+      {
+        status = file_read_exact(file, list_type, sizeof(list_type), bytes_read);
+      }
+      if (status != FX_SUCCESS)
+      {
+        return APP_MEDIA_ERROR_FILE_READ;
+      }
+
+      if (memcmp(list_type, "movi", 4U) == 0)
+      {
+        *movi_data_start = payload_start + 4U;
+        *movi_end = payload_end;
+      }
+    }
+    else if (memcmp(tag, "idx1", 4U) == 0)
+    {
+      *idx1_start = payload_start;
+      *idx1_size = chunk_size;
+    }
+
+    offset = next_offset;
+  }
+
+  return (*movi_data_start != 0U) ? APP_MEDIA_ERROR_NONE : APP_MEDIA_ERROR_INVALID_MEDIA;
+}
+
+static uint32_t avi_build_index_from_idx1(FX_FILE *file,
+                                          ULONG64 file_size,
+                                          ULONG64 movi_data_start,
+                                          ULONG64 idx1_start,
+                                          uint32_t idx1_size,
+                                          uint32_t *frame_count,
+                                          uint32_t *bytes_read)
+{
+  const uint32_t entries = idx1_size / 16U;
+  uint8_t entry[16];
+  uint32_t frames = 0U;
+
+  for (uint32_t i = 0U; (i < entries) && (frames < APP_MEDIA_MAX_VIDEO_FRAMES); ++i)
+  {
+    UINT status = fx_file_seek(file, idx1_start + ((ULONG64)i * 16ULL));
+    if (status == FX_SUCCESS)
+    {
+      status = file_read_exact(file, entry, sizeof(entry), bytes_read);
+    }
+    if (status != FX_SUCCESS)
+    {
+      return APP_MEDIA_ERROR_FILE_READ;
+    }
+
+    if ((memcmp(entry, "00dc", 4U) == 0) || (memcmp(entry, "00db", 4U) == 0))
+    {
+      const uint32_t offset = get_u32_le(&entry[8]);
+      const uint32_t size = get_u32_le(&entry[12]);
+      const ULONG64 chunk_offset = movi_data_start + offset;
+
+      if ((size != 0U) && (size <= APP_MEDIA_JPEG_MAX_BYTES) &&
+          ((chunk_offset + 8ULL + (ULONG64)size) <= file_size) &&
+          (chunk_offset <= 0xFFFFFFFFULL))
+      {
+        s_avi_index[frames].offset = (uint32_t)chunk_offset;
+        s_avi_index[frames].size = size;
+        frames++;
+      }
+    }
+  }
+
+  *frame_count = frames;
+  return (frames != 0U) ? APP_MEDIA_ERROR_NONE : APP_MEDIA_ERROR_INVALID_MEDIA;
+}
+
+static uint32_t avi_build_index_from_movi(FX_FILE *file,
+                                          ULONG64 movi_data_start,
+                                          ULONG64 movi_end,
+                                          uint32_t *frame_count,
+                                          uint32_t *bytes_read)
+{
+  ULONG64 offset = movi_data_start;
+  uint32_t frames = 0U;
+
+  while (((offset + 8U) <= movi_end) && (frames < APP_MEDIA_MAX_VIDEO_FRAMES))
+  {
+    uint8_t tag[4];
+    uint32_t chunk_size;
+    uint32_t error = avi_read_chunk_header(file, offset, tag, &chunk_size, bytes_read);
+
+    if (error != APP_MEDIA_ERROR_NONE)
+    {
+      return error;
+    }
+    if ((offset + 8ULL + (ULONG64)chunk_size) > movi_end)
+    {
+      return APP_MEDIA_ERROR_INVALID_MEDIA;
+    }
+
+    if (((memcmp(tag, "00dc", 4U) == 0) || (memcmp(tag, "00db", 4U) == 0)) &&
+        (chunk_size != 0U) && (chunk_size <= APP_MEDIA_JPEG_MAX_BYTES) &&
+        (offset <= 0xFFFFFFFFULL))
+    {
+      s_avi_index[frames].offset = (uint32_t)offset;
+      s_avi_index[frames].size = chunk_size;
+      frames++;
+    }
+
+    offset += 8ULL + chunk_size + (chunk_size & 1U);
+  }
+
+  *frame_count = frames;
+  return (frames != 0U) ? APP_MEDIA_ERROR_NONE : APP_MEDIA_ERROR_INVALID_MEDIA;
+}
+
+static uint32_t load_avi_preview(FX_FILE *file, const char *path, uint32_t *bytes_read)
+{
+  ULONG64 file_size = file->fx_file_current_file_size;
+  ULONG64 movi_data_start;
+  ULONG64 movi_end;
+  ULONG64 idx1_start;
+  uint32_t idx1_size;
+  uint32_t frame_count = 0U;
+  uint32_t frame_index;
+  uint8_t tag[4];
+  uint32_t chunk_size;
+  UINT status;
+  uint32_t error;
+
+  if (file_size < 20U)
+  {
+    preview_clear();
+    status_set_error(APP_MEDIA_ERROR_INVALID_MEDIA);
+    return APP_MEDIA_ERROR_INVALID_MEDIA;
+  }
+
+  if ((s_video_play_frame_count == 0U) || (strncmp(s_video_play_path, path, APP_MEDIA_FILE_NAME_LEN) != 0))
+  {
+    error = avi_find_regions(file,
+                             file_size,
+                             &movi_data_start,
+                             &movi_end,
+                             &idx1_start,
+                             &idx1_size,
+                             bytes_read);
+    if (error == APP_MEDIA_ERROR_NONE)
+    {
+      if ((idx1_start != 0U) && (idx1_size >= 16U))
+      {
+        error = avi_build_index_from_idx1(file,
+                                          file_size,
+                                          movi_data_start,
+                                          idx1_start,
+                                          idx1_size,
+                                          &frame_count,
+                                          bytes_read);
+      }
+      else
+      {
+        error = avi_build_index_from_movi(file, movi_data_start, movi_end, &frame_count, bytes_read);
+      }
+    }
+    if (error != APP_MEDIA_ERROR_NONE)
+    {
+      preview_clear();
+      status_set_error(error);
+      return error;
+    }
+
+    s_video_play_frame = 0U;
+    s_video_play_frame_count = frame_count;
+    status_set_file(s_video_play_path, path);
+  }
+
+  frame_count = s_video_play_frame_count;
+  frame_index = (frame_count == 0U) ? 0U : (s_video_play_frame % frame_count);
+  error = avi_read_chunk_header(file,
+                                (ULONG64)s_avi_index[frame_index].offset,
+                                tag,
+                                &chunk_size,
+                                bytes_read);
+  if (error != APP_MEDIA_ERROR_NONE)
+  {
+    preview_clear();
+    status_set_error(error);
+    return error;
+  }
+  if ((memcmp(tag, "00dc", 4U) != 0) && (memcmp(tag, "00db", 4U) != 0))
+  {
+    preview_clear();
+    status_set_error(APP_MEDIA_ERROR_INVALID_MEDIA);
+    return APP_MEDIA_ERROR_INVALID_MEDIA;
+  }
+
+  chunk_size = media_min_u32(chunk_size, s_avi_index[frame_index].size);
+  if ((chunk_size == 0U) || (chunk_size > APP_MEDIA_JPEG_MAX_BYTES))
+  {
+    preview_clear();
+    status_set_error(APP_MEDIA_ERROR_INVALID_MEDIA);
+    return APP_MEDIA_ERROR_INVALID_MEDIA;
+  }
+
+  status = fx_file_seek(file, (ULONG64)s_avi_index[frame_index].offset + 8ULL);
+  if (status == FX_SUCCESS)
+  {
+    status = file_read_exact(file, s_jpeg_buffer, chunk_size, bytes_read);
+  }
+  if (status != FX_SUCCESS)
+  {
+    preview_clear();
+    status_set_error(APP_MEDIA_ERROR_FILE_READ);
+    return APP_MEDIA_ERROR_FILE_READ;
+  }
+
+  error = decode_jpeg_preview(chunk_size, frame_index, frame_count);
+  if (error == APP_MEDIA_ERROR_NONE)
+  {
+    s_video_play_frame = (frame_index + 1U) % frame_count;
+  }
+  return error;
 }
 
 static uint32_t read_selected_file(void)
 {
   char path[APP_MEDIA_FILE_NAME_LEN];
-  ULONG actual = 0U;
-  uint8_t header[512];
   UINT status;
   uint32_t bytes = 0U;
+  uint32_t selected_type;
+  uint32_t error;
 
   status_lock();
   status_set_file(path, s_status.selected_file);
+  selected_type = s_status.selected_type;
   status_unlock();
 
   if (path[0] == '\0')
   {
     status_set_error(APP_MEDIA_ERROR_NO_SELECTION);
     return APP_MEDIA_ERROR_NO_SELECTION;
+  }
+
+  if (s_recording != 0U)
+  {
+    status_set_error(APP_MEDIA_ERROR_ALREADY_RECORDING);
+    return APP_MEDIA_ERROR_ALREADY_RECORDING;
   }
 
   status = fx_file_open(&s_media, &s_work_file, (CHAR *)path, FX_OPEN_FOR_READ);
@@ -1115,25 +1832,30 @@ static uint32_t read_selected_file(void)
     return APP_MEDIA_ERROR_FILE_OPEN;
   }
 
-  status = fx_file_read(&s_work_file, header, sizeof(header), &actual);
-  if (status == FX_SUCCESS)
+  if (selected_type == APP_MEDIA_SELECTED_SCREENSHOT)
   {
-    bytes = actual;
+    error = load_bmp_preview(&s_work_file, &bytes);
+  }
+  else if (selected_type == APP_MEDIA_SELECTED_VIDEO)
+  {
+    error = load_avi_preview(&s_work_file, path, &bytes);
+  }
+  else
+  {
+    error = APP_MEDIA_ERROR_NO_SELECTION;
+    status_set_error(error);
   }
   (void)fx_file_close(&s_work_file);
 
-  if (status != FX_SUCCESS)
-  {
-    status_set_error(APP_MEDIA_ERROR_FILE_READ);
-    return APP_MEDIA_ERROR_FILE_READ;
-  }
-
   status_lock();
   s_status.last_read_bytes = bytes;
-  s_status.last_error = APP_MEDIA_ERROR_NONE;
+  if (error == APP_MEDIA_ERROR_NONE)
+  {
+    s_status.last_error = APP_MEDIA_ERROR_NONE;
+  }
   status_unlock();
 
-  return APP_MEDIA_ERROR_NONE;
+  return error;
 }
 
 static void process_command(AppMediaCommand_t command)
@@ -1310,6 +2032,11 @@ UINT AppMedia_Init(VOID *memory_ptr)
 
   (void)memory_ptr;
   memset(&s_status, 0, sizeof(s_status));
+  memset(s_preview_buffer, 0, sizeof(s_preview_buffer));
+  s_video_play_path[0] = '\0';
+  s_video_play_frame = 0U;
+  s_video_play_frame_count = 0U;
+  s_jpeg_ready = 0U;
 
   ret = tx_mutex_create(&s_media_status_mutex, (CHAR *)"media_status", TX_NO_INHERIT);
   if (ret != TX_SUCCESS)
@@ -1388,4 +2115,22 @@ void AppMedia_GetStatus(AppMediaStatus_t *status)
   status_lock();
   *status = s_status;
   status_unlock();
+}
+
+const uint16_t *AppMedia_GetPreviewBuffer(AppMediaPreviewInfo_t *info)
+{
+  if (info != NULL)
+  {
+    status_lock();
+    info->generation = s_status.preview_generation;
+    info->valid = ((s_status.flags & APP_MEDIA_FLAG_PREVIEW_VALID) != 0U) ? 1U : 0U;
+    info->type = s_status.preview_type;
+    info->width = s_status.preview_width;
+    info->height = s_status.preview_height;
+    info->frame_index = s_status.preview_frame_index;
+    info->frame_count = s_status.preview_frame_count;
+    status_unlock();
+  }
+
+  return s_preview_buffer;
 }

@@ -81,11 +81,28 @@ typedef struct
     uint32_t dropped_frames;
     uint32_t record_seconds;
     uint32_t last_read_bytes;
+    uint32_t preview_generation;
+    uint32_t preview_type;
+    uint32_t preview_width;
+    uint32_t preview_height;
+    uint32_t preview_frame_index;
+    uint32_t preview_frame_count;
     uint64_t total_bytes;
     uint64_t free_bytes;
     char last_file[32];
     char selected_file[32];
 } AppMediaStatus_t;
+
+typedef struct
+{
+    uint32_t generation;
+    uint32_t valid;
+    uint32_t type;
+    uint32_t width;
+    uint32_t height;
+    uint32_t frame_index;
+    uint32_t frame_count;
+} AppMediaPreviewInfo_t;
 
 static uint32_t AppMedia_RequestScreenshot()
 {
@@ -123,6 +140,15 @@ static void AppMedia_GetStatus(AppMediaStatus_t* status)
     {
         memset(status, 0, sizeof(*status));
     }
+}
+
+static const uint16_t* AppMedia_GetPreviewBuffer(AppMediaPreviewInfo_t* info)
+{
+    if (info != 0)
+    {
+        memset(info, 0, sizeof(*info));
+    }
+    return 0;
 }
 #endif
 
@@ -245,6 +271,17 @@ void Model::tick()
     snapshot.mediaSelectedType = static_cast<uint8_t>(media.selected_type);
     copyFileName(snapshot.mediaLastFile, media.last_file, sizeof(snapshot.mediaLastFile));
     copyFileName(snapshot.mediaSelectedFile, media.selected_file, sizeof(snapshot.mediaSelectedFile));
+
+    AppMediaPreviewInfo_t preview;
+    memset(&preview, 0, sizeof(preview));
+    snapshot.mediaPreviewPixels = AppMedia_GetPreviewBuffer(&preview);
+    snapshot.mediaPreviewGeneration = preview.generation;
+    snapshot.mediaPreviewValid = (preview.valid != 0U) ? 1U : 0U;
+    snapshot.mediaPreviewType = static_cast<uint8_t>(preview.type);
+    snapshot.mediaPreviewWidth = static_cast<uint16_t>(preview.width);
+    snapshot.mediaPreviewHeight = static_cast<uint16_t>(preview.height);
+    snapshot.mediaPreviewFrameIndex = preview.frame_index;
+    snapshot.mediaPreviewFrameCount = preview.frame_count;
 
     if ((modelListener != 0) && ((tickCount % 3U) == 0U))
     {

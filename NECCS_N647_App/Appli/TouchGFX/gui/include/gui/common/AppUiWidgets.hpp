@@ -105,4 +105,24 @@ private:
     touchgfx::colortype gridColor;
 };
 
+class AppRgb565Preview : public touchgfx::Widget
+{
+public:
+    AppRgb565Preview();
+
+    void setSource(const uint16_t* pixels, uint16_t width, uint16_t height, bool valid);
+    void setColors(touchgfx::colortype background, touchgfx::colortype border);
+
+    virtual void draw(const touchgfx::Rect& area) const;
+    virtual touchgfx::Rect getSolidRect() const;
+
+private:
+    const uint16_t* source;
+    uint16_t sourceWidth;
+    uint16_t sourceHeight;
+    touchgfx::colortype backgroundColor;
+    touchgfx::colortype borderColor;
+    bool sourceValid;
+};
+
 #endif /* APP_UI_WIDGETS_HPP */

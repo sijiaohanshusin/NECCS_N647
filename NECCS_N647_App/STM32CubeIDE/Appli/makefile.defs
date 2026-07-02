@@ -61,7 +61,8 @@ NECCS_MANUAL_FALLBACK_OBJS := \
 ./Application/User/Core/app_threadx.o \
 ./Application/User/Core/tx_initialize_low_level.o \
 ./Drivers/STM32N6xx_HAL_Driver/stm32n6xx_hal_crc.o \
-./Drivers/STM32N6xx_HAL_Driver/stm32n6xx_hal_crc_ex.o
+./Drivers/STM32N6xx_HAL_Driver/stm32n6xx_hal_crc_ex.o \
+./Drivers/STM32N6xx_HAL_Driver/stm32n6xx_hal_jpeg.o
 
 OBJS += $(NECCS_MANUAL_FALLBACK_OBJS)
 C_DEPS += \
@@ -77,7 +78,8 @@ C_DEPS += \
 ./Application/User/Core/app_mic_array.d \
 ./Application/User/Core/app_threadx.d \
 ./Drivers/STM32N6xx_HAL_Driver/stm32n6xx_hal_crc.d \
-./Drivers/STM32N6xx_HAL_Driver/stm32n6xx_hal_crc_ex.d
+./Drivers/STM32N6xx_HAL_Driver/stm32n6xx_hal_crc_ex.d \
+./Drivers/STM32N6xx_HAL_Driver/stm32n6xx_hal_jpeg.d
 S_UPPER_DEPS += ./Application/User/Core/tx_initialize_low_level.d
 
 USER_OBJS += $(filter-out $(NECCS_OBJS_BEFORE_FALLBACK),$(OBJS))
@@ -122,6 +124,9 @@ Drivers/STM32N6xx_HAL_Driver/stm32n6xx_hal_crc.o: $(NECCS_HAL_SRC_DIR)/stm32n6xx
 	arm-none-eabi-gcc "$<" $(NECCS_RELEASE_CFLAGS) -MF"$(@:%.o=%.d)" -MT"$@" -o "$@"
 
 Drivers/STM32N6xx_HAL_Driver/stm32n6xx_hal_crc_ex.o: $(NECCS_HAL_SRC_DIR)/stm32n6xx_hal_crc_ex.c ../makefile.defs
+	arm-none-eabi-gcc "$<" $(NECCS_RELEASE_CFLAGS) -MF"$(@:%.o=%.d)" -MT"$@" -o "$@"
+
+Drivers/STM32N6xx_HAL_Driver/stm32n6xx_hal_jpeg.o: $(NECCS_HAL_SRC_DIR)/stm32n6xx_hal_jpeg.c ../makefile.defs
 	arm-none-eabi-gcc "$<" $(NECCS_RELEASE_CFLAGS) -MF"$(@:%.o=%.d)" -MT"$@" -o "$@"
 
 clean: clean-neccs-fallback
