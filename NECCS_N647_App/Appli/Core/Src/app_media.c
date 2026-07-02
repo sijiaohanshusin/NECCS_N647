@@ -32,6 +32,7 @@
 #define APP_MEDIA_RECORD_PERIOD_TICKS     (TX_TIMER_TICKS_PER_SECOND / APP_MEDIA_RECORD_FPS)
 #define APP_MEDIA_JPEG_MAX_BYTES          (384U * 1024U)
 #define APP_MEDIA_MAX_VIDEO_FRAMES        1800U
+#define APP_MEDIA_BMP_ROWS_PER_WRITE      64U
 #define APP_MEDIA_MIN_FREE_AFTER_WRITE    (1024ULL * 1024ULL)
 #define APP_MEDIA_RECORD_MIN_FREE_BYTES   (4ULL * 1024ULL * 1024ULL)
 
@@ -68,7 +69,7 @@ static FX_FILE s_work_file;
 static FX_FILE s_record_file;
 static uint8_t s_filex_cache[APP_MEDIA_FILEX_CACHE_SIZE] __attribute__((aligned(32)));
 static uint8_t s_boot_sector[SD_NAND_BLOCK_SIZE] __attribute__((aligned(32)));
-static uint8_t s_bmp_row[APP_MEDIA_FB_WIDTH * 3U] __attribute__((aligned(32)));
+static uint8_t s_bmp_row[APP_MEDIA_FB_WIDTH * 3U * APP_MEDIA_BMP_ROWS_PER_WRITE] __attribute__((aligned(32)));
 static uint8_t s_jpeg_buffer[APP_MEDIA_JPEG_MAX_BYTES] __attribute__((aligned(32)));
 static AppMediaAviIndex_t s_avi_index[APP_MEDIA_MAX_VIDEO_FRAMES];
 
@@ -597,9 +598,11 @@ static uint32_t write_bmp_screenshot(void)
   status = fx_file_write(&s_work_file, header, sizeof(header));
   if (status == FX_SUCCESS)
   {
+    uint32_t rows_in_chunk = 0U;
+
     for (int32_t row = (int32_t)APP_MEDIA_FB_HEIGHT - 1; row >= 0; --row)
     {
-      uint8_t *dst = s_bmp_row;
+      uint8_t *dst = &s_bmp_row[rows_in_chunk * row_bytes];
       const uint16_t *src = &framebuffer[(uint32_t)row * APP_MEDIA_FB_WIDTH];
 
       for (uint32_t col = 0U; col < APP_MEDIA_FB_WIDTH; ++col)
@@ -613,10 +616,15 @@ static uint32_t write_bmp_screenshot(void)
         *dst++ = (uint8_t)((r5 << 3) | (r5 >> 2));
       }
 
-      status = fx_file_write(&s_work_file, s_bmp_row, row_bytes);
-      if (status != FX_SUCCESS)
+      rows_in_chunk++;
+      if ((rows_in_chunk >= APP_MEDIA_BMP_ROWS_PER_WRITE) || (row == 0))
       {
-        break;
+        status = fx_file_write(&s_work_file, s_bmp_row, rows_in_chunk * row_bytes);
+        if (status != FX_SUCCESS)
+        {
+          break;
+        }
+        rows_in_chunk = 0U;
       }
     }
   }
