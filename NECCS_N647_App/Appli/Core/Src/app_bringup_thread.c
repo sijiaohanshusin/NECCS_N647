@@ -1,6 +1,7 @@
 #include "app_bringup_thread.h"
 
 #include "app_boot_diag.h"
+#include "app_camera.h"
 #include "app_media.h"
 #include "app_power.h"
 #include "main.h"
@@ -55,6 +56,10 @@ void App_BringUpThreadEntry(ULONG thread_input)
 
   AppPower_Init();
   App_BringUpMirrorMediaStatus();
+  if (AppCamera_Init() == APP_CAMERA_OK)
+  {
+    (void)AppCamera_StartSmoke();
+  }
 
   while (1)
   {
@@ -62,6 +67,7 @@ void App_BringUpThreadEntry(ULONG thread_input)
     g_app_boot_diag.bringup_loop_count++;
     App_BringUpMirrorMediaStatus();
     AppPower_Poll(1000U);
+    AppCamera_Poll(1000U);
     LED0_TOGGLE();
     tx_thread_sleep(APP_HEARTBEAT_TICKS);
   }

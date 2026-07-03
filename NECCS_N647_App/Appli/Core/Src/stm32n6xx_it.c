@@ -74,6 +74,7 @@ void App_ThreadX_SysTickHook(void)
 extern DMA2D_HandleTypeDef hdma2d;
 extern GPU2D_HandleTypeDef hgpu2d;
 extern LTDC_HandleTypeDef hltdc;
+extern DCMIPP_HandleTypeDef hdcmipp;
 
 /* USER CODE END EV */
 
@@ -272,6 +273,36 @@ void LTDC_UP_ERR_IRQHandler(void)
   /* USER CODE BEGIN LTDC_UP_ERR_IRQn 1 */
 
   /* USER CODE END LTDC_UP_ERR_IRQn 1 */
+}
+
+/**
+  * @brief This function handles CSI global interrupt.
+  */
+void CSI_IRQHandler(void)
+{
+  /* USER CODE BEGIN CSI_IRQn 0 */
+  g_app_boot_diag.last_irqn = (uint32_t)CSI_IRQn;
+
+  /* USER CODE END CSI_IRQn 0 */
+  HAL_DCMIPP_CSI_IRQHandler(&hdcmipp);
+  /* USER CODE BEGIN CSI_IRQn 1 */
+
+  /* USER CODE END CSI_IRQn 1 */
+}
+
+/**
+  * @brief This function handles DCMIPP global interrupt.
+  */
+void DCMIPP_IRQHandler(void)
+{
+  /* USER CODE BEGIN DCMIPP_IRQn 0 */
+  g_app_boot_diag.last_irqn = (uint32_t)DCMIPP_IRQn;
+
+  /* USER CODE END DCMIPP_IRQn 0 */
+  HAL_DCMIPP_IRQHandler(&hdcmipp);
+  /* USER CODE BEGIN DCMIPP_IRQn 1 */
+
+  /* USER CODE END DCMIPP_IRQn 1 */
 }
 
 /**

@@ -76,6 +76,7 @@ void MX_XSPIM_Init(void);
 /* USER CODE BEGIN EFP */
 extern SD_HandleTypeDef hsd2;
 extern I2C_HandleTypeDef hi2c2;
+extern DCMIPP_HandleTypeDef hdcmipp;
 
 /* USER CODE END EFP */
 
@@ -100,8 +101,8 @@ extern I2C_HandleTypeDef hi2c2;
 #define EXP_GPIO_PC11_GPIO_Port GPIOC
 #define MIC_SHDNZ_Pin GPIO_PIN_6
 #define MIC_SHDNZ_GPIO_Port GPIOC
-#define CAM_LED_EN_Pin GPIO_PIN_14
-#define CAM_LED_EN_GPIO_Port GPIOE
+#define EXP_GPIO_PE14_Pin GPIO_PIN_14
+#define EXP_GPIO_PE14_GPIO_Port GPIOE
 #define EXP_GPIO_PE12_Pin GPIO_PIN_12
 #define EXP_GPIO_PE12_GPIO_Port GPIOE
 #define EXP_GPIO_PE7_Pin GPIO_PIN_7
@@ -124,8 +125,8 @@ extern I2C_HandleTypeDef hi2c2;
 #define CTP_INT_GPIO_Port GPIOQ
 #define EXP_GPIO_PQ5_Pin GPIO_PIN_5
 #define EXP_GPIO_PQ5_GPIO_Port GPIOQ
-#define CAM_EN_MODULE_Pin GPIO_PIN_0
-#define CAM_EN_MODULE_GPIO_Port GPIOD
+#define EXP_GPIO_PD0_Pin GPIO_PIN_0
+#define EXP_GPIO_PD0_GPIO_Port GPIOD
 #define EXP_GPIO_PQ2_Pin GPIO_PIN_2
 #define EXP_GPIO_PQ2_GPIO_Port GPIOQ
 #define EXP_GPIO_PQ1_Pin GPIO_PIN_1
@@ -156,8 +157,8 @@ extern I2C_HandleTypeDef hi2c2;
 #define LED1_GPIO_Port GPIOO
 #define EXP_GPIO_PG7_Pin GPIO_PIN_7
 #define EXP_GPIO_PG7_GPIO_Port GPIOG
-#define EXP_GPIO_PG6_Pin GPIO_PIN_6
-#define EXP_GPIO_PG6_GPIO_Port GPIOG
+#define CAM_EN_MODULE_Pin GPIO_PIN_6
+#define CAM_EN_MODULE_GPIO_Port GPIOG
 #define EXP_ALT_ETH_PF10_Pin GPIO_PIN_10
 #define EXP_ALT_ETH_PF10_GPIO_Port GPIOF
 #define EXP_ALT_ETH_PF7_Pin GPIO_PIN_7
@@ -166,8 +167,8 @@ extern I2C_HandleTypeDef hi2c2;
 #define EXP_GPIO_PF3_GPIO_Port GPIOF
 #define EXP_GPIO_PF5_Pin GPIO_PIN_5
 #define EXP_GPIO_PF5_GPIO_Port GPIOF
-#define EXP_GPIO_PG4_Pin GPIO_PIN_4
-#define EXP_GPIO_PG4_GPIO_Port GPIOG
+#define CAM_LED_EN_Pin GPIO_PIN_4
+#define CAM_LED_EN_GPIO_Port GPIOG
 #define EXP_ALT_ETH_PF11_Pin GPIO_PIN_11
 #define EXP_ALT_ETH_PF11_GPIO_Port GPIOF
 #define EXP_GPIO_PF1_Pin GPIO_PIN_1

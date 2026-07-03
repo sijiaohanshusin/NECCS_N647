@@ -667,6 +667,55 @@ void HAL_XSPI_MspDeInit(XSPI_HandleTypeDef* hxspi)
 }
 
 /* USER CODE BEGIN 1 */
+void HAL_DCMIPP_MspInit(DCMIPP_HandleTypeDef *hdcmipp)
+{
+  RCC_PeriphCLKInitTypeDef PeriphClkInitStruct = {0};
+
+  if (hdcmipp->Instance == DCMIPP)
+  {
+    PeriphClkInitStruct.PeriphClockSelection = RCC_PERIPHCLK_DCMIPP | RCC_PERIPHCLK_CSI;
+    PeriphClkInitStruct.DcmippClockSelection = RCC_DCMIPPCLKSOURCE_IC17;
+    PeriphClkInitStruct.ICSelection[RCC_IC17].ClockSelection = RCC_ICCLKSOURCE_PLL1;
+    PeriphClkInitStruct.ICSelection[RCC_IC17].ClockDivider = 4;
+    PeriphClkInitStruct.ICSelection[RCC_IC18].ClockSelection = RCC_ICCLKSOURCE_PLL1;
+    PeriphClkInitStruct.ICSelection[RCC_IC18].ClockDivider = 60;
+    if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInitStruct) != HAL_OK)
+    {
+      Error_Handler();
+    }
+
+    __HAL_RCC_DCMIPP_CLK_ENABLE();
+    __HAL_RCC_CSI_CLK_ENABLE();
+
+    __HAL_RCC_DCMIPP_FORCE_RESET();
+    __HAL_RCC_DCMIPP_RELEASE_RESET();
+    __HAL_RCC_CSI_FORCE_RESET();
+    __HAL_RCC_CSI_RELEASE_RESET();
+
+    HAL_NVIC_SetPriority(DCMIPP_IRQn, 5, 0);
+    HAL_NVIC_SetPriority(CSI_IRQn, 5, 0);
+    HAL_NVIC_EnableIRQ(DCMIPP_IRQn);
+    HAL_NVIC_EnableIRQ(CSI_IRQn);
+  }
+}
+
+void HAL_DCMIPP_MspDeInit(DCMIPP_HandleTypeDef *hdcmipp)
+{
+  if (hdcmipp->Instance == DCMIPP)
+  {
+    __HAL_RCC_DCMIPP_FORCE_RESET();
+    __HAL_RCC_DCMIPP_RELEASE_RESET();
+    __HAL_RCC_CSI_FORCE_RESET();
+    __HAL_RCC_CSI_RELEASE_RESET();
+
+    __HAL_RCC_DCMIPP_CLK_DISABLE();
+    __HAL_RCC_CSI_CLK_DISABLE();
+
+    HAL_NVIC_DisableIRQ(DCMIPP_IRQn);
+    HAL_NVIC_DisableIRQ(CSI_IRQn);
+  }
+}
+
 void HAL_GPU2D_MspInit(GPU2D_HandleTypeDef* hgpu2d)
 {
   if(hgpu2d->Instance==GPU2D)

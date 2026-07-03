@@ -748,7 +748,7 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPION_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOE, CTP_RST_Pin|LCD_BL_PWM_Pin|CAM_LED_EN_Pin|LCD_NRST_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOE, CTP_RST_Pin|LCD_BL_PWM_Pin|LCD_NRST_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(MIC_SHDNZ_GPIO_Port, MIC_SHDNZ_Pin, GPIO_PIN_RESET);
@@ -761,6 +761,9 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(CAM_EN_MODULE_GPIO_Port, CAM_EN_MODULE_Pin, GPIO_PIN_RESET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(CAM_LED_EN_GPIO_Port, CAM_LED_EN_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(PWR_SD_EN_GPIO_Port, PWR_SD_EN_Pin, GPIO_PIN_RESET);
@@ -796,17 +799,17 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : EXP_GPIO_PE13_Pin EXP_GPIO_PE15_Pin EXP_GPIO_PE12_Pin EXP_GPIO_PE7_Pin
-                           USER2_Pin USER1_Pin */
-  GPIO_InitStruct.Pin = EXP_GPIO_PE13_Pin|EXP_GPIO_PE15_Pin|EXP_GPIO_PE12_Pin|EXP_GPIO_PE7_Pin
-                          |USER2_Pin|USER1_Pin;
+  /*Configure GPIO pins : EXP_GPIO_PE13_Pin EXP_GPIO_PE15_Pin EXP_GPIO_PE14_Pin EXP_GPIO_PE12_Pin
+                           EXP_GPIO_PE7_Pin USER2_Pin USER1_Pin */
+  GPIO_InitStruct.Pin = EXP_GPIO_PE13_Pin|EXP_GPIO_PE15_Pin|EXP_GPIO_PE14_Pin|EXP_GPIO_PE12_Pin
+                          |EXP_GPIO_PE7_Pin|USER2_Pin|USER1_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : UCPD1_INT_Pin EXP_ALT_ETH_PD1_Pin EXP_ALT_ETH_PD12_Pin BQ25730_PROCHOT_Pin
+  /*Configure GPIO pins : EXP_GPIO_PD0_Pin UCPD1_INT_Pin EXP_ALT_ETH_PD1_Pin EXP_ALT_ETH_PD12_Pin BQ25730_PROCHOT_Pin
                            EXP_GPIO_PD11_Pin */
-  GPIO_InitStruct.Pin = UCPD1_INT_Pin|EXP_ALT_ETH_PD1_Pin|EXP_ALT_ETH_PD12_Pin|BQ25730_PROCHOT_Pin
+  GPIO_InitStruct.Pin = EXP_GPIO_PD0_Pin|UCPD1_INT_Pin|EXP_ALT_ETH_PD1_Pin|EXP_ALT_ETH_PD12_Pin|BQ25730_PROCHOT_Pin
                           |EXP_GPIO_PD11_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
@@ -819,8 +822,8 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(BQ25730_OTG_VAP_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : CTP_RST_Pin LCD_BL_PWM_Pin CAM_LED_EN_Pin LCD_NRST_Pin */
-  GPIO_InitStruct.Pin = CTP_RST_Pin|LCD_BL_PWM_Pin|CAM_LED_EN_Pin|LCD_NRST_Pin;
+  /*Configure GPIO pins : CTP_RST_Pin LCD_BL_PWM_Pin LCD_NRST_Pin */
+  GPIO_InitStruct.Pin = CTP_RST_Pin|LCD_BL_PWM_Pin|LCD_NRST_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -860,6 +863,13 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(CAM_EN_MODULE_GPIO_Port, &GPIO_InitStruct);
 
+  /*Configure GPIO pin : CAM_LED_EN_Pin */
+  GPIO_InitStruct.Pin = CAM_LED_EN_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(CAM_LED_EN_GPIO_Port, &GPIO_InitStruct);
+
   /*Configure GPIO pin : BQ25730_PG_Pin */
   GPIO_InitStruct.Pin = BQ25730_PG_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
@@ -886,11 +896,11 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(LED1_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : EXP_GPIO_PG7_Pin EXP_GPIO_PG6_Pin EXP_GPIO_PG4_Pin EXP_GPIO_PG14_Pin
-                           EXP_GPIO_PG3_Pin EXP_GPIO_PG15_Pin EXP_GPIO_PG1_Pin EXP_ALT_ETH_PG12_Pin
+  /*Configure GPIO pins : EXP_GPIO_PG7_Pin EXP_GPIO_PG14_Pin EXP_GPIO_PG3_Pin
+                           EXP_GPIO_PG15_Pin EXP_GPIO_PG1_Pin EXP_ALT_ETH_PG12_Pin
                            EXP_GPIO_PG2_Pin EXP_ALT_ETH_PG11_Pin */
-  GPIO_InitStruct.Pin = EXP_GPIO_PG7_Pin|EXP_GPIO_PG6_Pin|EXP_GPIO_PG4_Pin|EXP_GPIO_PG14_Pin
-                          |EXP_GPIO_PG3_Pin|EXP_GPIO_PG15_Pin|EXP_GPIO_PG1_Pin|EXP_ALT_ETH_PG12_Pin
+  GPIO_InitStruct.Pin = EXP_GPIO_PG7_Pin|EXP_GPIO_PG14_Pin|EXP_GPIO_PG3_Pin
+                          |EXP_GPIO_PG15_Pin|EXP_GPIO_PG1_Pin|EXP_ALT_ETH_PG12_Pin
                           |EXP_GPIO_PG2_Pin|EXP_ALT_ETH_PG11_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;

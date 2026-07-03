@@ -58,6 +58,8 @@ void GPU2D_IRQHandler(void);
 void GPU2D_ER_IRQHandler(void);
 void LTDC_UP_IRQHandler(void);
 void LTDC_UP_ERR_IRQHandler(void);
+void CSI_IRQHandler(void);
+void DCMIPP_IRQHandler(void);
 void USART1_IRQHandler(void);
 /* USER CODE BEGIN EFP */
 

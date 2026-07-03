@@ -733,8 +733,8 @@ HAL_StatusTypeDef HAL_DCMIPP_CSI_SetConfig(const DCMIPP_HandleTypeDef *hdcmipp,
 
   /* set reg @0xe3 & reg @0xe2 value DLL target oscilation freq */
   /* Based on the table page 77, osc_freq_target */
-  DCMIPP_CSI_WritePHYReg(csi_instance, 0x00, 0xe3, SNPS_Freqs[pCSI_Config->PHYBitrate].osc_freq_target >> 8);
-  DCMIPP_CSI_WritePHYReg(csi_instance, 0x00, 0xe3, SNPS_Freqs[pCSI_Config->PHYBitrate].osc_freq_target & 0xFFU);
+  DCMIPP_CSI_WritePHYReg(csi_instance, 0x00, 0xe2, SNPS_Freqs[pCSI_Config->PHYBitrate].osc_freq_target & 0xFFU);
+  DCMIPP_CSI_WritePHYReg(csi_instance, 0x00, 0xe3, (SNPS_Freqs[pCSI_Config->PHYBitrate].osc_freq_target >> 8) & 0x0FU);
 
   /* set basedir_0 to RX DLD 0 RX, 1 TX. Synopsys 1 RX 0 TX  + freq range */
   WRITE_REG(csi_instance-> PFCR, (0x28U << CSI_PFCR_CCFR_Pos) |
@@ -743,10 +743,12 @@ HAL_StatusTypeDef HAL_DCMIPP_CSI_SetConfig(const DCMIPP_HandleTypeDef *hdcmipp,
   /* Enable the D-PHY_RX lane(s) etc */
   if (pCSI_Config->NumberOfLanes == DCMIPP_CSI_ONE_DATA_LANE)
   {
+    WRITE_REG(csi_instance->PCR, CSI_PCR_DL0EN | CSI_PCR_CLEN);
     WRITE_REG(csi_instance->PCR, CSI_PCR_DL0EN | CSI_PCR_CLEN | CSI_PCR_PWRDOWN);
   }
   else
   {
+    WRITE_REG(csi_instance->PCR, CSI_PCR_DL0EN | CSI_PCR_DL1EN | CSI_PCR_CLEN);
     WRITE_REG(csi_instance->PCR, CSI_PCR_DL0EN | CSI_PCR_DL1EN | CSI_PCR_CLEN | CSI_PCR_PWRDOWN);
   }
 
@@ -8600,4 +8602,3 @@ static HAL_StatusTypeDef DCMIPP_CSI_VCStop(const DCMIPP_HandleTypeDef *hdcmipp, 
   */
 #endif /* DCMIPP */
 #endif /* HAL_DCMIPP_MODULE_ENABLED */
-

@@ -21,6 +21,9 @@ endif
 ifeq ($(findstring ./Application/User/Core/app_i2c2_bus.o,$(NECCS_OBJECTS_LIST_TEXT)),)
 NECCS_NEEDS_FALLBACK := 1
 endif
+ifeq ($(findstring ./Application/User/Core/app_camera.o,$(NECCS_OBJECTS_LIST_TEXT)),)
+NECCS_NEEDS_FALLBACK := 1
+endif
 
 ifneq ($(NECCS_NEEDS_FALLBACK),)
 NECCS_OBJS_BEFORE_FALLBACK := $(OBJS)
@@ -54,6 +57,8 @@ NECCS_MANUAL_FALLBACK_OBJS := \
 ./Application/User/Core/app_audio_frame.o \
 ./Application/User/Core/app_boot_diag.o \
 ./Application/User/Core/app_bringup_thread.o \
+./Application/User/Core/app_camera.o \
+./Application/User/Core/app_camera_imx219.o \
 ./Application/User/Core/app_i2c2_bus.o \
 ./Application/User/Core/app_media.o \
 ./Application/User/Core/app_media_jpeg.o \
@@ -72,6 +77,8 @@ C_DEPS += \
 ./Application/User/Core/app_audio_frame.d \
 ./Application/User/Core/app_boot_diag.d \
 ./Application/User/Core/app_bringup_thread.d \
+./Application/User/Core/app_camera.d \
+./Application/User/Core/app_camera_imx219.d \
 ./Application/User/Core/app_i2c2_bus.d \
 ./Application/User/Core/app_media.d \
 ./Application/User/Core/app_media_jpeg.d \
@@ -100,6 +107,12 @@ Application/User/Core/app_boot_diag.o: $(NECCS_CORE_SRC_DIR)/app_boot_diag.c ../
 	arm-none-eabi-gcc "$<" $(NECCS_RELEASE_CFLAGS) -MF"$(@:%.o=%.d)" -MT"$@" -o "$@"
 
 Application/User/Core/app_bringup_thread.o: $(NECCS_CORE_SRC_DIR)/app_bringup_thread.c ../makefile.defs
+	arm-none-eabi-gcc "$<" $(NECCS_RELEASE_CFLAGS) -MF"$(@:%.o=%.d)" -MT"$@" -o "$@"
+
+Application/User/Core/app_camera.o: $(NECCS_CORE_SRC_DIR)/app_camera.c ../makefile.defs
+	arm-none-eabi-gcc "$<" $(NECCS_RELEASE_CFLAGS) -MF"$(@:%.o=%.d)" -MT"$@" -o "$@"
+
+Application/User/Core/app_camera_imx219.o: $(NECCS_CORE_SRC_DIR)/app_camera_imx219.c ../makefile.defs
 	arm-none-eabi-gcc "$<" $(NECCS_RELEASE_CFLAGS) -MF"$(@:%.o=%.d)" -MT"$@" -o "$@"
 
 Application/User/Core/app_i2c2_bus.o: $(NECCS_CORE_SRC_DIR)/app_i2c2_bus.c ../makefile.defs
