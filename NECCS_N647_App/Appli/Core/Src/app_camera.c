@@ -22,7 +22,7 @@ static volatile AppCameraStatus_t g_app_camera_status =
   .fps = APP_CAMERA_FPS,
   .frame0_addr = APP_CAMERA_FRAME0_ADDR,
   .frame1_addr = APP_CAMERA_FRAME1_ADDR,
-  .frame_bytes = APP_CAMERA_RAW10_FRAME_BYTES,
+  .frame_bytes = APP_CAMERA_CAPTURE_FRAME_BYTES,
   .frame_buffer_bytes = APP_CAMERA_FRAME_BUFFER_BYTES,
   .pipe_index = APP_CAMERA_DCMIPP_PIPE,
   .phy_bitrate = APP_CAMERA_PRIMARY_PHY,
@@ -58,7 +58,7 @@ volatile uint32_t g_app_camera_phy_bitrate = APP_CAMERA_PRIMARY_PHY;
 volatile uint32_t g_app_camera_fallback_count = 0U;
 volatile uint32_t g_app_camera_frame0_addr = APP_CAMERA_FRAME0_ADDR;
 volatile uint32_t g_app_camera_frame1_addr = APP_CAMERA_FRAME1_ADDR;
-volatile uint32_t g_app_camera_frame_bytes = APP_CAMERA_RAW10_FRAME_BYTES;
+volatile uint32_t g_app_camera_frame_bytes = APP_CAMERA_CAPTURE_FRAME_BYTES;
 volatile uint32_t g_app_camera_csi_sr0 = 0U;
 volatile uint32_t g_app_camera_csi_sr1 = 0U;
 volatile uint32_t g_app_camera_csi_err1 = 0U;
@@ -246,7 +246,7 @@ static int32_t AppCamera_ConfigureDcmipp(uint32_t phy_bitrate)
   }
 
   pipe_config.FrameRate = DCMIPP_FRAME_RATE_ALL;
-  pipe_config.PixelPipePitch = 0U;
+  pipe_config.PixelPipePitch = APP_CAMERA_CAPTURE_LINE_BYTES;
   pipe_config.PixelPackerFormat = DCMIPP_PIXEL_PACKER_FORMAT_MONO_Y8_G8_1;
   hal_status = HAL_DCMIPP_PIPE_SetConfig(&hdcmipp, APP_CAMERA_DCMIPP_PIPE, &pipe_config);
   if (hal_status != HAL_OK)
@@ -363,7 +363,7 @@ int32_t AppCamera_Init(void)
   g_app_camera_status.data_counter = 0U;
   g_app_camera_status.frame0_addr = APP_CAMERA_FRAME0_ADDR;
   g_app_camera_status.frame1_addr = APP_CAMERA_FRAME1_ADDR;
-  g_app_camera_status.frame_bytes = APP_CAMERA_RAW10_FRAME_BYTES;
+  g_app_camera_status.frame_bytes = APP_CAMERA_CAPTURE_FRAME_BYTES;
   g_app_camera_status.frame_buffer_bytes = APP_CAMERA_FRAME_BUFFER_BYTES;
   g_app_camera_status.pipe_index = APP_CAMERA_DCMIPP_PIPE;
   g_app_camera_status.phy_bitrate = APP_CAMERA_PRIMARY_PHY;
