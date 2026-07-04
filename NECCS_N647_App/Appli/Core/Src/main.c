@@ -40,6 +40,14 @@
 /* USER CODE BEGIN PD */
 #define APP_HYPERRAM_BASE        0x90000000UL
 #define APP_HYPERRAM_TEST_BYTES  0x1000UL
+#ifndef APP_PCMD_SDOUT_BCLK_MARGIN_FIX
+#define APP_PCMD_SDOUT_BCLK_MARGIN_FIX  1U
+#endif
+#if (APP_PCMD_SDOUT_BCLK_MARGIN_FIX != 0U)
+#define APP_PCMD_SAI_CLOCK_STROBING  SAI_CLOCKSTROBING_RISINGEDGE
+#else
+#define APP_PCMD_SAI_CLOCK_STROBING  SAI_CLOCKSTROBING_FALLINGEDGE
+#endif
 
 /* USER CODE END PD */
 
@@ -693,7 +701,7 @@ static void MX_SAI1_Init(void)
   hsai_BlockA1.Init.AudioMode = SAI_MODEMASTER_RX;
   hsai_BlockA1.Init.DataSize = SAI_DATASIZE_16;
   hsai_BlockA1.Init.FirstBit = SAI_FIRSTBIT_MSB;
-  hsai_BlockA1.Init.ClockStrobing = SAI_CLOCKSTROBING_FALLINGEDGE;
+  hsai_BlockA1.Init.ClockStrobing = APP_PCMD_SAI_CLOCK_STROBING;
   hsai_BlockA1.Init.Synchro = SAI_ASYNCHRONOUS;
   hsai_BlockA1.Init.OutputDrive = SAI_OUTPUTDRIVE_DISABLE;
   hsai_BlockA1.Init.NoDivider = SAI_MASTERDIVIDER_DISABLE;
@@ -724,7 +732,7 @@ static void MX_SAI1_Init(void)
   hsai_BlockB1.Init.AudioMode = SAI_MODESLAVE_RX;
   hsai_BlockB1.Init.DataSize = SAI_DATASIZE_16;
   hsai_BlockB1.Init.FirstBit = SAI_FIRSTBIT_MSB;
-  hsai_BlockB1.Init.ClockStrobing = SAI_CLOCKSTROBING_FALLINGEDGE;
+  hsai_BlockB1.Init.ClockStrobing = APP_PCMD_SAI_CLOCK_STROBING;
   hsai_BlockB1.Init.Synchro = SAI_SYNCHRONOUS;
   hsai_BlockB1.Init.OutputDrive = SAI_OUTPUTDRIVE_DISABLE;
   hsai_BlockB1.Init.NoDivider = SAI_MASTERDIVIDER_ENABLE;

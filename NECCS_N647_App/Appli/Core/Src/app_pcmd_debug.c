@@ -43,13 +43,16 @@ typedef struct
 
 #define APP_PCMD_MODE_STEP_MS      7000U
 #define APP_PCMD_POLL_MS           0U
-#define APP_PCMD_UI_REFRESH_MS     100U
-#define APP_PCMD_DMA_WORDS         4096U
+#define APP_PCMD_UI_REFRESH_MS     250U
+#define APP_PCMD_DMA_WORDS         8192U
 #define APP_PCMD_I2C_TIMEOUT_MS    100U
 #define APP_PCMD_MAX_SLOTS         16U
 #define APP_PCMD_BUS_COUNT         2U
 #define APP_PCMD_DEFAULT_MODE      PCMD3180_ARRAY_MODE_32CH_48K
 #define APP_PCMD_AUTO_MODE_SWITCH  0U
+#ifndef APP_PCMD_SDOUT_BCLK_MARGIN_FIX
+#define APP_PCMD_SDOUT_BCLK_MARGIN_FIX  1U
+#endif
 #define APP_PCMD_RESET_LOW_MS      100U
 #define APP_PCMD_RESET_SETTLE_MS   10U
 #define APP_PCMD_CLOCK_SETTLE_MS   1000U
@@ -88,8 +91,10 @@ static uint32_t g_pcmd_sai_b_rate_last_count = 0;
 static uint32_t g_pcmd_sai_a_full_rate = 0;
 static uint32_t g_pcmd_sai_b_full_rate = 0;
 static volatile uint32_t g_pcmd_slot_abs_sum[APP_PCMD_BUS_COUNT][APP_PCMD_MAX_SLOTS];
+static volatile int32_t g_pcmd_slot_dc_sum[APP_PCMD_BUS_COUNT][APP_PCMD_MAX_SLOTS];
 static volatile uint32_t g_pcmd_slot_abs_count[APP_PCMD_BUS_COUNT][APP_PCMD_MAX_SLOTS];
 static volatile uint16_t g_pcmd_slot_level[APP_PCMD_BUS_COUNT][APP_PCMD_MAX_SLOTS];
+static volatile int16_t g_pcmd_slot_dc_level[APP_PCMD_BUS_COUNT][APP_PCMD_MAX_SLOTS];
 static volatile uint16_t g_pcmd_slot_last_sample[APP_PCMD_BUS_COUNT][APP_PCMD_MAX_SLOTS];
 static uint32_t g_pcmd_last_ui_tick = 0;
 static volatile uint32_t g_app_pcmd_ram_test_ok = 0;
@@ -105,6 +110,7 @@ static void App_PCMD_ProcessBuffer(const uint16_t *buffer,
                                    uint32_t sample_words,
                                    uint8_t slots_per_bus,
                                    volatile uint32_t *slot_abs_sum,
+                                   volatile int32_t *slot_dc_sum,
                                    volatile uint32_t *slot_abs_count,
                                    volatile uint16_t *slot_samples);
 static void App_PCMD_UpdateLevelsFromAccumulator(void);
@@ -324,14 +330,17 @@ static void App_PCMD_ProcessBuffer(const uint16_t *buffer,
                                    uint32_t word_count,
                                    uint8_t slot_count,
                                    volatile uint32_t *slot_abs_sum,
+                                   volatile int32_t *slot_dc_sum,
                                    volatile uint32_t *slot_abs_count,
                                    volatile uint16_t *last_sample)
 {
+  int32_t instant_dc_sum[APP_PCMD_MAX_SLOTS] = {0};
   uint32_t instant_sum[APP_PCMD_MAX_SLOTS] = {0U};
   uint16_t instant_count[APP_PCMD_MAX_SLOTS] = {0U};
   uint16_t instant_last[APP_PCMD_MAX_SLOTS] = {0U};
 
-  if ((buffer == NULL) || (slot_abs_sum == NULL) || (slot_abs_count == NULL) ||
+  if ((buffer == NULL) || (slot_abs_sum == NULL) || (slot_dc_sum == NULL) ||
+      (slot_abs_count == NULL) ||
       (last_sample == NULL) ||
       (slot_count == 0U) || (slot_count > APP_PCMD_MAX_SLOTS))
   {
@@ -341,12 +350,24 @@ static void App_PCMD_ProcessBuffer(const uint16_t *buffer,
   for (uint32_t word = 0U; word < word_count; word++)
   {
     const int32_t sample = (int16_t)buffer[word];
-    const uint32_t magnitude = (sample < 0) ? (uint32_t)(-sample) : (uint32_t)sample;
     const uint32_t slot = word % slot_count;
 
-    instant_sum[slot] += magnitude;
+    instant_dc_sum[slot] += sample;
     instant_count[slot]++;
     instant_last[slot] = buffer[word];
+  }
+
+  for (uint32_t word = 0U; word < word_count; word++)
+  {
+    const int32_t sample = (int16_t)buffer[word];
+    const uint32_t slot = word % slot_count;
+    const int32_t mean = (instant_count[slot] == 0U) ? 0 :
+                         (instant_dc_sum[slot] / (int32_t)instant_count[slot]);
+    const int32_t ac_sample = sample - mean;
+    const uint32_t magnitude =
+        (ac_sample < 0) ? (uint32_t)(-ac_sample) : (uint32_t)ac_sample;
+
+    instant_sum[slot] += magnitude;
   }
 
   for (uint32_t slot = 0U; slot < APP_PCMD_MAX_SLOTS; slot++)
@@ -354,6 +375,7 @@ static void App_PCMD_ProcessBuffer(const uint16_t *buffer,
     if (slot >= slot_count)
     {
       slot_abs_sum[slot] = 0U;
+      slot_dc_sum[slot] = 0;
       slot_abs_count[slot] = 0U;
       last_sample[slot] = 0U;
     }
@@ -367,6 +389,8 @@ static void App_PCMD_ProcessBuffer(const uint16_t *buffer,
       {
         slot_abs_sum[slot] = UINT32_MAX;
       }
+
+      slot_dc_sum[slot] += instant_dc_sum[slot];
 
       if ((UINT32_MAX - slot_abs_count[slot]) > instant_count[slot])
       {
@@ -384,6 +408,7 @@ static void App_PCMD_ProcessBuffer(const uint16_t *buffer,
 static void App_PCMD_UpdateLevelsFromAccumulator(void)
 {
   uint32_t sums[APP_PCMD_BUS_COUNT][APP_PCMD_MAX_SLOTS];
+  int32_t dc_sums[APP_PCMD_BUS_COUNT][APP_PCMD_MAX_SLOTS];
   uint32_t counts[APP_PCMD_BUS_COUNT][APP_PCMD_MAX_SLOTS];
   const uint32_t primask = __get_PRIMASK();
 
@@ -393,8 +418,10 @@ static void App_PCMD_UpdateLevelsFromAccumulator(void)
     for (uint32_t slot = 0U; slot < APP_PCMD_MAX_SLOTS; slot++)
     {
       sums[bus][slot] = g_pcmd_slot_abs_sum[bus][slot];
+      dc_sums[bus][slot] = g_pcmd_slot_dc_sum[bus][slot];
       counts[bus][slot] = g_pcmd_slot_abs_count[bus][slot];
       g_pcmd_slot_abs_sum[bus][slot] = 0U;
+      g_pcmd_slot_dc_sum[bus][slot] = 0;
       g_pcmd_slot_abs_count[bus][slot] = 0U;
     }
   }
@@ -410,15 +437,26 @@ static void App_PCMD_UpdateLevelsFromAccumulator(void)
       if (counts[bus][slot] == 0U)
       {
         g_pcmd_slot_level[bus][slot] = 0U;
+        g_pcmd_slot_dc_level[bus][slot] = 0;
       }
       else
       {
         uint32_t avg = sums[bus][slot] / counts[bus][slot];
+        int32_t dc_avg = dc_sums[bus][slot] / (int32_t)counts[bus][slot];
         if (avg > UINT16_MAX)
         {
           avg = UINT16_MAX;
         }
+        if (dc_avg > INT16_MAX)
+        {
+          dc_avg = INT16_MAX;
+        }
+        else if (dc_avg < INT16_MIN)
+        {
+          dc_avg = INT16_MIN;
+        }
         g_pcmd_slot_level[bus][slot] = (uint16_t)avg;
+        g_pcmd_slot_dc_level[bus][slot] = (int16_t)dc_avg;
       }
     }
   }
@@ -560,6 +598,10 @@ static void App_PCMD_SetExpectedSnapshot(uint32_t device_index,
 
   snapshot = &g_pcmd_devices[device_index].snapshot;
   memset(snapshot, 0, sizeof(*snapshot));
+  for (uint32_t channel = 0U; channel < PCMD3180_ARRAY_MAX_MICS_PER_DEV; channel++)
+  {
+    snapshot->asi_ch_slot[channel] = (uint8_t)(device_config->start_slot + channel);
+  }
   snapshot->pwr_cfg = PCMD3180_PWR_PDM_AND_PLL |
                       (uint8_t)((device_config->enable_micbias == 0U) ? 0U : PCMD3180_PWR_MICBIAS);
   snapshot->pdmclk_cfg = PCMD3180_PDMCLK_CFG_RESET_MASK |
@@ -594,8 +636,10 @@ static void App_PCMD_ConfigureMode(PCMD3180_ArrayModeTypeDef mode)
     for (uint32_t slot = 0U; slot < APP_PCMD_MAX_SLOTS; slot++)
     {
       g_pcmd_slot_abs_sum[bus][slot] = 0U;
+      g_pcmd_slot_dc_sum[bus][slot] = 0;
       g_pcmd_slot_abs_count[bus][slot] = 0U;
       g_pcmd_slot_level[bus][slot] = 0U;
+      g_pcmd_slot_dc_level[bus][slot] = 0;
       g_pcmd_slot_last_sample[bus][slot] = 0U;
     }
   }
@@ -656,6 +700,9 @@ static void App_PCMD_ConfigureMode(PCMD3180_ArrayModeTypeDef mode)
     if (pcmd_status == PCMD3180_OK)
     {
       g_pcmd_device_configs[i].defer_power_up = 0U;
+#if (APP_PCMD_SDOUT_BCLK_MARGIN_FIX != 0U)
+      g_pcmd_device_configs[i].invert_bclk = 1U;
+#endif
       pcmd_status = PCMD3180_Configure(&g_pcmd_handles[i], &g_pcmd_device_configs[i]);
     }
     g_pcmd_devices[i].config_status = pcmd_status;
@@ -761,7 +808,7 @@ static void App_PCMD_ShowMicActivity(uint16_t start_y)
   (void)PCMD3180_GetArrayModeConfig(PCMD3180_ARRAY_MODE_32CH_48K, &full_array_map);
 
   rgblcd_show_string(APP_PCMD_UI_X, y, APP_PCMD_UI_W, 16, 16,
-                     "MIC AVG dBFS + bar: U1-U4 all channels",
+                     "MIC AC dBFS + bar: U1-U4 all channels",
                      CYAN);
   y += 24U;
 
@@ -872,6 +919,13 @@ static void App_PCMD_ShowDebugPage(void)
   rgblcd_show_string(APP_PCMD_UI_X, y, APP_PCMD_UI_W, 24, 24,
                      "NECCS N647 PCMD3180 DEBUG", CYAN);
   y += 34U;
+
+#if (APP_PCMD_SDOUT_BCLK_MARGIN_FIX != 0U)
+  rgblcd_show_string(APP_PCMD_UI_X, y, APP_PCMD_UI_W, 12, 12,
+                     "SDOUT edge fixed: BCLK_POL=1 SAI_RX=RISING Fs unchanged",
+                     YELLOW);
+  y += 16U;
+#endif
 
   snprintf(line,
            sizeof(line),
@@ -1100,6 +1154,16 @@ static void App_PCMD_ShowDebugPage(void)
   rgblcd_show_string(APP_PCMD_UI_X, y, APP_PCMD_UI_W, 12, 12, line, WHITE);
   y += 20U;
 
+  snprintf(line,
+           sizeof(line),
+           "AC removes DC. DC A0:%d A8:%d B0:%d B8:%d",
+           (int)g_pcmd_slot_dc_level[PCMD3180_TDM_BUS_A][0],
+           (int)g_pcmd_slot_dc_level[PCMD3180_TDM_BUS_A][8],
+           (int)g_pcmd_slot_dc_level[PCMD3180_TDM_BUS_B][0],
+           (int)g_pcmd_slot_dc_level[PCMD3180_TDM_BUS_B][8]);
+  rgblcd_show_string(APP_PCMD_UI_X, y, APP_PCMD_UI_W, 12, 12, line, CYAN);
+  y += 16U;
+
   rgblcd_show_string(APP_PCMD_UI_X, y, APP_PCMD_UI_W, 12, 12,
                       "Expected: U1-U4 OK; raw hex changes with input.",
                       LGRAY);
@@ -1165,6 +1229,7 @@ void HAL_SAI_RxHalfCpltCallback(SAI_HandleTypeDef *hsai)
                            APP_PCMD_DMA_WORDS / 2U,
                            g_pcmd_debug.mode_config.tdm_slots_per_bus,
                            g_pcmd_slot_abs_sum[PCMD3180_TDM_BUS_A],
+                           g_pcmd_slot_dc_sum[PCMD3180_TDM_BUS_A],
                            g_pcmd_slot_abs_count[PCMD3180_TDM_BUS_A],
                            g_pcmd_slot_last_sample[PCMD3180_TDM_BUS_A]);
   }
@@ -1175,6 +1240,7 @@ void HAL_SAI_RxHalfCpltCallback(SAI_HandleTypeDef *hsai)
                            APP_PCMD_DMA_WORDS / 2U,
                            g_pcmd_debug.mode_config.tdm_slots_per_bus,
                            g_pcmd_slot_abs_sum[PCMD3180_TDM_BUS_B],
+                           g_pcmd_slot_dc_sum[PCMD3180_TDM_BUS_B],
                            g_pcmd_slot_abs_count[PCMD3180_TDM_BUS_B],
                            g_pcmd_slot_last_sample[PCMD3180_TDM_BUS_B]);
   }
@@ -1189,6 +1255,7 @@ void HAL_SAI_RxCpltCallback(SAI_HandleTypeDef *hsai)
                            APP_PCMD_DMA_WORDS / 2U,
                            g_pcmd_debug.mode_config.tdm_slots_per_bus,
                            g_pcmd_slot_abs_sum[PCMD3180_TDM_BUS_A],
+                           g_pcmd_slot_dc_sum[PCMD3180_TDM_BUS_A],
                            g_pcmd_slot_abs_count[PCMD3180_TDM_BUS_A],
                            g_pcmd_slot_last_sample[PCMD3180_TDM_BUS_A]);
   }
@@ -1199,6 +1266,7 @@ void HAL_SAI_RxCpltCallback(SAI_HandleTypeDef *hsai)
                            APP_PCMD_DMA_WORDS / 2U,
                            g_pcmd_debug.mode_config.tdm_slots_per_bus,
                            g_pcmd_slot_abs_sum[PCMD3180_TDM_BUS_B],
+                           g_pcmd_slot_dc_sum[PCMD3180_TDM_BUS_B],
                            g_pcmd_slot_abs_count[PCMD3180_TDM_BUS_B],
                            g_pcmd_slot_last_sample[PCMD3180_TDM_BUS_B]);
   }

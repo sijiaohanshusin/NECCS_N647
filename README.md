@@ -1,5 +1,34 @@
 # NECCS_N647 工程速查
 
+## 2026-07-05 PCMD3180 U1/U2 level diagnosis
+
+- Added `docs/knowledge` from the shared `D:\Project\NECCS\docs\knowledge` OCR/document set so the PCMD3180 datasheet notes referenced by this README are locally available.
+- Board test confirmed the 48 kHz SDOUT/BCLK edge-margin fix works. It does not change sample rate or BCLK: the screen should still show `Fs=48000` and `BCLK=12288000`. The fixed timing is PCMD3180 `BCLK_POL=1` (`ASI_CFG0` becomes `0x05` instead of `0x01`) with SAI1 A/B RX strobing on the rising edge. This confirms the U1/U2 issue followed SDOUT-vs-BCLK sampling margin rather than address/slot configuration.
+- Latest generated APP image for this fixed edge configuration is `_flash_images/appli.hex`; Release build passed after the change.
+- Latest photo shows U1/U2 register/config state is healthy: `Prb/Cfg/St` all OK, U1 slots `00-07`, U2 slots `08-0F`, `PWR=P80`, `PD40`, `PI00`, `GPO=41414141`, `GI=45/67`, and SAI A has no reported DMA/SAI error.
+- The U1/U2 symptom in that photo is not an address/slot/register failure; it is that raw average absolute PCM levels are much higher than U3/U4. The old debug page included DC offset in the level number, so a static offset or stuck input could look like strong microphone activity.
+- Updated the PCMD debug page to show AC activity after removing per-slot DC, and to print representative DC values (`DC A0/A8/B0/B8`). If U1/U2 AC drops but DC is large, treat it as offset/stuck-data diagnosis rather than acoustic response. If U1/U2 AC remains high, focus on SAI1_SD_A electrical noise, U1/U2 PDMCLK/PDM input wiring, or bad microphones on the A bus.
+- Aligned the debug DMA buffer with the H7 reference frame size: `APP_PCMD_DMA_WORDS=8192` (`16ch * 256 * 2`) and slowed the full-screen debug refresh to 250 ms to reduce ISR/display pressure. With this buffer size, `Rate full/s expected` should be about 94 instead of 188.
+- `Rate full/s` is a DMA-buffer fill-rate diagnostic, not the audio sample rate. The real audio rate remains `Fs=48000` with `BCLK=12.288 MHz`; changing `APP_PCMD_DMA_WORDS` from 4096 to 8192 intentionally halves the displayed full-buffer rate.
+- After physically swapping SDOUT1 and SDOUT2, the displayed channel distribution changed, but the screen-side U1/U2 / SAI A group still looked worse than U3/U4. That points away from a simple SDOUT1-vs-SDOUT2 trace-length mismatch or bad U1/U2 devices alone, and toward SAI A / PB7 input margin, sampling-edge margin, or bus-A-specific signal integrity.
+
+## 2026-07-05 PCMD3180 SAI vs H7 audit
+
+- N647 keeps the H7 reference frame format for PCMD3180 capture: master RX, 48 kHz, 16-bit data, 256-bit frame, 1-bit FS pulse before first bit, and 16 active slots. The one fixed board-specific timing difference is that N647 now uses PCMD3180 `BCLK_POL=1` plus SAI RX rising-edge strobe for better SDOUT/BCLK margin.
+- The intentional topology difference is that N647 also enables SAI1 Block B as a synchronous slave RX data line. U1/U2 use Bus A / SAI1_SD_A / addresses 4C-4D; U3/U4 use Bus B / SAI1_SD_B / addresses 4E-4F.
+- PCMD3180 register format still follows the H7 sequence for ASI/PDM/power: `ASI_CFG0=0x01`, `ASI_CFG1=0x01`, slots 0-7 or 8-15, `PDMCLK_CFG=0x40`, PDM input channel config, `IN_CH_EN/ASI_OUT_CH_EN=0xFF`, `PWR_CFG=0x60`.
+- The main config difference found was DMA priority: H7 used very-high audio DMA priority, while N647 generated GPDMA channel 0/1 as low-priority variants. Updated both SAI1_A and SAI1_B GPDMA linked-list priorities to `DMA_HIGH_PRIORITY` in source and IOC.
+- If U1/U2 remain abnormal after this, it is unlikely to be caused by 4E/4F slot conflict; next checks should focus on SAI1_SD_A electrical/data validity, PCMD PDMCLK/PDM input health, and per-channel MIC wiring. If only later MIC groups fail, prioritize SAI1_SD_B / PE3, U3/U4 power/addressing, and B-block DMA data movement.
+
+## 2026-07-04 PCMD3180 debug photo / slot display fix
+
+- Disabling 4C/4E did not fix the bad MIC/debug-page symptom, so do not treat it as a simple address/slot conflict.
+- Board photo showed 32CH/48K, Slot16, BCLK 12.288 MHz, PLL2 245.76 MHz, SAIclk 12.288 MHz, `ADDR/16` OK on 4C/4D/4E/4F after configure, and SAI A/B counters increasing with `e=0`.
+- All four 8-channel MIC groups had visible level bars. This photo does not support a global MIC-hardware failure; remaining per-channel level differences should be checked after the debug display is corrected.
+- The red U1-U4 rows with `SL 00-00` were a software diagnostic/display bug when `APP_PCMD_POLL_MS=0`: `App_PCMD_SetExpectedSnapshot()` filled the expected power/PDM/GPO/GPI fields but did not fill `asi_ch_slot[]`.
+- Fixed `App_PCMD_SetExpectedSnapshot()` to synthesize expected ASI slots from `device_config->start_slot`. Next board check should show U1/U3 as `SL 00-07` and U2/U4 as `SL 08-0F`; if polling is later re-enabled and `SL` still fails, inspect the `Fail Ux reg/wr/rd` line.
+- Restored `tools/debug` from `main`; `.gitignore` now explicitly unignores it because the Windows case-insensitive `**/Debug/` rule also hid `tools/debug/`.
+
 ## 2026-07-04 APP build recovery
 
 - `tools/build_n647_app.ps1` is the preferred repeatable APP build entry.

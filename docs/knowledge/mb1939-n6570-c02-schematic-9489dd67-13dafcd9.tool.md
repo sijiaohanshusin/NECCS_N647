@@ -1,0 +1,375 @@
+## STM32N6570-DK
+
+## MB1939
+
+## Table of contents
+
+Sheet 1: Project overview (this page) Sheet 2: Top
+
+Sheet 3: STM32_microcontroller_I/Os Sheet 4: STM32_microcontroller_power Sheet 5: Power Sheet 6: HexaSPI_PSRAM Sheet 7: OctoSPI_Flash Sheet 8: Peripherals Sheet 9: Arduino_UNO_R3_SMD
+
+Sheet 10: STMOD+ Sheet 11: LCD Sheet 12: Camera Sheet 13: Ethernet Sheet 14: SDcard Sheet 15: Audio
+
+Sheet 16: MEMs_microphone
+
+Sheet 17: USB1_DRP Sheet 18: USB2 Sheet 19: STLINK_V3EC Sheet 20: External_Debug_Interface Sheet 21: Mechanical
+
+## Legend
+
+General comment such as function title, configuration, ... Text to be added to silkscreen. Warning text.
+
+Notes to generate the board layout.
+
+## Open Platform License Agreement
+
+The Open Platform License Agreement (“Agreement”) is a binding legal contract between you ("You") and STMicroelectronics International N.V. (“ST”), a company incorporated under the laws of the Netherlands acting for the purpose of this Agreement through its Swiss branch 39, Chemin du Champ des Filles, 1228 Plan-les-Ouates, Geneva, Switzerland.
+
+By using the enclosed reference designs, schematics, PC board layouts, and documentation, in hardcopy or CAD tool file format (collectively, the “Reference Material”), You are agreeing to be bound by the terms and conditions of this Agreement. Do not use the Reference Material until You have read and agreed to this Agreement terms and conditions. The use of the Reference Material automatically implies the acceptance of the Agreement terms and conditions.
+
+The complete Open Platform License Agreement can be found on www.st.com/opla.
+
+U_Top Top.SchDoc Title: **Project_Overview** Project: **STM32N6570-DK** Variant: N6570 Revision: C -02 Reference: MB1939 Size: A4 Date: 4-Nov-24 Sheet: 1 of 21
+
+**==> picture [42 x 24] intentionally omitted <==**
+
+|U_STM32_microcontroller_power<br>STM32_microcontroller_power.SchDoc<br>U_Power<br>Power.SchDoc|U_STM32_microcontroller_power<br>STM32_microcontroller_power.SchDoc<br>U_Power<br>Power.SchDoc|U_STM32_microcontroller_power<br>STM32_microcontroller_power.SchDoc<br>U_Power<br>Power.SchDoc|U_STM32_microcontroller_power<br>STM32_microcontroller_power.SchDoc<br>U_Power<br>Power.SchDoc|U_STM32_microcontroller_power<br>STM32_microcontroller_power.SchDoc<br>U_Power<br>Power.SchDoc|U_STM32_microcontroller_power<br>STM32_microcontroller_power.SchDoc<br>U_Power<br>Power.SchDoc|U_STM32_microcontroller_IOs<br>STM32_microcontroller_IOs.SchDoc|U_STM32_microcontroller_IOs<br>STM32_microcontroller_IOs.SchDoc|U_STM32_microcontroller_IOs<br>STM32_microcontroller_IOs.SchDoc|U_STM32_microcontroller_IOs<br>STM32_microcontroller_IOs.SchDoc|U_STM32_microcontroller_IOs<br>STM32_microcontroller_IOs.SchDoc|U_Ethernet<br>Ethernet.SchDoc<br>U_Mechanical<br>Mechanical.SchDoc|U_Ethernet<br>Ethernet.SchDoc<br>U_Mechanical<br>Mechanical.SchDoc|U_Ethernet<br>Ethernet.SchDoc<br>U_Mechanical<br>Mechanical.SchDoc|U_Ethernet<br>Ethernet.SchDoc<br>U_Mechanical<br>Mechanical.SchDoc|U_Ethernet<br>Ethernet.SchDoc<br>U_Mechanical<br>Mechanical.SchDoc|U_Ethernet<br>Ethernet.SchDoc<br>U_Mechanical<br>Mechanical.SchDoc|
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+||||||||U_STM32_microcontroller_IOs<br>STM32_microcontroller_IOs.SchDoc||||||||||
+|||||||||U_STM32_microcontroller_IOs<br>STM32_microcontroller_IOs.SchDoc|||||||||
+|MCUPower<br>||PWR_ON<br>MCUPower<br>EXT_SMPS_MODE|||||||ETHERNET<br>PWR_ON<br>I2C2<br>EXT_SMPS_MODE|||||NRST<br>ETHERNET|||
+| | | | | | | |
+|NRST<br>STMOD_ADC<br>I2C1<br>ARD_UNO_R3<br>U_Arduino_UNO_R3_SMD<br>Arduino_UNO_R3_SMD.SchDoc<br>HEXASPI<br>U_HexaSPI_PSRAM<br>HexaSPI_PSRAM.SchDoc<br>I2C2<br>LCD<br>U_LCD<br>LCD.SchDoc<br>NRST<br>Peripherals<br>U_Peripherals<br>Peripherals.SchDoc<br>NRST<br>OCTOSPI<br>U_OctoSPI_Flash<br>OctoSPI_Flash.SchDoc<br>STMOD_ADC<br>STMOD+<br>I2C1<br>U_STMOD+<br>STMOD+.SchDoc<br>Camera<br>I2C1<br>U_Camera<br>Camera.SchDoc|||||||||||||||||
+|||HEXASPI|||||||HEXASPI<br>MicroSD|||||NRST<br>PWR_ON<br>MicroSD|||
+| | | | | | | |
+| | | | | | | |
+|||NRST<br>OCTOSPI|||||||AudioCodec<br>OCTOSPI<br>NRST|||||I2C2<br>AudioCodec|||
+| | | | | | | |
+| | | | | | | |
+| | | | | | | |
+|||NRST<br>Peripherals<br>|||||||Peripherals<br>MIC|||||MIC<br>|||
+| | | | | | | |
+| | | | | | | |
+| | | | | | | |
+|||NRST<br>STMOD_ADC<br>I2C1<br>ARD_UNO_R3|||||||ARD_UNO_R3<br>USB1<br>I2C1|||||USB1<br>I2C2|||
+| | | | | | | |
+| | | | | | | |
+|||STMOD_ADC<br>STMOD+<br>I2C1|||||||STMOD+<br>USB2|||||USB2|||
+| | | | | | | |
+| | | | | | | |
+|||I2C2<br>LCD|||||||LCD|||||NRST<br>MCU|||
+| | | | | | | |
+| | | | | | | |
+| | | | | | | |
+|||Camera<br>I2C1|||||||Camera<br>JNTRST<br>TRACE<br>MCU|||||NRST<br>MCU<br>JNTRST<br>TRACE<br>|||
+| | | | | | | |
+
+
+
+**==> picture [42 x 24] intentionally omitted <==**
+
+Title: **Top** Project: **STM32N6570-DK** Variant: N6570 Revision: C -02 Reference: MB1939 Size: A4 Date: 4-Nov-24 Sheet: 2 of 21
+
+**==> picture [1114 x 798] intentionally omitted <==**
+
+**----- Start of picture text -----**<br>
+U27A<br>HEXASPI PA0 U10 R3 PF0 U27B STMOD+<br>PA0 PF0<br>DQS0CLKNCSIO0IO2IO4IO3IO1 RR6R5R5RR4RR5R4654128657574 0R0R0R0R0R0R0R0R0R PO0PO4PO2PP0PP1PP2PP3PP4PP5 PA1PA2PA3PA4PA5PA6PA7PA8PA9 URRU8R8T8P9P8P7141214 PA1PA2PA3PA4PA5PA6PA7PA8 PF2PF4PF6PF5PF7PF8PF3PF1 P4N4M2L2M3L5M1N3P1 PF1PF2PF3PF4PF5PF6PF7PF8PF9 PQ0PQ1PQ2PQ3PQ4PQ5PQ6PQ7 D4A2D3D5G5E4E5E3 PQ0PQ1PQ2PQ3PQ4PQ5PQ6PQ7 CSI_REXTCSI_CKNCSI_D1NCSI_D0NCSI_CKPCSI_D1PCSI_D0P P5T4U4T5U5T3U3 R33CSI_D1PCSI_D1NCSI_D0PCSI_D0NCSI_CKPCSI_CKN200R ETHERNETETH_CLK125ETH_MDINTETH_TXD0ETH_TXD2ETH_TXD1 PD3PF2PF12PF13PG3PG4 SPI5_MOSISPI5_MISOSPI5_SCKSPI5_NSSCTSRTSRXTX PA3PG2PH8PE15PG5PD5PF6PG14<br>IO5 R54 0R PP6 PA10 R7 PA9 PF9 L4 PF10 ETH_TXD3<br>HEXASPI IO6 PA10 PF10<br>R53 0R PP7 PA11 T7 P3 PF11 E2 PD12 PH7<br>IO7 R51 0R PO3 PA12 U7 PA11 PF11 T1 PF12 PWR_ON A1 PWR_ON ETH_MDIO PD1 MOSI PC6<br>DQS1 R59 0R PP8 PA13 U6 PA12 PF12 R2 PF13 VDDA1V8_AON PDR_ON ETH_MDC PF7 STMOD+ MISO<br>IO8 R64 0R PP9 PA14 T6 PA13(JTMS/SWDIO) PF13 N2 PF14 ETHERNET ETH_RX_CLK PF0<br>IO9 R63 0R PP10 PA15 P12 PA14(JTCK/SWCLK)  PF14 N1 PF15 BOOT0 G4 TP9 ETH_GTX_CLK PF11 PC11<br>IO10IO12IO11 R5R4R6090 0R0R0R PP11PP12PP13 PB0 E15 PA15(JTDI) PF15 R13 PG0 NRST NRST G3 BOOT0NRST OTG2_HSDMOTG2_HSDP A3B3E6 OTG2_HSDMOTG2_HSDP TP23 ETH_TX_ENETH_RXD0 PF14PF15 ADC_DRSTINT PB3PC9PC7<br>IO13 R48 0R PP14 PB1 R11 PB0 PG0 R9 PG1 OTG2_ID C4 ETH_RXD1 PF8 PWM<br>IO14 R46 0R PP15 PB2 C16 PB1 PG1 T11 PG2 NC D6 R34 200R ETH_RXD2 PF9 PD13<br>IO15 PB3 F13 PB2 PG2 R1 PG3 OTG2_TXRTUNE ETH_RXD3 IO1 PF1<br>PB3 PG3 IO2<br>PB4 T12 P2 PG4 TP8 PF10 PB8<br>OCTOSPI PB5PB6PB7 UEE121617 PB4(NJTRST)PB5(JTDO/TRACESWO)PB6 PG4PG6PG5 M4L3L1 PG5PG6PG7 HW5 OTG1_HSDMOTG1_HSDP A5B5C3 OTG1_HSDMOTG1_HSDP TP24 ETH_RX_DVETH_CLK PF5 IO4IO3 PG9<br>R66 0R PN1 PB8 D16 PB7 PG7 T14 PG8 OTG1_ID B4<br>NCS PB8 PG8 NC<br>R72 0R PN0 PB9 D15 T13 PG9 DNF C6 R32 200R<br>CLKDQSIO0IO1 RRR754122 0R0R0R PN6PN2PN3 PB10PB11PB12 RUP101011 PB9PB10PB11PB12 PG10PG12PG11PG9 T10U13T9 PG10PG11PG12 SG-BGA-6112 OTG1_TXRTUNEUCPD1_CC2UCPD1_CC1 A6B6 UCPD1_CC1UCPD1_CC2 LCD_RGB<br>OCTOSPI IO2 R70 0R PN4 PB13 C15 PB13 PG13 U9 PG13 STM32N657X0H3Q R0 PG0<br>R67 0R PN5 PB14 B17 P6 PG14 PD9<br>IO3 PB14 PG14 R1<br>R65 0R PN8 PB15 D17 R6 PG15 PD15<br>IO4 PB15 PG15 R2<br>R39 0R PN9 32K LSE I2C PULL UP SB8 PB4<br>IO5 R3<br>R37 0R PN10 PH4<br>IO6 R4<br>R40 0R PN11 PC0 C10 A7 PH0 VDDIO SB6 PA15<br>IO7 PC1PC2 A9D9 PC0PC1 PH1-OSC_OUT(PH1)PH0-OSC_IN(PH0) B7 PH1 PC14 R171 0R C175 3.3pF I2C1 PH9PC1 RR115349 1K1K55 R6R5 PG11PD8<br>PC3 E10 PC2 E7 PH2 X3 R7 PG12<br>PC3 PH2 G0<br>PC4 A10 B1 PH3 32.768KHz PG1<br>PC4 PH3 G1<br>Peripherals PC5 B10 PC5 PH4 F4 PH4 PC15 R170 0R C174 3.3pF G2 PA1<br>PO1 PC6 B9 F5 PH5 VDDIO PA0<br>LED1 PC6 PH5 G3<br>PG10 PC7 C9 B2 PH6 PD14 R36 1K5 PB15<br>LED2 PC7 PH6 G4<br>PC8 D7 D2 PH7 I2C2 PD4 R38 1K5 PB12<br>PC8 PH7 G5<br>BOOT0 PC9 C7 C2 PH8 PB11<br>BOOT0 PC9 PH8 G6<br>PA6 PC10 A8 D8 PH9 PG8<br>Peripherals BOOT1 PC11 B8 PC10 PH9 LCD G7 PG15<br>PC11 B0<br>PC13 PC12 C8 PA7<br>USER1 PC12 B1<br>PC13 F3 P17 PN0 PB2<br>PC13 PN0 B2<br>PC14 D1 R17 PN1 48MHz HSE PG6<br>PE0 PC15 C1 PC14-OSC32_IN(OSC32_IN) PN1 T17 PN2 B3 PH3<br>TAMP PC15-OSC32_OUT(OSC32_OUT) PN2PN3 R15 PN3 PH0 R155 0R C155 8.2pF B4B5 PH6<br>N17 PN4 PA8<br>PN4 B6<br>PD0 D13 R16 PN5 PA2<br>PD1 A14 PD0 PN5 P15 PN6 X2 B7<br>PD2 C12 PD1 PN6 T16 PN7 48MHz PG13<br>Arduino_UNO_R3 PD7 PD3PD4 BE1513 PD2PD3 PN7PN8 P16T15 PN8PN9 LCD_ON/OFFLCD_DE PQ3PB14<br>A0DA1D PC10PE12 PD5PD6 DD1412 PD4PD5 PN10PN9 U15U16 PN10PN11 PH1 R154 0R C153 8.2pF LCD_HSYNCLCD_VSYNC PE11PB13<br>A2DA3DA4D PD11PC12PH2 PD7PD8PD9 HEE141214 PD6PD7PD8 PN12PN11 P14 PN12 LCD_BL_CTRLLCD_CLKLCD_INT PQ4PQ6PE1<br>A5D PD9 NRST<br>PA5 PD10 A13 M17 PO0 USB1<br>A0 PD10 PO0<br>PA9 PD11 G14 K16 PO1 PA4<br>A1 PD11 PO1 EN<br>A2A4A3 PA10PA12PF3PB10 PD12PD13PD14PD15 CCBC17141413 PD12PD13PD14 PO2PO4PO3 K17M1N16K156 PO2PO3PO4PO5 MicroSD_SDIOD0D1 PC4PC5PC0 UCPD1_ISENSEUCPD1_CC2UCPD1_CC1 UCPD1_CC1UCPD1_CC2PA5PD10<br>ARD_UNO_R3 D0D2D4A5D3D1 SB42SB44PF6PD5PD0PE9 DNF PH5PC13 PE0PE1PE2PE3PE4 DFFFF1617141015 PD15PE0PE1PE2PE3PE4 PO5PP0PP2PP4PP3PP1 G17H16J17J16H15 PP0PP1PP2PP3PP4 MicroSD PWR_SD_ENDECTECTLDO_SELCMDCKD2D3 PE4PC2PC3PN12PO5PQ7 USB1 UCPD1_VSENSEUSB2USB1_HS_NUCPD1_INTUSB1_HS_PUSB1_OCP OTG1_HSDPOTG1_HSDMPA11PN7 Camera CKNCKPD0ND1ND0PD1P CSI_CKNCSI_CKPCSI_D0NCSI_D0PCSI_D1NCSI_D1P<br>D6D5 PE10PE13 PE5PE6 DC1111 PE5PE6 PP6PP5 J14G16 PP5PP6 AudioCodec USB2 HSDMHSDP OTG2_HSDOTG2_HSDMP Camera PWR_ENNRST PD2PC8<br>PD6 PE7 B13 G15 PP7 PG7 PB9<br>D7D8D9 PE7PE14PA3 PE8PE9PE10 AAB161615 PE7PE8PE9 PP9PP7PP8 L16N14N15 PP8PP9PP10 SAI1_MCLK_ASAI1_CLK_ASAI1_FS_A PB6PB0PB7 PWR_USB2_EN TOF_LPnTOF_INT PQ0PQ5<br>D10D12D11 PG2PH8PE15 PE11PE12PE13 BAE121111 PE10PE11PE12 PP10PP12PP11 L15J15K14 PP11PP12PP13 AudioCodec SAI1_SD_ASAI1_SD_B PE3PB1 MCUSWDIO PA13PB5 IMU_INT2IMU_INT1 PQ1PQ2<br>D13 PE14 B11 PE13 PP13 L17 PP14 Audio_INT SWO PA14<br>PE14 PP14 MCU SWCLK<br>PE15 A12 H17 PP15 SB7 PA15<br>PE15 PP15 JTDI<br>PE5<br>I2C1 STM32N657X0H3Q MIC VCP_TX PE6<br>PH9 PH9 TP21 PE2 VCP_RX<br>I2C1 SCL CK<br>PC1 PC1 N/A<br>SDA<br>TP22 PA5 PE8 TRACE<br>MIC D1<br>N/A PG7<br>TRACECLK<br>I2C2 PA10 D2 SB41 DNF PE12 TRACED0 PE3<br>PD14 PD14 PB0<br>I2C2 SCL TRACE TRACED1<br>PD4 PD4 PB6<br>SDA TRACED2<br>SB43 PB4 PF4 PB7<br>JNTRST EXT_SMPS_MODE TRACED3 Title: STM32_microcontroller_IOs<br>Project: STM32N6570-DK<br>Variant: N6570<br>Revision: C -02 Reference: MB1939<br>Size: A3 Date: 4-Nov-24 Sheet: 3 of 21<br>1 2<br>3 4<br>**----- End of picture text -----**<br>
+
+
+**==> picture [791 x 455] intentionally omitted <==**
+
+**----- Start of picture text -----**<br>
+VDDIO U27C VDDCORE<br>G13 L6<br>VDD VDDCORE<br>H12 L12<br>VDD VDDCORE<br>H13 M7 VDDCORE<br>VDD VDDCORE<br>J12 M9<br>VDD VDDCORE<br>J13 M11<br>K13 VDD VDDCORE N8 C69 C70 C65 C68 C44 C63 C60 C51 C57 C61<br>VDDIO VBAT VDD VDDCORE N10 1uF 1uF 1uF 1uF 1uF 1uF 1uF 1uF 1uF 1uF<br>VDDCORE<br>SB4 E1 N12<br>VBAT VDDCORE<br>VDD3V3 P11<br>VDDCORE<br>R159 0R A4<br>VDD33USB<br>VDDA1V8PMU C43 1uF R4<br>VDDCSI<br>G1 VDDA1V8<br>VDDA18PMU<br>C169 100nF H1<br>VSSSMPS<br>K1 H2<br>VDD1V8 K2 VDDSMPS VSSSMPS H3 C54 C71 C80 C74 C79 C50 C46 C77 C47 C78<br>L4 2.2nH K3 VDDSMPS VSSSMPS H4 100nF 100nF 100nF 100nF 100nF 100nF 100nF 100nF 100nF 100nF<br>VDDSMPS VSSSMPS<br>K4 H5<br>C35 C29 C45 C41 C48 C52 K5 VDDSMPS VSSSMPS H6<br>10uF 10uF 1uF 1uF 100nF 100nF K6 VDDSMPS VSSSMPS<br>VDDSMPS<br>A17 VDDIO VBAT<br>VSS<br>J1 F7<br>VLXSMPS VSS<br>J2 F10<br>C37 2.2nF R220 2R J3 VLXSMPS VSS F11 C67 C58 C73 C75 C72 C55 C66 C76 C28<br>J4 VLXSMPS VSS F12 100nF 100nF 100nF 100nF 100nF 100nF 100nF 100nF 100nF<br>VLXSMPS VSS<br>J5 G12<br>VLXSMPS VSS<br>I_SENS_VDDCORE_P L7 1.0uH J6 VLXSMPS VSS K12<br>I_SENS_VDDCORE_N G2 VFBSMPS VSS M8<br>C177 C179 C176 C178 C34 4.7uF F1 VSS M10M12 VREFP VDDIO_SD VDDA18AON<br>22uF 22uF 22uF 22uF VDDA1V8 V08CAP VSS M13<br>L13 VSS N5 C39 C38 C59 C64 C40<br>L14 VDDIO2 VSS N7 100nF 1uF 100nF 100nF 100nF<br>VDDIO2 VSS<br>M14 N9<br>VDDIO2-5 are for Independent IO supply.              M15 VDDIO2 VSS N11<br>VDDIO2: PO[5:0] and PP[15:0].                                        N13 VDDIO2 VSS U1<br>VDDIO3: PN[12:0].                                                VDDIO P13 VDDIO3 VSS U17<br>VDDIO4: PC[1], PC[12:6] and PH[2,9].                                E8 VDDIO3 VSS<br>VDDIO5: PC[0], PC[5,2], and PE[4]. VDDIO_SD F8 VDDIO4VDDIO4 VSSA M6<br>E9 VDDIO5 VDDA1V8_AON I_SENS_VDDCORE_N C170 22uF I_SENS_VDDCORE_P<br>F9 G6<br>VDDIO5 VSSAON<br>R168 50mR<br>VDDA1V8 C36 VDDCORE<br>R5 F2 100nF R22 0R R167 0R<br>VDDA18CSI VSSAPMU D NF<br>C5<br>VDDA18USB<br>T2 VREFP<br>VREF-<br>N6 U2<br>VDDA18ADC VREF+<br>VDDA1V8_AON VDDA18AON VDDA1V8<br>R148 0R F6 M5<br>VDDA18AON VDDA18PLL<br>STM32N657X0H3Q<br>VDD1V8 VDDA1V8PMU<br>L8 18R @ 100MHz<br>MCUPower<br>MCUPower VDDCORE_NVDDCORE_P I_SENS_VDDCORE_PI_SENS_VDDCORE_N VDDA1V8PMU R173 D NF 0R VDDA1V8<br>VDDA1V8 VREFP<br>R27 0R<br>**----- End of picture text -----**<br>
+
+
+Title: **STM32_microcontroller_power** Project: **STM32N6570-DK** Variant: N6570 Revision: C -02 Reference: MB1939 Size: A4 Date: 4-Nov-24 Sheet: 4 of 21
+
+**==> picture [42 x 24] intentionally omitted <==**
+
+**==> picture [1078 x 706] intentionally omitted <==**
+
+**----- Start of picture text -----**<br>
+POWER Measurement of power comsumption<br>CN2 5V Power Supply options HW3<br>PWR_ON PWR_ON I_SENS_EXT_PI_SENS_EXT_VDDCORE_P 31 13 42 24 I_SENS_EXT_NI_SENS_EXT_VDDCORE_N<br>EXT_SMPS_MODE PWR_LP PF4 I_SENS_INT_P 57 5 6 68 I_SENS_INT_N default : 1-2 TP4<br>7 8<br>I_SENS_INT_VDDCORE_P 9 9 10 10 I_SENS_INT_VDDCORE_N JP2 5V<br>I_SENS_VDDIO_PI_SENS_VDDA1V8_P 1311 1113 1214 1214 I_SENS_VDDIO_NI_SENS_VDDA1V8_N 5V_USB_SNK5V_STLK 13 42<br>Jumper_Header 7x2 5V_VIN 5 6 LD5 Green C201<br>Jumper_Header_3x2 R129 220uF<br>820R<br>MCUPower 5V_STLK: 5V 500mA / 1.5A / 3A<br>MCUPower VDDCORE_P I_SENS_INT_VDDCORE_P 5V_USB_SNK: 5V 1.5A<br>I_SENS_INT_VDDCORE_N 5V_VIN: 5V 0.8A<br>VDDCORE_N<br>External SMPS<br>5V External POWER<br>I_SENS_EXT_P I_SENS_EXT_N I_SENS_EXT_VDDCORE_P C53 22uF I_SENS_EXT_VDDCORE_N U21 LD1117S50TR<br>TP10 VIN 5V_VIN<br>R35 50mR 3 2<br>5V LNK2 U2 VDDCORE Vin Vout 4<br>R23 0R A2 B2 L5 240nH R31 0R R30 0R Gnd Tab<br>C32 C31 VIN SW C56 C62 C49 C42 C131 C134<br>R24 330mR 10uF 10uF 10uF 10uF<br>TP25 B1 22uF 22uF 22uF 22uF<br>PG<br>TP11 C27 22uF<br>PWR_ON R25 0R A1 EN FB C1 R28 56K<br>VDDCORE voltage feedback<br>R29 R157 C30 100pF to probe from MCU balls<br>160K 422K<br>Q7<br>3 Si1062X<br>GND C2 D PWR_LP = 1 (OVERDRIVE) : VDDCORE = 0.890V<br>PWR_LP = 0 (NOMINAL ) : VDDCORE = 0.810V I_SENS_VDDIO_P I_SENS_VDDIO_N<br>TPS62088YFP VDDIO TP13<br>1 R158 150K PWR_LP PF4<br>S G 5V U5 LD39020ADTPU33R VDDIO<br>2 R223 4 1 R79 0R R78 0R<br>1M VIN OUT<br>C92 3 2 C95 C94 R80 750mR<br>1uF EN GND 1uF 1uF<br>C93 22uF<br>TP12<br>Internal SMPS and other MCU 1V8 POWER INPUT<br>VDDIO and VDDA1V8_AON should<br>be provided to the MCU before other<br>I_SENS_INT_P I_SENS_INT_N<br>R8 TP14 powers.<br>5V LNK1 U1 330R VDD1V8 VDDA1V8_AON TP15<br>R19 0R 6 7 L3 2.2uH R21 0R<br>VINSW SW D NF<br>R20 330mR PWR_ON R12 D NF0R 21 VINAEN FB 3 R1130K 5V 4 U43VIN LD39020ADTPU18ROUT 1 R163 0R VDDA1V8_AON<br>C23 22uF 5 C21 C22 C26 C25 C173 3 2 C171 C172<br>DN F C15 C24 C16 PG 22uF 22uF 22uF 22uF 1uF EN GND 1uF 1uF<br>220uF 1uF 10uF C20 R10<br>ST1S31PUR 22pF 24K<br>3V3 POWER I_SENS_VDDA1V8_P I_SENS_VDDA1V8_N<br>R132 TP16 1V8 POWER TP17<br>560R<br>5V U22 VDD3V3 VDD3V3 U45 VDDA1V8<br>R130 0R 6 7 L6 2.2uH R136 0R 7 1 R187 0R R179 0R<br>VINSW SW VIN VOUT<br>1 C189 8 2<br>PWR_ON 25 VINAEN FB 3 R13575K C135 C136 10uFPWR_ON R199 0R 6 VINEN VOUTFB 45 C18310uF C182R188 33022uFmR<br>DN F C138 C139 C137 PG 22uF 22uF 3 GND EP<br>220uF 1uF 10uF R133 LCON GND<br>ST1S31PUR 24K R189 LD56100DPU18R I_SENS_VDDA1V8_N<br>0R<br>1<br>EP<br>5<br>GND PGND ePAD EP<br>5<br>4 8 9<br>GND PGND ePAD<br>4 8 9<br>**----- End of picture text -----**<br>
+
+
+Title: **Schematic sheet title to update** Project: **STM32N6570-DK** Variant: N6570 Revision: C -02 Reference: MB1939 Size: A3 Date: 4-Nov-24 Sheet: 5 of 21
+
+**==> picture [42 x 23] intentionally omitted <==**
+
+## HexaSPI PSRAM Memory
+
+**==> picture [769 x 323] intentionally omitted <==**
+
+**----- Start of picture text -----**<br>
+HEXASPI<br>NCS HEXASPI_NCS<br>CLK HEXASPI_CLK<br>HEXASPI_DQS0 VDDA1V8 VDD_HEXASPI_M<br>DQS0<br>IO0 HEXASPI_IO0<br>IO1 HEXASPI_IO1 SB35<br>IO2 HEXASPI_IO2<br>IO3 HEXASPI_IO3<br>IO4 HEXASPI_IO4<br>IO5 HEXASPI_IO5<br>HEXASPI IO6 HEXASPI_IO6<br>IO7 HEXASPI_IO7<br>HEXASPI_DQS1<br>DQS1IO8 HEXASPI_IO8 HEXASPI<br>IO9 HEXASPI_IO9 Impedance Constraint [Min = 45.00    Max = 55.00    ]<br>IO10 HEXASPI_IO10<br>IO11 HEXASPI_IO11<br>IO12 HEXASPI_IO12<br>IO13 HEXASPI_IO13 VDD_HEXASPI_M<br>IO14 HEXASPI_IO14 VDD_HEXASPI_M<br>IO15 HEXASPI_IO15 HexaSPI R138 U26 100 nF/4.7µF decoupling  for each pair C1/D1 - E4/E5<br>i 10K<br>PO0 HEXASPI_NCS A3 CE# VDD D1<br>E4<br>VDD<br>HexaSPI C142 C144 C141 C143<br>i 100nF 100nF 4.7uF 4.7uF<br>PO4 HEXASPI_CLK B2 CLK VSS C1<br>E5<br>VSS<br>HexaSPI i PO2 HEXASPI_DQS0 C3 DQS/DM0 DQS/DM1 B3 HEXASPI_DQS1 PO3 i HexaSPI<br>Match length (including BGA package length)- DQS0 with IO0..7 (Byte0) , all in 50 mils, - DQS1 with IO8..15 (Byte1), all in 50 mils, - CLK is 100 mils from any signal of Byte0 or Byte1- NCS can be CLK +/- 700 mils HexaSPIHexaSPIHexaSPIHexaSPIHexaSPIHexaSPIHexaSPIHexaSPI iiiiiiii PP0PP1PP2PP3PP4PP5PP6PP7 HEXASPI_IO0HEXASPI_IO1HEXASPI_IO2HEXASPI_IO3HEXASPI_IO4HEXASPI_IO5HEXASPI_IO6HEXASPI_IO7 D2D4D3C4D5E2E3E1 ADQ0ADQ1ADQ2ADQ3ADQ4ADQ5ADQ6ADQ7 DQ10DQ12DQ14DQ13DQ15DQ11DQ9DQ8 C2B1A2A4A5B4B5C5 HEXASPI_IO8HEXASPI_IO9HEXASPI_IO10HEXASPI_IO11HEXASPI_IO12HEXASPI_IO13HEXASPI_IO14HEXASPI_IO15 PP8PP9PP10PP11PP12PP13PP14PP15 iiiiiiii HexaSPIHexaSPIHexaSPIHexaSPIHexaSPIHexaSPIHexaSPIHexaSPI<br>**----- End of picture text -----**<br>
+
+
+APS256XXN-OBR-BG
+
+**==> picture [42 x 24] intentionally omitted <==**
+
+Title: **HexaSPI_PSRAM** Project: **STM32N6570-DK** Variant: N6570 Revision: C -02 Reference: MB1939 Size: A4 Date: 4-Nov-24 Sheet: 6 of 21
+
+OctoSPI Flash Memory
+
+## OCTOSPI
+
+Impedance Constraint [Min = 45.00    Max = 55.00    ]
+
+**==> picture [727 x 192] intentionally omitted <==**
+
+**----- Start of picture text -----**<br>
+VDDA1V8 VDD_OCTOSPI_M<br>SB36 VDD_OCTOSPI_M VDD_OCTOSPI_M<br>OCTOSPI<br>NCS OCTOSPI_NCSOCTOSPI_DQS R142 100 nF/4.7µF decoupling  for each pair B4/B3 - E4/E5- C1/D1<br>CLKDQSIO0IO1 OCTOSPI_CLKOCTOSPI_IO0OCTOSPI_IO1 OctoSPIi 10K Close to OctoSPIU25 C844.7uF C87100nF<br>OCTOSPI IO2 OCTOSPI_IO2 PN1 OCTOSPI_NCS R141 0R C2 CS VCC B4<br>IO4IO3 OCTOSPI_IO3OCTOSPI_IO4 OctoSPI i PN6 OCTOSPI_CLK B2 SCLK VCCQVCCQ D1E4<br>IO6IO7IO5 OCTOSPI_IO5OCTOSPI_IO6OCTOSPI_IO7 OctoSPIOctoSPIOctoSPI iii PPPN0N2N3 OCTOSPI_DQSOCTOSPI_IO0OCTOSPI_IO1 D2D3C3 DQSSI/SIO0SO/SIO1 VSSQVSSQGND B3C1E5 C89100nF TP6C90100nF VDD_OC884.7uFCTOSPI_MC914.7uF<br>OctoSPIOctoSPI ii PN4PN5 OCTOSPI_IO2OCTOSPI_IO3 D4C4 SIO2SIO3 ECS A5 R139 ECS/ used as info on TP<br>OctoSPI i PN8 OCTOSPI_IO4 D5 SIO4 10K<br>OctoSPI i PN9 OCTOSPI_IO5 E3 SIO5 NC A2<br>OctoSPI i PN10 OCTOSPI_IO6 E2 SIO6 NC A3<br>OctoSPI i PN11 OCTOSPI_IO7 E1 SIO7 DNU B1<br>B5<br>DNU<br>A4 C5<br>RESET NC<br>TP7<br>MX66UW1G45GXDI00<br>**----- End of picture text -----**<br>
+
+
+**==> picture [136 x 71] intentionally omitted <==**
+
+**----- Start of picture text -----**<br>
+VDD_OCTOSPI_M<br>R140<br>10K<br>D4<br>NRST<br>BAT60JFILM<br>**----- End of picture text -----**<br>
+
+
+Length equalization ( include BGA package length ) : - DQS0 with IO0..7 (Byte0) , and CLK , all in 50 mils - NCS length can be in the range of up to CLK length +/-  750 mils
+
+**==> picture [42 x 24] intentionally omitted <==**
+
+Title: **OctoSPI_Flash** Project: **STM32N6570-DK** Variant: N6570 Revision: C -02 Reference: MB1939 Size: A4 Date: 4-Nov-24 Sheet: 7 of 21
+
+Peripherals
+
+**==> picture [751 x 405] intentionally omitted <==**
+
+**----- Start of picture text -----**<br>
+Peripherals<br>LED1<br>LED1<br>LED2<br>LED2<br>BOOT0<br>BOOT0<br>BOOT1<br>Peripherals BOOT1<br>USER1<br>USER1<br>VDDIO<br>TAMP<br>TAMP<br>USER1<br>B2<br>BOOT<br>KSC721JLFS<br>VDDIO<br>SW2 2<br>BOOT0 R103 10K 1<br>3 PC13 USER1<br>NRST<br>RESET<br>09.03290.01 B1<br>R225 C198 KSC321JLFS<br>VDDIO DNF10K U10 10nF U9<br>SW1 2<br>PA6 BOOT1 R102 10K 1<br>3<br>09.03290.01<br>VDDIO<br>LEDs VDD3V3 VDD3V3<br>TAMP<br>LD1 LD2 B4<br>Green Red<br>KSC721JLFS<br>R1 R2<br>330R 680R<br>PE0 TAMP<br>PO1 LED1 R4 47K 1 Q1 PG10 LED2<br>BSR14 R224<br>DNF10K U12<br>R3<br>100K<br>2 1<br>4 3<br>1 1 2 1<br>2 ESDALC6V1-1U2 2 ESDALC6V1-1U2 4 3<br>2 1<br>4 3<br>3 1<br>2<br>2 ESDALC6V1-1U2<br>**----- End of picture text -----**<br>
+
+
+Title: **Schematic sheet title to update** Project: **STM32N6570-DK** Variant: N6570 Revision: C -02 Reference: MB1939 Size: A4 Date: 4-Nov-24 Sheet: 8 of 21
+
+**==> picture [42 x 24] intentionally omitted <==**
+
+**==> picture [858 x 204] intentionally omitted <==**
+
+**----- Start of picture text -----**<br>
+VDDA1V8<br>VDDA1V8 VDDA1V8<br>U8A<br>ARD_A0R R89 3 TSZ122IST U7A U6A<br>470K V+ 1 SB49 ARD_A0 PA5 ARD_A2R R85 3 TSZ122IST ARD_A4R R81 3 TSZ122IST<br>2 V- 470K V+ 1 SB51 ARD_A2 PA10 470K V+ 1 ARD_A4 PF3<br>2_INP18 2 V- 2 V-<br>R90 12_INP11 1_INP16<br>560K R86 R82<br>560K 560K<br>U8B<br>ARD_A1R R92 5 U7B U6B<br>470K 7 ARD_A1 PA9 ARD_A3R R88 5 ARD_A5R R84 5<br>6 470K 7 ARD_A3 PA12 470K 7 ARD_A5 PB10<br>12_INP10 6 6<br>R91 TSZ122IST 12_INP13 12_INP8<br>560K R87 TSZ122IST R83 TSZ122IST<br>560K 560K<br>SB9<br>STMOD_ADC<br>8<br>8 8<br>4<br>4 4<br>**----- End of picture text -----**<br>
+
+
+## Arduino Connectors
+
+**==> picture [815 x 360] intentionally omitted <==**
+
+**----- Start of picture text -----**<br>
+Arduino_UNO_R3 PD7 ARD_A0D SB23 ARD_A0R<br>A0D ARD_A0D PC10 ARD_A1D SB22 ARD_A1R Q2 LD6<br>A1D ARD_A1D PE12 ARD_A2D SB21 ARD_A2R 2 S D 3 R131 330R VDD3V3<br>A2D ARD_A2D PD11 ARD_A3D SB20 ARD_A3R<br>A3D ARD_A3D PC12 ARD_A4D SB31 ARD_A4R Green<br>A4D ARD_A4D PC1 ARD_D14 SB32 DNF BSN20BK G<br>A5D ARD_A5D PH2 ARD_A5D SB33 ARD_A5R<br>A0A2A1 ARD_A0ARD_A1ARD_A2 PH9 ARD_D15 SB34 DNF R1341M<br>A3 ARD_A3<br>A4 ARD_A4 0R SB25 VREFP<br>A5 ARD_A5<br>ARD_UNO_R3 D0D1 ARD_D0ARD_D1 5V_VIN SCL/D15 CN1210 10 ARD_D15 PH9 I2C1/I3C1_SCL<br>D2 ARD_D2 SDA/D14 9 9 ARD_D14 PC1 I2C1/I3C1_SDA C140<br>D3 ARD_D3 R111 AREF 8 8 R137 D NF 0R 100nF<br>D4 ARD_D4 1K CN8 GND 7 7<br>D5 ARD_D5 1 1 SCK/D13 6 6 ARD_D13 PE15 SPI5_SCK<br>D6 ARD_D6 VDD3V3 2 2 IOREF MISO/D12 5 5 ARD_D12 PH8 SPI5_MISO<br>D7 ARD_D7 NRST 3 3 NRST PWM/MOSI/D11 4 4 ARD_D11 PG2 TIM14_CH1 SPI5_MOSI<br>D8 ARD_D8 VDD3V3 4 4 3V3 PWM/CS/D10 3 3 ARD_D10 PA3 TIM16_CH1 SPI5_NSS<br>D9 ARD_D9 5V 5 5 5V PWM/D9 2 2 ARD_D9 PE14 TIM1_CH4<br>D10 ARD_D10 6 6 GND D8 1 1 ARD_D8 PE7<br>D11 ARD_D11 7 7 GND<br>D12 ARD_D12 VIN 8 8 VIN Socket 10x1<br>D13 ARD_D13 Warning: VIN = 7-12V CN11<br>Socket 8x1 D7 8 8 ARD_D7 PD6<br>CN7 PWM/D6 7 7 ARD_D6 PE13 TIM1_CH3<br>ARD_A0R 1 1 A0 PWM/D5 6 6 ARD_D5 PE10 TIM1_CH2N<br>ARD_A1R 2 2 A1 D4 5 5 ARD_D4 PH5<br>ARD_A2R 3 3 A2 PWM/INT1/D3 4 4 ARD_D3 PE9 TIM1_CH1<br>ARD_A3R 4 4 A3 INT0/D2 3 3 ARD_D2 PD0<br>ARD_A4R 5 5 A4/SDA TX/D1 2 2 ARD_D1 PD5 USART2_TX<br>ARD_A5R 6 6 A5/SCL RX/D0 1 1 ARD_D0 PF6 USART2_RX<br>I2C1<br>I2C1 SCL ARD_D15 Socket 6x1 Socket 8x1<br>SDA ARD_D14<br>TP5<br>ARD_A4<br>Test point for PPS_OUT<br>1<br>**----- End of picture text -----**<br>
+
+
+Title: **Schematic sheet title to update** Project: **STM32N6570-DK** Variant: N6570 Revision: C -02 Reference: MB1939 Size: A3 Date: 4-Nov-24 Sheet: 9 of 21
+
+**==> picture [42 x 23] intentionally omitted <==**
+
+|STMod+<br>STMOD_RX<br>STMOD_RTS<br>STMOD_8<br>STMOD_TX<br>STMOD_CTS<br>STMOD_SDA<br>STMOD_SCL<br>STMOD_IO1<br>STMOD_IO2<br>STMOD_RST<br>STMOD_INT<br>STMOD_IO3<br>STMOD_IO4<br>STMOD_PWM<br>STMOD_ADC_D<br>STMOD_NSS<br>STMOD_MISO5<br>STMOD_SCK<br>STMOD_MOSI5<br>CTS<br>TX<br>RX<br>RTS<br>MOSI<br>MISO<br>INT<br>RST<br>ADC_D<br>PWM<br>IO1<br>IO2<br>IO3<br>IO4<br>SPI5_SCK<br>SPI5_MISO<br>SPI5_MOSI<br>SPI5_NSS<br>STMOD+<br>STMOD+<br>SCL<br>SDA<br>I2C1<br>I2C1<br>STMOD_9<br>P<br>P<br>PH7<br>P<br>P<br>P<br>P<br>P<br>P<br>PC6<br>P<br>PH9<br>PC1<br>`NLSTMOD08`<br>**`POSTMOD0`**<br>`NLSTMOD09`<br>`NLSTMOD0ADC0D`<br>`NLSTMOD0CTS`<br>`NLSTMOD0INT`<br>`NLSTMOD0IO1`<br>`NLSTMOD0IO2`<br>`NLSTMOD0IO3`<br>`NLSTMOD0IO4`<br>`NLSTMOD0MISO5`<br>`NLSTMOD0MOSI5`<br>`NLSTMOD0NSS`<br>`NLSTMOD0PWM`<br>`NLSTMOD0RST`<br>`NLSTMOD0RTS`<br>`NLSTMOD0RX`<br>`NLSTMOD0SCK`<br>`NLSTMOD0SCL`<br>**`POI2C1`**<br>`NLSTMOD0SDA`<br>`NLSTMOD0TX`<br>**`OI2C10S`**`CL`<br>`DA`<br>**`OST`**`MOD0`**`0`**`ADC0D`<br>**`STMOD`** **`0`**`C`**`TS`**<br>**`INT`**<br>**`O`**`1234`<br>**`MOD00M`**`I`**`S`**`O`<br>`O I`<br>`PWM`<br>**`R`**<br>**`O`** **`TMOD00`**`R`**`X`**<br>**`OSTMOD00SPI5`** **`M`**`I`**`S`**`OI`<br>**`OD00SPI50`** `S`<br>`SCK`|STMOD_NSS/CTS<br>STMOD#1<br>STMOD_RX<br>STMOD_RTS<br>STMOD_TX<br>STMOD_CTS<br>STMOD_NSS<br>STMOD_MISO5<br>STMOD_SCK<br>STMOD_MOSI5<br>SB16<br>STMOD_ADC_D<br>SB11<br>DNF<br>SB10<br>SB13<br>DNF<br>SB12<br>SB15<br>DNF<br>SB14<br>SB18<br>DNF<br>SB17<br>G5<br>A3<br>D5<br>H8<br>F6<br>E15<br>G14<br>C9<br>G2<br>**`PISB1001`**<br>**`P`**<br>`COSB10`<br>**`PISB1101`**<br>**`P`**<br>`COSB11`<br>**`PISB1201`**<br>**`P`**<br>`COSB12`<br>**`PISB1301`**<br>**`P`**<br>`COSB13`<br>**`PISB1401`**<br>**`P`**<br>`COSB14`<br>**`PISB1501`**<br>**`P`**<br>`COSB15`<br>**`P`**<br>**`PISB1602`**<br>`COSB16`<br>**`PISB1701`**<br>**`P`**<br>`COSB17`<br>**`PISB1801`**<br>**`P`**<br>`COSB18`<br>`NLSTMOD0NSS0CTS`|STMOD_NSS<br>SB11<br>DNF<br> <br>**`PISB1101`**<br>**`P`**<br>`COSB11`|STMOD_NSS<br>SB11<br>DNF<br> <br>**`PISB1101`**<br>**`P`**<br>`COSB11`|STMOD_NSS<br>SB11<br>DNF<br> <br>**`PISB1101`**<br>**`P`**<br>`COSB11`|**`ISB1102`**||5V<br>1<br>1<br>2<br>2<br>3<br>3<br>4<br>4<br>5<br>5<br>6<br>6<br>7<br>7<br>8<br>8<br>9<br>9<br>10<br>10<br>11<br>11<br>12<br>12<br>13<br>13<br>14<br>14<br>15<br>15<br>16<br>16<br>17<br>17<br>18<br>18<br>19<br>19<br>20<br>20<br>STMod+<br>Socket 10X2<br>CN4<br>STMOD_IO1<br>STMOD_IO2<br>STMOD_RST<br>STMOD_INT<br>STMOD_IO3<br>STMOD_IO4<br>STMOD_PWM<br>STMOD_ADC<br><br>X<br>X<br><br>STMOD#11-INT<br>STMOD#12-RST<br>STMOD#13-ADC<br>STMOD#14-PWM<br>STMOD#17-IO<br>STMOD#18-IO<br>STMOD#19-IO<br>STMOD#20-IO<br>STMOD_MISO5/RX<br>STMOD_SCK/RTS<br>STMOD_MOSI5/TX<br>STMOD_NSS/CTS<br>STMOD_ADC<br>STMOD_ADC<br>TP3<br>PD13<br>PB8<br>PG9<br>PF1<br>PC7<br>PB3<br>PC11<br>**`PICN401`**<br>**`PICN402`**<br>**`PICN403`**<br>**`PICN404`**<br>**`PICN405`**<br>**`PICN406`**<br>**`PICN407`**<br>**`PICN408`**<br>**`PICN409`**<br>**`PICN4010`**<br>**`PICN4011`**<br>**`PICN4012`**<br>**`PICN4013`**<br>**`PICN4014`**<br>**`PICN4015`**<br>**`PICN4016`**<br>**`PICN4017`**<br>**`PICN4018`**<br>**`PICN4019`**<br>**`PICN4020`**<br>`COCN4`<br>**`PITP301`**<br>`COTP3`<br>`NLSTMOD0ADC`<br>**`POSTMOD0ADC`**|
+|---|---|---|---|---|---|---|---|
+|||||DNF<br>**`1`**<br>**`P`**||||
+|||STMOD_CTS<br>SB10<br>**`PISB100`**<br>`COSB10`||**`1`**<br>**`P`**|**`SB1002`**|||
+|||STMOD_MOSI5<br>SB13<br>DNF<br> <br> <br> <br>**`PISB1301`**<br>**`P`**<br>`COSB13`|||<br>**`ISB1302`**|||
+|||||DNF<br>**`1`**<br>**`P`**||||
+|||STMOD_TX<br>SB12<br>**`PISB120`**<br>`COSB12`||**`1`**<br>**`P`**|**`ISB1202`**|||
+|||STMOD_MISO5<br>SB15<br>DNF<br> <br>**`PISB1501`**<br>**`P`**<br>`COSB15`|||**`ISB1502`**|||
+|||||DNF<br>**`1`**<br>**`P`**||||
+|||STMOD_RX<br>SB14<br>**`PISB140`**<br>`COSB14`<br>||**`1`**<br>**`P`**<br> <br>|**`ISB1402`**<br>|||
+|||STMOD_SCK<br>SB18<br>DNF<br>5<br> <br> <br>**`PISB1801`**<br>**`P`**<br>`COSB18`|||<br>**`ISB1802`**|||
+|||||DNF<br>**`1`**<br>**`P`**||||
+|||STMOD_RTS<br>S<br>4<br>`COS`|B17<br>**`PISB170`**<br>`B17`|**`1`**<br>**`P`**|**`ISB1702`**|||
+|||S<br>STMOD_ADC_D<br>`COS`|B16<br>**`P`**<br>**`PISB1602`**<br>`B16`||**`SB1601`**|||
+|||||**`P`**<br>**`2`**||||
+||||STMOD#1<br> <br>||-NS<br>|S/CTS|1<br>1<br>2<br>2<br>3<br>3<br>4<br>4<br>5<br>5<br>6<br>6<br>7<br>7<br>8<br>8<br>9<br>9<br>10<br>10<br>11<br>12<br>13<br>14<br>15<br>16<br>17<br>18<br>19<br>20<br>STMod+<br>Socket 10<br>CN4<br><br>X<br>X<br><br>TP3<br>**`PICN401`**<br>**`PICN402`**<br>**`PICN403`**<br>**`PICN404`**<br>**`PICN405`**<br>**`PICN406`**<br>**`PICN407`**<br>**`PICN408`**<br>**`PICN409`**<br>**`PICN4010`**<br>`COCN4`<br>**`PITP301`**<br>`COTP3`|
+||STMOD_MOSI5/TX<br> <br>`NLSTMOD0MOSI50TX`||STMOD#2||-MO|SI5/T|2<br>X<br> <br>**`PICN40`**|
+||STMOD_MISO5/RX<br>`NLSTMOD0MISO50RX`<br>||STMOD#3||-MI|SO5/R|3<br>X<br>**`PICN40`**|
+||STMODSCK/RTS<br>`NLSTMOD0SCK0RTS`||STMOD#4||-SC|K/RTS|4<br><br> <br>|
+||_<br>STMODSCL<br>||STMOD#7||-SC||5<br>**`PICN40`**<br>**`PICN40`**|
+|||||||L<br>5V|6<br> <br>|
+||||||||7<br>**`PICN40`**|
+||_<br>STMOD_8||STMOD#8||-MO|SI5|8<br>**`PICN40`**<br>**`PICN40`**|
+||STMOD_9||STMOD#9||||9<br> <br>**`PICN40`**|
+||STMOD_SDA<br>||STMOD#1||0-SD|A|10<br> <br>**`PICN401`**|
+||||STMOD_ADC_D|||||
+||||Test point for MCO2|||||
+
+
+
+**==> picture [42 x 24] intentionally omitted <==**
+
+Title: **Schematic sheet title to update** Project: **STM32N6570-DK** Variant: N6570 Revision: C -02 Reference: MB1939 Size: A4 Date: 4-Nov-24 Sheet: 10 of 21
+
+LCD Connector
+
+**==> picture [697 x 266] intentionally omitted <==**
+
+**----- Start of picture text -----**<br>
+CN3<br>LCD_RGB 1 1 2 2<br>R0 LCD_R0 PG0 LCD_R0 3 3 4 4 LCD_G0 PG12<br>R1 LCD_R1 PD9 LCD_R1 5 5 6 6 LCD_G1 PG1<br>R2 LCD_R2 PD15 LCD_R2 7 7 8 8 LCD_G2 PA1<br>R3 LCD_R3 PB4 LCD_R3 9 9 10 10 LCD_G3 PA0<br>R4 LCD_R4 PH4 LCD_R4 11 11 12 12 LCD_G4 PB15<br>R5 LCD_R5 PA15 LCD_R5 13 13 14 14 LCD_G5 PB12<br>R6 LCD_R6 PG11 LCD_R6 15 15 16 16 LCD_G6 PB11<br>R7 LCD_R7 PD8 LCD_R7 17 17 18 18 LCD_G7 PG8<br>G0 LCD_G0 19 19 20 20<br>G1 LCD_G1 PG15 LCD_B0 21 21 22 22 LCD_DE PG13<br>G2 LCD_G2 PA7 LCD_B1 23 23 24 24 SB5 LCD_ON/OFF PQ3<br>G3 LCD_G3 PB2 LCD_B2 25 25 26 26 LCD_HSYNC PB14<br>G4 LCD_G4 PG6 LCD_B3 27 27 28 28 LCD_VSYNC PE11<br>G5 LCD_G5 PH3 LCD_B4 29 29 30 30<br>G6 LCD_G6 PH6 LCD_B5 31 31 32 32 LCD_CLK PB13<br>LCD G7 LCD_G7 PA8 LCD_B6 33 33 34 34<br>B0 LCD_B0 PA2 LCD_B7 35 35 36 36 LCD_NRST PE1<br>B1 LCD_B1 37 37 38 38 R69 0R I2C2_SDA PD4<br>B2 LCD_B2 PQ4 LCD_INT 39 39 40 40 R68 0R I2C2_SCL PD14<br>B3 LCD_B3 41 41 42 42<br>B4 LCD_B4 PQ6 LCD_BL_CTRL 43 43 44 44<br>B5 LCD_B5 5V R43 0R 45 45 46 46<br>B6B7 LCD_B6LCD_B7 R41 0R C8210uF C83100nF 4749 4749 4850 4850 VDD3V3<br>LCD_DE Socket 25x2 C81<br>LCD_DE LCD_ON/OFF 100nF<br>LCD_ON/OFF<br>LCD_HSYNC<br>LCD_HSYNC LCD_VSYNC FLE-125-01-G-DV (Samtec) I2C address of MB1860-B01:<br>LCD_VSYNC LCD_CLK Read 0xBB / Write 0xBA<br>LCD_CLK LCD_INT TP1<br>LCD_INT<br>LCD_BL_CTRL<br>LCD_BL_CTRL<br>NRST LCD_NRST<br>LCD_B6<br>Test point for MCO1<br>**----- End of picture text -----**<br>
+
+
+**==> picture [145 x 29] intentionally omitted <==**
+
+**----- Start of picture text -----**<br>
+I2C2<br>I2C2 SCL I2C2_SCL<br>SDA I2C2_SDA<br>**----- End of picture text -----**<br>
+
+
+**==> picture [113 x 57] intentionally omitted <==**
+
+**----- Start of picture text -----**<br>
+N/A N/A<br>H5 H3<br>N/A N/A<br>H4 H6<br>**----- End of picture text -----**<br>
+
+
+**==> picture [42 x 24] intentionally omitted <==**
+
+Title: **LCD & Camera connectors** Project: **STM32N6570-DK** Variant: N6570 Revision: C -02 Reference: MB1939 Size: A4 Date: 4-Nov-24 Sheet: 11 of 21
+
+## Camera CONNECTOR
+
+**==> picture [684 x 382] intentionally omitted <==**
+
+**----- Start of picture text -----**<br>
+CN14<br>Camera ECMF2-40A100N6 1<br>1<br>CKN CSI_CLK_N U31 CSI_D0_N_CON 2 2<br>CKP CSI_CLK_P CSI_CLK_P 6 D+ ic D+ con 1 CSI_CLK_P_CON CSI_D0_P_CON 3 3<br>D0N CSI_D0_N CSI_CLK_N 5 D- ic D- con 2 CSI_CLK_N_CON 4 4<br>D0P CSI_D0_P 4 GND GND 3 CSI_D1_N_CON 5 5<br>D1N CSI_D1_N CSI_D1_P_CON 6 6<br>D1P CSI_D1_P 7 7<br>PWR_ENNRST EN_MODULENRST_CAM U29 ECMF2-40A100N6 CSI_CLK_N_CONCSI_CLK_P_CON 89 89<br>CSI_D0_P 6 D+ ic D+ con 1 CSI_D0_P_CON 10 10<br>TOF_LPnTOF_INT TOF_INTTOF_LPn CSI_D0_N 45 D- icGND D- conGND 23 CSI_D0_N_CON PQ5PQ0 TOF_LPnTOF_INT 121311 1112<br>13<br>IMU_INT2IMU_INT1 IMU_INT1IMU_INT2 U30 ECMF2-40A100N6 PQ1PQ2 IMU_INT1IMU_INT2 141615 1415<br>16<br>CSI_D1_P 6 D+ ic D+ con 1 CSI_D1_P_CON PC8 NRST_CAM 17 17<br>CSI_D1_N 5 D- ic D- con 2 CSI_D1_N_CON PD2 EN_MODULE 18 18<br>4 3 19<br>GND GND 19<br>PH9 I2C_SCL 20 20<br>I2C1 VDD_CAM PC1 I2C_SDA 21 21<br>SCL I2C_SCL 22 22<br>SDA I2C_SDA C161<br>1uF S1<br>SHIELD<br>S2<br>SHIELD<br>FFC/FPPC_2-1734592-2<br>VDD_CAM<br>I2C address of MB1854-B01:<br>Camera: Read 0x35 / Write 0x34<br>TOF_LPn TOF: Read  0x53 / Write  0x52<br>TOF_INT DNFR22110K DNFR22210K IMU: Read 0xD6 / Write 0xD5<br>IMU_INT1<br>IMU_INT2 NRST_CAM VDD3V3 VDD_CAM<br>EN_MODULE SB45<br>NRST_CAM<br>EN_MODULE<br>I2C_SCL U54 LD1117S33TR<br>I2C_SDA 5V VDD_CAM<br>U41 U40 U39 U38 U37 U36 U35 U33 3 Vin Vout 2 SB53 DNF<br>4<br>GND TAB<br>C199 C200<br>10uF 10uF<br>1 1 1 1 1 1 1 1<br>1<br>2 2 2 2 2 2 2 2<br>ESDALC6V1-1U2 ESDALC6V1-1U2 ESDALC6V1-1U2 ESDALC6V1-1U2 ESDALC6V1-1U2 ESDALC6V1-1U2 ESDALC6V1-1U2 ESDALC6V1-1U2<br>**----- End of picture text -----**<br>
+
+
+|CSI_CLK_N<br>CSI_CLK_P<br>CSI_D0_N<br>CSI_D0_P<br>CSI_D1_N<br>CSI_D1_P<br>I2C_SCL<br>I2C_SDA<br>NRST_CAM<br>EN_MODULE<br>TOF_INT<br>TOF_LPn<br>IMU_INT1<br>IMU_INT2<br>CKN<br>CKP<br>D0N<br>D0P<br>D1N<br>D1P<br>PWR_EN<br>NRST<br>TOF_INT<br>TOF_LPn<br>IMU_INT1<br>IMU_INT2<br>Camera<br>Camera<br>SCL<br>SDA<br>I2C1<br>I2C1<br>`NLCSI0CLK0N`<br>**`POCamera`**<br>`NLCSI0CLK0P`<br>`NLCSI0D00N`<br>`NLCSI0D00P`<br>`NLCSI0D10N`<br>`NLCSI0D10P`<br>**`POI2C1`**<br>**`OCamera0CKNP`**<br>**`D01`**<br>**`OCamera0IMU0INT`**`12`<br>`amera0NRS`**`T`**<br>`amera0PWR0EN`<br>**`era0TOF0`**`IN`<br>`LPn`<br>**`OI2C10S`**`CL`<br>`DA`|CSI_CLK_N<br>CSI_CLK_P<br>CSI_D0_N<br>CSI_D0_P<br>CSI_D1_N<br>CSI_D1_P|D+ con<br>D+ ic<br>6<br>D- ic<br>5<br>D- con<br>GND<br>GND<br>4<br>ECM<br>U31<br>D+ con<br>D+ ic<br>6<br>D- ic<br>5<br>D- con<br>GND<br>GND<br>4<br>ECM<br>U29<br>D+ con<br>D+ ic<br>6<br>D- ic<br>5<br>D- con<br>GND<br>GND<br>4<br>ECM<br>U30<br>**`PIU2904`**<br>**`PIU2905`**<br>**`PIU2906`**<br>`COU29`<br>**`PIU3004`**<br>**`PIU3005`**<br>**`PIU3006`**<br>`COU30`<br>**`PIU3104`**<br>**`PIU3105`**<br>**`PIU3106`**<br>`COU31`|1<br>F2-40A100N6<br>CSI_CLK_P_CON<br>**`PIU3101`**<br>`NLCSI0CLK0P0CON`|
+|---|---|---|---|
+||||2<br>CSI_CLK_N_CON<br> <br>**`PIU3102`**<br>`NLCSI0CLK0N0CON`|
+||||3<br> <br>**`PIU3103`**|
+
+
+
+**==> picture [42 x 24] intentionally omitted <==**
+
+Title: **MB1854** Project: **STM32N6570-DK** Variant: N6570 Revision: C -02 Reference: MB1939 Size: A4 Date: 4-Nov-24 Sheet: 12 of 21
+
+**==> picture [828 x 547] intentionally omitted <==**
+
+**----- Start of picture text -----**<br>
+ETHERNET<br>ETH_MDINT<br>Ethernet U44 ETH_MDINT<br>3V3_DVDD_GMII 3V3_DVDD_GMII ETH_CLK125<br>28 ETH_CLK125<br>DVDD_RG<br>ETH_TXD0<br>R1744K7 R1784K7 R1754K7 DNFR1774K7 DNFR1764K7 TXC / RXC : delays 2nsPHY Address : 001 100nFC18 C1922uF ETH_TXD0ETH_TXD2ETH_TXD1 ETH_TXD1ETH_TXD2ETH_TXD3<br>ETH_TXD3<br>PF14PF15 ETH_RXD0ETH_RXD1 R182R183 22R22R 2425 RXD0_RXDLY RSET 39R208 2K49 3V3_AVDD_GMII ETH_MDIO ETH_MDIOETH_MDC<br>PF8PF9 ETH_RXD2ETH_RXD3 R184R185 22R22R 2223 RXD1_TXDLYRXD2_PLLOFFRXD3_PHYAD0 AVDD33AVDD33 1140 ETHERNET ETH_GTX_CLKETH_RX_CLKETH_MDC ETH_RX_CLKETH_GTX_CLK<br>ETH_TX_EN<br>3V3_DVDD_GMII ETH_TX_EN<br>PF7PF10 ETH_RX_CLKETH_RX_DV R180R181 22R22R 2726 RXCLK_PHYAD1 DVDD33 29 ETH_RXD0 ETH_RXD0ETH_RXD1<br>RXCTL_PHYAD2 ETH_RXD1<br>ETH_RXD2<br>1V05_DVDD_GMII ETH_RXD2 ETH_RXD3<br>R15 R16 R17 R18 R14 R13 21 ETH_RXD3<br>DNF4K7 DNF4K7 4K7 DNF4K7 4K7 4K7 DVDD10 ETH_RX_DV<br>PF12PF13 ETH_TXD0ETH_TXD1 RR116266 22R22R 1817 TXD0TXD1 AVDD10AVDD10 38 1V05_AVDD_GMII ETH_RX_DVETH_CLK ETH_CLK<br>PG3 ETH_TXD2 R169 22R 16 TXD2 AVDD10 38<br>PG4 ETH_TXD3 R172 22R 15 TXD3<br>LE1 4.7uH 1V05_GMII<br>30 Trace length <0.5 cm. Trace length <0.5 cm.<br>REG_OUT<br>3V3_DVDD_GMII 22 ohms(TX) to place near MCU C181 C180<br>41 22uF 100nF<br>E-PAD<br>PF11 ETH_TX_EN R161 22R 19 TXCTL<br>R200 R204 R186 PF0 ETH_GTX_CLK R160 22R 20 TXCLK CN16<br>1K5 1K5 1K5 MDIP0 1 RJ45_D1_P 1 TX1+<br>MDIN0 2 RJ45_D1_N 2 TX1- CT1 5<br>PD12PD1 ETH_MDIOETH_MDC 1413 MDIOMDC MDIP1 4 RJ45_D2_P 3 TX2+ CT2 6 C193<br>PD3 ETH_MDINT 31 INT MDIN1 5 RJ45_D2_N 4 TX2- 100nF<br>16<br>GND<br>MDIP2 6 RJ45_D3_P 7 TX3+ GND 15<br>C188 6.8pF MDIN2 7 RJ45_D3_N 8 TX3-<br>PF2 ETH_CLK125 R196 22R 35 CLKOUT<br>X425MHz R198 0R 3637 XTAL_IN MDIN3MDIP3 910 RJ45_D4_PRJ45_D4_N 109 TX4+TX4- 3V3_DVDD_GMII<br>R205 0R XTAL_OUT_EXT_CLK 32 12 11 R219 510R<br>C191 6.8pF DNFR20322R VDD_ETH R207 10K LED0_CFG_EXTLED1_CFG_LD0 33 13 GCYA GY AC 14<br>PF5 ETH_CLK RJ45_48F-01GYDXNL<br>D7 BAT60JFILM 12 LD7 R218<br>NRST PHYRSTB 34 510R<br>LED2_CFG_LDO1 R194 R195 R191<br>Green R190 4K7 4K7 3V3_DVDD_GMII<br>RTL8211F-CG 4K7 510R<br>1V05_GMII VDD_ETH<br>1V05_DVDD_GMII 3V3_DVDD_GMII L2<br>R9 0R<br>100R @ 100MHz<br>RGMII power source :3V3<br>C14 C12 C9 C17 C13 C10 C11 VDD3V3 VDD_ETH<br>22uF 100nF 22uF 100nF 100nF 100nF 100nF<br>SB3<br>In case of EMI<br>1V05_AVDD_GMII 3V3_AVDD_GMII L1<br>R6 0R<br>100R @ 100MHz<br>C2 C7 C3 C4 C1 C5 C6 C8 Title: Ethernet<br>22uF 100nF 100nF 100nF 22uF 100nF 100nF 100nF Project: STM32N6570-DK<br>Variant: N6570<br>Revision: C -02 Reference: MB1939<br>Size: A4 Date: 4-Nov-24 Sheet: 13 of 21<br>1 2<br>3 4<br>**----- End of picture text -----**<br>
+
+
+## SD-Card
+
+**==> picture [762 x 375] intentionally omitted <==**
+
+**----- Start of picture text -----**<br>
+VDD3V3<br>U28 VDD_SD<br>1 6<br>VIN VOUT<br>R145 0R C146<br>C145 3 5 R146 0R 10uF<br>MicroSD_SDIO PWR_ON 1uF EN QOD<br>D0D2D1 SD_D0SD_D1SD_D2 PWR_ON R14410K 2 TPS22919DCKRGND NC 4<br>MicroSD D3 SD_D3 NRST NRST D6<br>CK SD_CK<br>CMD SD_CMD BAT60JFILM<br>DECTECT SD_DET PQ7 PWR_SD_EN D5<br>SD_SEL<br>LDO_SEL PWR_SD_EN BAT60JFILM<br>PWR_SD_EN<br>VDDIO_SD<br>VDD_SD<br>C86 100nF<br>R74 R73 R77 R76 R75 SD card should be<br>VDDIO 47K 47K 47K 47K 10K routed in 50 ohm C85 4.7uF<br>C152<br>PC4 SD_D0<br>PC5 SD_D1<br>5 100nF PC0 SD_D2<br>U32 PE4 SD_D3<br>VDDIO_SD VCC VDD_SD PC2 SD_CK<br>4 Z Y0 3 PC3 SD_CMD<br>VDDA1V8<br>PO5 SD_SEL 6 SEL Y1 1 U3 U4<br>1 10 1 10 CN13<br>R150 GNDNX3L1T3157GMZ 23 IO1IO2 NC4NC3 98 23 IO1IO2 NC4NC3 98 uSD-Card_PJS008-2003-1<br>100K 2 4 GND GND 7 4 GND GND 7 13 14<br>IO3 NC2 IO3 NC2 GND GND<br>5 6 5 6<br>IO4 NC1 IO4 NC1<br>HSP051-4M10 HSP051-4M10<br>VDDA1V8 12 11<br>GND<br>R143<br>10K<br>SMS064FF or SMS128FF<br>PN12 SD_DET<br>1 2 3 4 5 6 7 8<br>SW2 SW1<br>9 10<br>**----- End of picture text -----**<br>
+
+
+**==> picture [42 x 29] intentionally omitted <==**
+
+Title: **SD Card** Project: **STM32N6570-DK** Variant: N6570 Revision: C -02 Reference: MB1939 Size: A4 Date: 4-Nov-24 Sheet: 14 of 21
+
+Audio
+
+**==> picture [773 x 336] intentionally omitted <==**
+
+**----- Start of picture text -----**<br>
+AudioCodec VDD3V3 VL_AUDIO<br>SAI1_MCLK_A<br>SAI1_MCLK_A SAI1_CLK_A SB38<br>SAI1_CLK_A SAI1_FS_A I2C2<br>SAI1_FS_A<br>AudioCodec SAI1_SD_ASAI1_SD_B SAI1_SD_ASAI1_SD_B I2C2 SDASCL I2C2_SCLI2C2_SDA VDDA1V8 VDD_AUDIO<br>AUDIO_INT SB37<br>Audio_INT<br>VDD_AUDIO<br>U34<br>23 AVDD MCLK 28 SB55 SAI1_MCLK_A PG7<br>6 DCVDD BCLK/GPIO4 29 SB56 SAI1_CLK_A PB6<br>C1474.7uF C1482.2uF C149100nF C1504.7uFVL_AUDIO SB39 47 CPVDDDBVDD DACDATADCDATLRCK 303231 SSBSBB575859 SAI1_FS_ASAI1_SD_ASAI1_SD_B PB0PB7PE3<br>C159 VDD_AUDIO SB40 DNF 19 MICVDD IRQ/GPIO1 1 R147 0R AUDIO_INT PB1<br>100nF C162 SCLK 2 R226 0R I2C2_SCL PD14 Jack_ Socket-Stereo_PJ-3028B-4P<br>100nF SDA 3 R227 0R I2C2_SDA PD4<br>14 3 CN15<br>HPOUTFB<br>8 13 6<br>CPCA HPOUTL<br>C160 2.2uF 10 15 4<br>CPCB HPOUTR<br>C158 4.7uF MIC 2<br>20 R156 2K2<br>MICBIAS<br>C163 2.2uF 11 AUDIO<br>C167 2.2uF 12 CPVOUTP 27 C154 1uF C164 C165 U42<br>CPVOUTN IN1L/DMICDAT1 25 100nF 100nF 1 6<br>IN1R/DMICDAT2 I/O1 I/O4<br>2 5<br>GND GND<br>C168 4.7uF 21 26 3 4<br>VMIDC IN2L 24 C156 1uF R164 R165 I/O2 I/O3<br>22 IN2R DNF 20R 20R ESDA6V1BC6<br>AGND<br>9 16<br>CPGND LINEOUTL<br>5 18<br>DGND LINEOUTR<br>33 17<br>GND_PADDLE LINEOUTFB<br>WM8904CGEFL/RV<br>I2C address of WM8904 : AUDIO Stereo Out with MIC<br>Read 0x35 / Write 0x34<br>**----- End of picture text -----**<br>
+
+
+**==> picture [42 x 24] intentionally omitted <==**
+
+Title: **Audio_Codec** Project: **STM32N6570-DK** Variant: N6570 Revision: C -02 Reference: MB1939 Size: A4 Date: 4-Nov-24 Sheet: 15 of 21
+
+## MEMs microphone
+
+Operation Voltage: VDD_MIC = 1.6 - 3.6V
+
+**==> picture [685 x 224] intentionally omitted <==**
+
+**----- Start of picture text -----**<br>
+VDD_MIC CN5<br>2 1<br>2 1<br>PE2 CK 4 3<br>4 3<br>VDD_MIC PE8 Data_Con 6 6 5 5 D2 PE12<br>C119 8 8 7 7<br>VDD_MIC MIC_DET 10 10 9 9<br>MIC 12 11<br>CK 100nF 14 12 11 13<br>CK 5 14 13<br>U14 16 15<br>TP18 TP19 16 15<br>MIC D1 D1 VCC 18 18 17 17 VDD_MIC<br>PE8 D1 4 Z Y0 3 Data_Con TP20 20 20 19 19<br>D2 D2 VDD_MIC<br>R105 10K MIC_DET 6 SEL Y1 1 Data_Mems Socket 10x2<br>GND<br>NX3L1T3157GMZ<br>2<br>VDD3V3 VDD_MIC VDD_MIC VDD_MIC<br>U13<br>SB19 5 2 R106 10K<br>VDD LR<br>4 R104 0R CK PE2<br>CLK<br>Auto detect MIC board on connector.When MIC board plugged, bypass Data from on board MIC. C1 18 C117 3 GND DOUT 1 Data_Mems<br>1uF 100nF MP23DB01HPTR<br>**----- End of picture text -----**<br>
+
+
+**==> picture [42 x 24] intentionally omitted <==**
+
+Title: **MEMs_microphone** Project: **STM32N6570-DK** Variant: N6570 Revision: C -02 Reference: MB1939 Size: A4 Date: 4-Nov-24 Sheet: 16 of 21
+
+USB1 Type-C DRP
+
+**==> picture [885 x 685] intentionally omitted <==**
+
+**----- Start of picture text -----**<br>
+SINK PATH<br>UCPD MANAGEMENT WITH TCPP03<br>R209 0R<br>D NF<br>SB46 UCPD_SNK VDD3V3<br>5V_USB_SNK<br>LD10<br>R228 D1 S1 S2 D2 C184 Red<br>1M3 10nF<br>G1 G2<br>Q3<br>STL40DN3LLH5 R217<br>330R<br>Dedicated and differential PCB tracks between R7 and U46 pin 9 and 10<br>SOURCE PATH R7 22mR<br>VBUS1<br>PN7 USB1_OCP R216 47K 1 Q6<br>5V SB48 UCPD_SOURCE1 BSR14<br>R215<br>R229 100K<br>1M3 C196 D1 S1 S2 D2<br>DN F<br>I2C2 1nF G1 G2<br>I2C2 SCL I2C2_SCL Q4<br>SDA I2C2_SDA STL40DN3LLH5<br>U46<br>TCPP03-M20<br>USB1<br>2 10<br>VDD3V3 VCC_VCONN ISENSE<br>EN PA4 USB1_EN 20 EN VBUSc 9 R193 R192<br>R210 100K 100K 24K<br>UCPD1_ISENSE PA5 SB47 DNF 4 IANA 11<br>VSENSE<br>CN18 USB1<br>1 15 A5 A4<br>UCPD1_CC1 3 CC1 CC1c 13 B5 CC1 VBUS1 A9 VBUS1<br>UCPD1_CC2 Note: PD10 need to do internal pull up in MCU side CC2 CC2c CC2 VBUS2VBUS3 B4<br>PD10 19 14 A8 B9<br>UCPD1_INT FLGn CBIAS C186 C187 B8 SBU1 VBUS4<br>PD4PD14 I2C2_SDAI2C2_SCL R20R2026 0R0R 1718 SDASCL GND GNDI2C_ADD 16 R197 C185100nF 330pF 330pF A6A7B6 SBU2D+1D+2 U50ESDA25P35-1U1M C1972.2uF<br>USB1 10K B7 D-1<br>D-2<br>A2 B12<br>TX1+ GND4<br>A3 B1<br>TX1- GND3<br>B11 A12<br>RX1+ GND2<br>USB1_OCP USB1_OCP B10 RX1- GND1 A1<br>I2C address of TCPP03 (I2C_ADD=0) :<br>Read 0x69 / Write 0x68 B2 SH1<br>TX2+ Shield1<br>Diff Pair 90ohm Diff Pair 90ohm B3 SH2<br>TX2- Shield2<br>i U51 i A11 RX2+ Shield3 SH3<br>USB1_HS_NUSB1_HS_P OTG1_HS_POTG1_HS_N 645 D+ icD- ic D+ conD- con 123 USB1_CN_HS_PUSB1_CN_HS_N A10 RX2-USB TYPE-CShield4 SH4<br>UCPD1_VSENSE i GND GND i USB_C_12401826E412A<br>UCPD1_VSENSE Diff Pair 90ohm ECMF2-40A100N6 Diff Pair 90ohm<br>USB DP/DM should be<br>routed in 90 ohm diff +/- 10%<br>VBUS SENSE 5V_USB_LED<br>VBUS1 LD9 USB1 VDD3V3<br>Green<br>R212 270R<br>R152 Curr=5mA, Lum=25%<br>140K<br>PA11UCPD1_VSENSE<br>R213 1 Q5<br>VBUS1 47K BSR14<br>C151 R151<br>10pF 10K<br>R214<br>22K<br>5 6 3 1 7 8<br>4 2<br>3<br>5 6 3 1 7 8 2<br>4 2<br>8 7 6 5<br>GDCS GDCG GDPS GDPG<br>1<br>21 12 2<br>3<br>2<br>**----- End of picture text -----**<br>
+
+
+**==> picture [42 x 23] intentionally omitted <==**
+
+Title: **USB1_DRP** Project: **STM32N6570-DK** Variant: N6570 Revision: C -02 Reference: MB1939 Size: A3 Date: 4-Nov-24 Sheet: 17 of 21
+
+## USB_HOST
+
+**==> picture [649 x 279] intentionally omitted <==**
+
+**----- Start of picture text -----**<br>
+VBUS2<br>C194<br>GND<br>USB2 100nF<br>HSDM OTG2_HSD_N U49 CN17<br>USB2 HSDP OTG2_HSD_P 4 GND GND 3 1 VBUS<br>PWR_USB2_EN PWR_USB2_EN OTG2_HSD_NOTG2_HSD_P 65 D- icD+ ic D+ conD- con 21 USB_D1CONN_NUSB_D1CONN_P 23 DMDP<br>ECMF2-40A100N6 4<br>GND<br>U48<br>5<br>Shield<br>6<br>Shield<br>USB_A_67643-3911<br>VDD3V3<br>5V VBUS2<br>U47<br>5 1 LD8<br>IN OUT Red<br>PB9 PWR_USB2_EN 4 EN FAULT 3 USB2_FAULT<br>C190 GND C195<br>100nF STMPS2151STR 220uF R211<br>R201 680R<br>100K<br>USB2_FAULT<br>1<br>USB_Type A receptacle<br>2<br>ESDA7P120-1U1M<br>2<br>**----- End of picture text -----**<br>
+
+
+**==> picture [42 x 24] intentionally omitted <==**
+
+Title: **USB_Host_Hub&TypeC_DRP** Project: **STM32N6570-DK** Variant: N6570 Revision: C -02 Reference: MB1939 Size: A4 Date: 4-Nov-24 Sheet: 18 of 21
+
+## STLINK-V3EC
+
+**==> picture [1090 x 740] intentionally omitted <==**
+
+**----- Start of picture text -----**<br>
+VBUS_STLK<br>C120 100pF C122 20pF<br>TP2<br>CN6 USB R108 5K1 C103 10nF U17A<br>A4A9B4 VBUS1VBUS2 CC2CC1 A5B5 R107 5K1 R96R97 100100KK C105 10nF STLK_UCPD_CC1_CSTLK_UCPD_CC2_C M5N5 ADCx_IN13/PC3ADCx_IN14/PC4 T_MCO/PA8 F15 R110100R<br>B9 VBUS3 A8 L2 INTERFACE WITH TARGET MCU<br>VBUS4 SBU2SBU1 B8 T_JTMS/T_SWDIO_OUT/PF9T_SWDIO_IN/PH7 N12D12 T_SWDIOT_SWO R94R116 33R0R STLINK TARGET MCU<br>U16 A6 U15 T_SWO/PD2 A6<br>D+2D+1D-1 B6A7B7 STLK_USB_CN_PSTLK_USB_CN_N 231 D+ conD- con D+ icD- ic 654 STLK_USB_PSTLK_USB_N RR1415 USB_DEV_HS_P/PB15USB_DEV_HS_N/PB14 T_SW_DIR/PA7T_SWCLK/PH6T_JTDO/PB5 M11R3 T_SWCLK R95 33R JTMS MCU.SWDIO PA13 MCU<br>D-2 GND GND SWDIO<br>B12 A2 ECMF2-40A100N6 T_JCLK_OUT/PB2 M6A10 T_SWCLK JTDOJTCK MCU.SWOMCU.SWCLK PB5PA14 SWO<br>AA1B112 GND4GND3GND2GND1 RX1+TX1+RX1-TX1- A3B11B10 X124MHz C1275.6pF STLK_OSC_INSTLK_OSC_OUT G1H1 OSC_IN/PH0 T_JNRST/PF13T_JRCLK/PB3T_JTDI/PF8 L3N6 T_JTDI R122 33R JTDI MCU.JTDIMCU.VCP_TXMCU.VCP_RX PA15PE5PE6 SWCLKJTDIVCP_TXVCP_RX MCU<br>SSSSH2H4H3H1 Shield1Shield2Shield3 RX2+TX2+TX2- B2B3A11A10 5.6pFC128 OSC_OUT/PH1 STLK_VCP_TX/PG14STLK_VCP_RX/PG9 C10A7 STLK_VCP_RXSTLK_VCP_TX R112R114 0R33R NRSTT_VCC LNK3 NRST VDDIO Target Vio reference<br>Shield4 RX2- JP1 T_PWR_EXT R113 5K1 5V Target external supply<br>USB TYPE-C STLK_NRST J1 NRST R115 10K source indicator<br>USB_C_12401826E412A<br>C130 100nF C121 2.2uF J14 P3 R117 0R NRST<br>V12_OTGPHY T_NRST/PA6<br>R109 3K J15 K13 R121 10K<br>REXT_OTGPHY GNDDetect/PG5 N3 T_VCC_AIN R119 10K<br>5V_STLK OVERVOLTAGE AND OVERCURRENT PROTECTION D6 BOOT0 T_PWR_EXT/PB1T_VCC AIN/PA0 R4 T_PWR_EXT<br>5V_STLK C6<br>VBUS_STLK 3V3_STLK PDR_ON D15 STLK_LED<br>U20 C129 10uF STLK_LED/PA10<br>3 5 C33 10nF D4 R93 10K<br>4 IN OUT HW_TYP_0/PI4 C4 R26 10K 3V3_STLK<br>IN 6 R124 3K T_PWR_INT J2 HW_TYP_1/PI5 Reserved<br>T_PWR_EN 2 EN/UVLO QOD R123 3K9 T_PWR_INT/ADC3_IN9/PF3 CN9<br>1 dVdt ILM 7 R12R12R12876 1K81K33K9 T_PWR_SEL1T_PWR_SEL2 DC1011 T_PWR_SEL1/PD4T_PWR_SEL2/PD5 STLK_SWCLK/PA14STLK_SWDIO/PA13 A15A14 STLK_SWDIOSTLK_SWCLK 1 4231DNF432<br>C132 R125 C133 T_PWR_EN R5 3V3_STLK 1<br>100nF 100K 10nF T_PWR_LED H15 T_PWR_EN/PB0 DNF<br>T_PWR_LED/PC6<br>STM32F723IEK6<br>LED POWER STATUS LD3 STLINK MCU POWER<br>5V_STLK OVERCURRENT PROTECTION MANAGEMENT Red<br>T_PWR_SEL2/PD5 T_PWR_SEL1/PD4 R98 1 3 3V3_STLK<br>PowerDefault.SNK Hi-Z Hi-Z T_PWR_LED 1K<br>(current limit: 550mA) U17B<br>Power1.5.SNK R99 2 4 N10 H6<br>(current limit: 1.66A) Hi-Z 0 330R 3V3_STLK G13 VDDVDD VSSVSS H7<br>Power3.0.SNK C5 H8<br>(current limit: 3.2A) 0 0 Green K4 VDDVDD VSSVSS H9<br>Hi-Z = IO set in high impedance Red/Green G3 VDD VSS H10<br>N8 J6<br>VDD VSS<br>N9 J7<br>VDD VSS<br>J13 J8<br>VDD VSS<br>H13 J9<br>VDD VSS<br>C8 J10<br>VDD VSS<br>C7 K6<br>VDD VSS<br>F3 K7<br>STMPS2151STR is backup of the TPS259535DSG LED STLINK LD4 J12 VDDVDD VSSVSS K8<br>Red C9 K9<br>VDD VSS<br>R1 K10<br>R100 1 3 P1 VDDA VSS F12<br>VREF+ VSS<br>VBUS_STLK U18 STMPS2151STR 5V_STLK STLK_LED 1K C1 VBAT VSS D5<br>L4 G2<br>5 1 R101 2 4 BYPASS-REG VSS M8<br>T_PWR_EN 4 INEN DNFFAULTOUT 3 R120100K D N F 3V3_STLK 330R Green 3V3_STLK M10F13 VCAP1VCAP2 VREF-VSSAVSS M1N1<br>DN F C125 GND DN F C123 Red/Green C116 C115<br>100nF DNFR118 T_PWR_INT 10uF 2.2uF 2.2uF<br>100K STM32F723IEK6<br>3V3_STLK<br>DNF ST-LINK POWER (3V3/300mA) C114 C101 C111 C112 C113 C106 C104 C110 C108<br>D1 U19 3V3_STLK 100nF 100nF 100nF 100nF 100nF 100nF 100nF 100nF 100nF<br>1 2 3 1<br>VBUS_STLK 5 VIN VOUT 4<br>EN NC/ADJ<br>BAT20JFILM 3V3_STLK<br>C126 GND C124<br>D2 2.2uF ST730M33R 10uF C98 C97 C109 C100 C107 C96 C102 C99<br>1 2<br>5V 100nF 100nF 100nF 100nF 100nF 100nF 100nF 100nF<br>BAT20JFILM<br>Title: STLINK-V3EC<br>1<br>ESDA25P35-1U1M 2<br>1 2<br>3 4<br>GND EP<br>8 9<br>0<br>F6 F7 F8 F9 F1 G6 G7 G8 G9<br>VSS VSS VSS VSS VSS VSS VSS VSS VSS<br>VSS VSS VSS VSS VSS VSS VSS VSS<br>2<br>G10 D9 H12 F2 D7 D8 G12 M9<br>2<br>**----- End of picture text -----**<br>
+
+
+Title: **STLINK-V3EC** Project: **STM32N6570-DK** Variant: N6570 Revision: C -02 Reference: MB1939 Size: A3 Date: 4-Nov-24 Sheet: 19 of 21
+
+**==> picture [42 x 23] intentionally omitted <==**
+
+## EXTERNAL DEBUGER INTERFACE
+
+## ESD PROTECTIONS
+
+**==> picture [664 x 180] intentionally omitted <==**
+
+**----- Start of picture text -----**<br>
+NRST<br>NRST<br>U24 U23<br>JNTRST<br>JNTRST<br>MCU.SWDIO 5 NRST 5<br>MCU MCU.JTDI 4 JNTRST 4<br>MCU.SWDIO JTMS 2 2<br>SWDIO<br>MCU.SWO JTDO SWO MCU.SWO 3 MCU.VCP_RX 3<br>MCU.SWCLK JTCK<br>SWCLK MCU<br>MCU.JTDI JTDI JTDI MCU.SWCLK 1 MCU.VCP_TX 1<br>MCU.VCP_TX<br>VCP_TX<br>MCU.VCP_RX<br>VCP_RX ESDALC6V1W5 ESDALC6V1W5<br>U52<br>TRACE TRACE_D0 5<br>TRACECLK<br>TRACECLK<br>TRACED0 TRACED0 U53 TRACE_D1 4<br>TRACED1 TRACED1 TRACE TRACE_CLK 1 2 2<br>TRACED2 TRACED2 TRACE_D2 3<br>TRACED3 ESDALC6V1-1U2<br>TRACED3<br>TRACE_D3 1<br>ESDALC6V1W5<br>**----- End of picture text -----**<br>
+
+
+## MIPI-20 CONNECTOR
+
+**==> picture [326 x 95] intentionally omitted <==**
+
+**----- Start of picture text -----**<br>
+VDDIO CN10<br>VTref 1 2 TMS/SWDIO MCU.SWDIO PA13<br>1 2<br>3 4 TCK/SWCLK MCU.SWCLK PA14<br>3 4<br>5 6 TDO/SWO MCU.SWO PB5<br>5 6<br>KEY 7 7 8 8 TDI MCU.JTDI PA15<br>9 10 nRESET NRST<br>9 10<br>SB54 DNF 11 11 12 12 TRACE_CLK SB29 TRACECLK PG7<br>13 13 14 14 TRACE_D0 SB30 TRACED0 PE3<br>15 15 16 16 TRACE_D1 SB26 TRACED1 PB0<br>17 17 18 18 TRACE_D2 SB28 TRACED2 PB6<br>19 19 20 20 TRACE_D3 SB27 TRACED3 PB7<br>Header 10x2<br>**----- End of picture text -----**<br>
+
+
+## TAG RECEIVER
+
+**==> picture [323 x 107] intentionally omitted <==**
+
+**----- Start of picture text -----**<br>
+VDDIO<br>R5<br>DNF DNF10K<br>VDDIO CN1 TAG<br>1 10 NRST<br>PA13 MCU.SWDIO JTMS 2 9 JNTRST SB2 JNTRST PB4<br>3 8 JTDI MCU.JTDI PA15<br>DNF<br>PA14 MCU.SWCLK JTCK 4 7<br>SB1 5 6 JTDO MCU.SWO PB5<br>Header 5x2<br>TAG: Only footprint with cable: TC2050-IDC-NL<br>Remove the solder bridge if the debugger probe provides power supply on pin5<br>**----- End of picture text -----**<br>
+
+
+**==> picture [42 x 24] intentionally omitted <==**
+
+Title: **External_Debug_Interface** Project: **STM32N6570-DK** Variant: N6570 Revision: C -02 Reference: MB1939 Size: A4 Date: 4-Nov-24 Sheet: 20 of 21
+
+**==> picture [224 x 36] intentionally omitted <==**
+
+**----- Start of picture text -----**<br>
+HW2 HW1 HW4<br>STICKER BOARD STICKER PRODUCT<br>PCB<br>N/A N/A<br>MB1939<br>**----- End of picture text -----**<br>
+
+
+N/A N/A N/A N/A H7 H8 H2 H1
+
+**==> picture [42 x 24] intentionally omitted <==**
+
+Title: **Mechanical** Project: **STM32N6570-DK** Variant: N6570 Revision: C -02 Reference: MB1939 Size: A4 Date: 4-Nov-24 Sheet: 21 of 21
+
+**==> picture [1410 x 1036] intentionally omitted <==**
+
+**==> picture [235 x 101] intentionally omitted <==**
+
+**==> picture [1468 x 1033] intentionally omitted <==**
+
+**==> picture [235 x 101] intentionally omitted <==**
+
+**==> picture [1412 x 1039] intentionally omitted <==**
+
+**==> picture [1469 x 1079] intentionally omitted <==**

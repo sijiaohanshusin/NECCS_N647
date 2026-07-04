@@ -34,6 +34,11 @@ RemoteSystemsTempFiles/
 **/build/
 **/cmake-build-*/
 
+# Keep the curated N647 debug scripts despite the case-insensitive Debug rule
+# on Windows.
+!tools/debug/
+!tools/debug/**
+
 # Generated compiler/linker artifacts
 *.o
 *.obj
