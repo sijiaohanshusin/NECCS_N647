@@ -15,6 +15,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
+$appRoot = Join-Path $repoRoot "NECCS_N647_App"
 $projectDir = Join-Path $repoRoot "NECCS_N647_App\STM32CubeIDE\Appli"
 $projectName = "NECCS_N647_App_Appli"
 $iocFile = Join-Path $repoRoot "NECCS_N647_App\NECCS_N647_App.ioc"
@@ -56,6 +57,44 @@ function Find-CubeIdeToolDirectory {
     }
 
     return Join-Path $plugin.FullName "tools\bin"
+}
+
+function Resolve-CubeFwRoot {
+    param([string]$CProjectPath)
+
+    $candidateRoots = New-Object System.Collections.Generic.List[string]
+
+    if (Test-Path -LiteralPath $CProjectPath -PathType Leaf) {
+        $cprojectText = Get-Content -LiteralPath $CProjectPath -Raw
+        $matches = [regex]::Matches($cprojectText, "([A-Za-z]:/[^`"|<>]*?/STM32Cube_FW_N6_[^/`"|<>]+)")
+        foreach ($match in $matches) {
+            $candidate = $match.Groups[1].Value -replace "/", "\"
+            if (-not ($candidateRoots -contains $candidate)) {
+                $candidateRoots.Add($candidate) | Out-Null
+            }
+        }
+    }
+
+    $defaultRepository = Join-Path $env:USERPROFILE "STM32Cube\Repository"
+    if (Test-Path -LiteralPath $defaultRepository -PathType Container) {
+        foreach ($candidate in Get-ChildItem -LiteralPath $defaultRepository -Directory -Filter "STM32Cube_FW_N6_*" |
+            Sort-Object Name -Descending) {
+            if (-not ($candidateRoots -contains $candidate.FullName)) {
+                $candidateRoots.Add($candidate.FullName) | Out-Null
+            }
+        }
+    }
+
+    foreach ($candidate in $candidateRoots) {
+        $halSource = Join-Path $candidate "Drivers\STM32N6xx_HAL_Driver\Src\stm32n6xx_hal.c"
+        $cmsisHeader = Join-Path $candidate "Drivers\CMSIS\Device\ST\STM32N6xx\Include\stm32n6xx.h"
+        if ((Test-Path -LiteralPath $halSource -PathType Leaf) -and
+            (Test-Path -LiteralPath $cmsisHeader -PathType Leaf)) {
+            return (Resolve-Path -LiteralPath $candidate).Path
+        }
+    }
+
+    throw "STM32Cube FW_N6 package not found. Install STM32Cube_FW_N6 or fix CubeIDE .cproject package paths."
 }
 
 function Assert-ContainsText {
@@ -373,6 +412,126 @@ function Repair-GeneratedObjectsListFromSubdirMakefiles {
     }
 }
 
+function Repair-GeneratedCubeFwPaths {
+    param(
+        [string]$ConfigDir,
+        [string]$CubeFwRoot
+    )
+
+    $cubeFwMakeRoot = ($CubeFwRoot -replace "\\", "/").TrimEnd("/")
+    $appMakeRoot = ((Resolve-Path -LiteralPath $appRoot).Path -replace "\\", "/").TrimEnd("/")
+    $replacementPairs = @(
+        [pscustomobject]@{ From = "$appMakeRoot/Drivers/STM32N6xx_HAL_Driver/Src"; To = "$cubeFwMakeRoot/Drivers/STM32N6xx_HAL_Driver/Src" },
+        [pscustomobject]@{ From = "-I../../../Drivers/STM32N6xx_HAL_Driver/Inc/Legacy"; To = "-I$cubeFwMakeRoot/Drivers/STM32N6xx_HAL_Driver/Inc/Legacy" },
+        [pscustomobject]@{ From = "-I../../../Drivers/STM32N6xx_HAL_Driver/Inc"; To = "-I$cubeFwMakeRoot/Drivers/STM32N6xx_HAL_Driver/Inc" },
+        [pscustomobject]@{ From = "-I../../../Drivers/CMSIS/Device/ST/STM32N6xx/Include"; To = "-I$cubeFwMakeRoot/Drivers/CMSIS/Device/ST/STM32N6xx/Include" },
+        [pscustomobject]@{ From = "-I../../../Drivers/CMSIS/Include"; To = "-I$cubeFwMakeRoot/Drivers/CMSIS/Include" }
+    )
+
+    $changedFiles = 0
+    foreach ($makefile in Get-ChildItem -LiteralPath $ConfigDir -Recurse -Include "*.mk" -File) {
+        $oldText = Get-Content -LiteralPath $makefile.FullName -Raw
+        if ($null -eq $oldText) {
+            continue
+        }
+
+        $newText = $oldText
+        foreach ($pair in $replacementPairs) {
+            if ([string]::IsNullOrEmpty($pair.From)) {
+                continue
+            }
+
+            $newText = $newText.Replace($pair.From, $pair.To)
+        }
+
+        if ($newText -ne $oldText) {
+            Write-TextFileNoBom -Path $makefile.FullName -Text $newText
+            $changedFiles++
+        }
+    }
+
+    if ($changedFiles -gt 0) {
+        Write-Host ("Repaired generated Cube FW_N6 paths for {0}: {1} makefile(s)." -f (Split-Path -Leaf $ConfigDir), $changedFiles)
+    }
+}
+
+function Remove-StaleGeneratedSubdirMakefiles {
+    param([string]$ConfigDir)
+
+    $sourceVariables = @("C_SRCS", "CXX_SRCS", "CPP_SRCS", "C_UPPER_SRCS", "S_SRCS", "S_UPPER_SRCS", "ASM_SRCS")
+    $removedFiles = 0
+
+    foreach ($subdirMk in Get-ChildItem -LiteralPath $ConfigDir -Recurse -Filter "subdir.mk" -File) {
+        $sourceEntries = New-Object System.Collections.Generic.List[string]
+        foreach ($variable in $sourceVariables) {
+            foreach ($entry in Get-MakeVariableAppendEntries -Path $subdirMk.FullName -Variable $variable) {
+                if ([string]::IsNullOrWhiteSpace($entry)) {
+                    continue
+                }
+
+                $sourceEntries.Add($entry.Trim().Trim('"')) | Out-Null
+            }
+        }
+
+        if ($sourceEntries.Count -eq 0) {
+            continue
+        }
+
+        $existingSources = 0
+        foreach ($entry in $sourceEntries) {
+            $candidate = if ([System.IO.Path]::IsPathRooted($entry)) {
+                $entry
+            } else {
+                Join-Path $ConfigDir ($entry -replace "/", "\")
+            }
+
+            if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+                $existingSources++
+            }
+        }
+
+        if ($existingSources -eq 0) {
+            Remove-Item -LiteralPath $subdirMk.FullName -Force
+            $removedFiles++
+        }
+    }
+
+    if ($removedFiles -gt 0) {
+        Write-Host ("Removed stale generated source lists for {0}: {1} subdir.mk file(s)." -f (Split-Path -Leaf $ConfigDir), $removedFiles)
+    }
+}
+
+function Remove-DuplicateGeneratedCmsisSystemSourceList {
+    param([string]$ConfigDir)
+
+    $cmsisSubdirMk = Join-Path $ConfigDir "Drivers\CMSIS\subdir.mk"
+    if (-not (Test-Path -LiteralPath $cmsisSubdirMk -PathType Leaf)) {
+        return
+    }
+
+    $sourceEntries = @(Get-MakeVariableAppendEntries -Path $cmsisSubdirMk -Variable "C_SRCS" |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+        ForEach-Object { $_.Trim().Trim('"') })
+
+    if ($sourceEntries.Count -eq 0) {
+        return
+    }
+
+    $systemEntries = @($sourceEntries | Where-Object {
+        [System.IO.Path]::GetFileName($_) -ieq "system_stm32n6xx_s.c"
+    })
+
+    if ($systemEntries.Count -ne $sourceEntries.Count) {
+        return
+    }
+
+    Remove-Item -LiteralPath $cmsisSubdirMk -Force
+    foreach ($suffix in @(".cyclo", ".d", ".o", ".su")) {
+        Remove-Item -LiteralPath (Join-Path $ConfigDir "Drivers\CMSIS\system_stm32n6xx_s$suffix") -ErrorAction SilentlyContinue
+    }
+    Write-Host ("Removed duplicate generated CMSIS system source list for {0}; Application/User/Core owns system_stm32n6xx_s.c." -f (Split-Path -Leaf $ConfigDir))
+}
+
 function Repair-GeneratedCoreSourceList {
     param([string]$ConfigDir)
 
@@ -385,93 +544,92 @@ function Repair-GeneratedCoreSourceList {
     }
 
     $subdirText = Get-Content -LiteralPath $subdirMk -Raw
-    $objectsText = Get-Content -LiteralPath $objectsList -Raw
-    $repairBlockPattern = "(?ms)\r?\n?# Added by tools/build_n647_app\.ps1 when CubeIDE omits local user sources\.\r?\nC_SRCS \+= \\\r?\n[^\r\n]+\r?\n\r?\nOBJS \+= \\\r?\n[^\r\n]+\r?\n\r?\nC_DEPS \+= \\\r?\n[^\r\n]+(?:\r?\n\r?\nApplication/User/Core/[^\r\n]+\.o: [^\r\n]+\r?\n\t[^\r\n]+)?"
-    $subdirText = [regex]::Replace($subdirText, $repairBlockPattern, "")
-
     $mainCompileLine = Get-MainCompileLine -ConfigDir $ConfigDir -CoreSubdirText $subdirText
 
-    $allSubdirText = $subdirText
-    foreach ($otherSubdirMk in Get-ChildItem -LiteralPath $ConfigDir -Recurse -Filter "subdir.mk" -File) {
-        if ($otherSubdirMk.FullName -ne $subdirMk) {
-            $allSubdirText += "`n" + (Get-Content -LiteralPath $otherSubdirMk.FullName -Raw)
+    $sourceRoots = @(
+        $coreSourceDir,
+        (Join-Path $projectDir "Application\User\Core")
+    )
+
+    $sourceByBaseName = [ordered]@{}
+    foreach ($sourceRoot in $sourceRoots) {
+        if (-not (Test-Path -LiteralPath $sourceRoot -PathType Container)) {
+            continue
+        }
+
+        foreach ($source in Get-ChildItem -LiteralPath $sourceRoot -Filter "*.c" -File) {
+            $baseName = [System.IO.Path]::GetFileNameWithoutExtension($source.Name)
+            if ($sourceByBaseName.Contains($baseName)) {
+                throw "Duplicate Application/User/Core source base name '$baseName': $($sourceByBaseName[$baseName].FullName) and $($source.FullName)"
+            }
+
+            $sourceByBaseName[$baseName] = $source
         }
     }
 
-    $newBlocks = New-Object System.Collections.Generic.List[string]
-    $objectLines = New-Object System.Collections.Generic.List[string]
+    if ($sourceByBaseName.Count -eq 0) {
+        throw "No Application/User/Core C sources found under expected source roots."
+    }
 
-    foreach ($source in Get-ChildItem -LiteralPath $coreSourceDir -Filter "*.c" -File) {
-        $baseName = [System.IO.Path]::GetFileNameWithoutExtension($source.Name)
+    $cSrcLines = New-Object System.Collections.Generic.List[string]
+    $objLines = New-Object System.Collections.Generic.List[string]
+    $depLines = New-Object System.Collections.Generic.List[string]
+    $ruleLines = New-Object System.Collections.Generic.List[string]
+    $cleanFiles = New-Object System.Collections.Generic.List[string]
+
+    foreach ($baseName in ($sourceByBaseName.Keys | Sort-Object)) {
+        $source = $sourceByBaseName[$baseName]
         $sourceForMake = $source.FullName -replace "\\", "/"
         $objectForMake = "./Application/User/Core/$baseName.o"
         $dependencyForMake = "./Application/User/Core/$baseName.d"
         $targetForMake = "Application/User/Core/$baseName.o"
-        $sourceAlreadyInUserCore = $subdirText -match [regex]::Escape($source.Name)
-        $sourceAlreadyGeneratedElsewhere = $allSubdirText -match [regex]::Escape($source.Name)
 
-        if (-not $sourceAlreadyInUserCore -and -not $sourceAlreadyGeneratedElsewhere) {
-            $newBlock = @"
+        $cSrcLines.Add($sourceForMake) | Out-Null
+        $objLines.Add($objectForMake) | Out-Null
+        $depLines.Add($dependencyForMake) | Out-Null
 
-# Added by tools/build_n647_app.ps1 when CubeIDE omits local user sources.
-C_SRCS += \
-$sourceForMake
+        $ruleLines.Add("$targetForMake`: $sourceForMake Application/User/Core/subdir.mk") | Out-Null
+        $ruleLines.Add($mainCompileLine) | Out-Null
+        $ruleLines.Add("") | Out-Null
 
-OBJS += \
-$objectForMake
-
-C_DEPS += \
-$dependencyForMake
-
-$targetForMake`: $sourceForMake Application/User/Core/subdir.mk
-$mainCompileLine
-"@
-            $newBlocks.Add($newBlock) | Out-Null
-            $objectLines.Add("`"$objectForMake`"") | Out-Null
-
-            foreach ($suffix in @(".o", ".d", ".su", ".cyclo")) {
-                Remove-Item -LiteralPath (Join-Path $ConfigDir "Application\User\Core\$baseName$suffix") -ErrorAction SilentlyContinue
-            }
-        }
-
-        if ($sourceAlreadyInUserCore -and $objectsText -match [regex]::Escape($objectForMake)) {
-            $objectLines.Add("`"$objectForMake`"") | Out-Null
+        foreach ($suffix in @(".cyclo", ".d", ".o", ".su")) {
+            $cleanFiles.Add("./Application/User/Core/$baseName$suffix") | Out-Null
+            Remove-Item -LiteralPath (Join-Path $ConfigDir "Application\User\Core\$baseName$suffix") -ErrorAction SilentlyContinue
         }
     }
 
-    if ($newBlocks.Count -gt 0 -or $subdirText -ne (Get-Content -LiteralPath $subdirMk -Raw)) {
-        $subdirText = $subdirText.TrimEnd() + "`r`n" + ($newBlocks -join "`r`n") + "`r`n"
-        Write-TextFileNoBom -Path $subdirMk -Text $subdirText
-        if ($newBlocks.Count -gt 0) {
-            Write-Host ("Repaired generated Core source list for {0}: {1} file(s)." -f (Split-Path -Leaf $ConfigDir), $newBlocks.Count)
+    $coreLines = New-Object System.Collections.Generic.List[string]
+    $coreLines.Add("################################################################################") | Out-Null
+    $coreLines.Add("# Normalized by tools/build_n647_app.ps1 from existing Application/User/Core sources.") | Out-Null
+    $coreLines.Add("################################################################################") | Out-Null
+    $coreLines.Add("") | Out-Null
+
+    foreach ($variableBlock in @(
+        @{ Name = "C_SRCS"; Values = $cSrcLines },
+        @{ Name = "C_DEPS"; Values = $depLines },
+        @{ Name = "OBJS"; Values = $objLines }
+    )) {
+        $coreLines.Add("$($variableBlock.Name) += \") | Out-Null
+        for ($i = 0; $i -lt $variableBlock.Values.Count; $i++) {
+            $suffix = if ($i -lt ($variableBlock.Values.Count - 1)) { " \" } else { "" }
+            $coreLines.Add(("{0}{1}" -f $variableBlock.Values[$i], $suffix)) | Out-Null
         }
+        $coreLines.Add("") | Out-Null
     }
 
-    $cleanObjectLines = New-Object System.Collections.Generic.List[string]
-    foreach ($line in (Get-Content -LiteralPath $objectsList)) {
-        if ($line -notmatch '^\s*"\./Application/User/Core/.+\.o"\s*$') {
-            $cleanObjectLines.Add($line) | Out-Null
-            continue
-        }
+    $coreLines.Add(($ruleLines -join "`r`n")) | Out-Null
+    $coreLines.Add("clean: clean-Application-2f-User-2f-Core") | Out-Null
+    $coreLines.Add("") | Out-Null
+    $coreLines.Add("clean-Application-2f-User-2f-Core:") | Out-Null
+    $coreLines.Add("`t-`$(RM) $($cleanFiles -join ' ')") | Out-Null
+    $coreLines.Add("") | Out-Null
+    $coreLines.Add(".PHONY: clean-Application-2f-User-2f-Core") | Out-Null
+    $coreLines.Add("") | Out-Null
 
-        if ($line -match '^\s*"\./Application/User/Core/([^/]+)\.o"\s*$') {
-            $baseName = $Matches[1]
-            if ($subdirText -match [regex]::Escape("$baseName.o")) {
-                $cleanObjectLines.Add($line) | Out-Null
-            }
-        }
-    }
-
-    foreach ($line in $objectLines) {
-        if (-not ($cleanObjectLines -contains $line)) {
-            $cleanObjectLines.Add($line) | Out-Null
-        }
-    }
-
-    $newObjectsText = ($cleanObjectLines -join "`r`n") + "`r`n"
-    if ($newObjectsText -ne $objectsText) {
-        Write-TextFileNoBom -Path $objectsList -Text $newObjectsText
-        Write-Host ("Repaired objects.list for {0}." -f (Split-Path -Leaf $ConfigDir))
+    $newSubdirText = ($coreLines -join "`r`n")
+    if ($newSubdirText -ne $subdirText) {
+        Write-TextFileNoBom -Path $subdirMk -Text $newSubdirText
+        Write-Host ("Rebuilt Application/User/Core source list for {0}: {1} C source(s)." -f (Split-Path -Leaf $ConfigDir), $sourceByBaseName.Count)
     }
 }
 
@@ -506,6 +664,8 @@ Assert-ContainsText -Path $mspFile -Text "HAL_PWREx_ConfigVddIORange(PWR_VDDIO2,
 Assert-ContainsText -Path $mspFile -Text "HAL_PWREx_ConfigVddIORange(PWR_VDDIO3,PWR_VDDIO_RANGE_1V8);"
 
 $CubeIdeRoot = Resolve-CubeIdeRoot -RequestedRoot $CubeIdeRoot
+$CubeFwRoot = Resolve-CubeFwRoot -CProjectPath (Join-Path $projectDir ".cproject")
+Write-Host "Using STM32Cube FW_N6 package: $CubeFwRoot"
 $gnuTools = Find-CubeIdeToolDirectory -IdeRoot $CubeIdeRoot -PluginPattern "com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32*.win32_*"
 $makeTools = Find-CubeIdeToolDirectory -IdeRoot $CubeIdeRoot -PluginPattern "com.st.stm32cube.ide.mcu.externaltools.make.win32_*"
 $make = Join-Path $makeTools "make.exe"
@@ -540,8 +700,14 @@ try {
         $mainCompileLine = Get-MainCompileLine -ConfigDir $configDir -CoreSubdirText (Get-Content -LiteralPath $coreSubdirMk -Raw)
 
         Add-MissingLocalBspSubdirMakefiles -ConfigDir $configDir -MainCompileLine $mainCompileLine
+        Repair-GeneratedCubeFwPaths -ConfigDir $configDir -CubeFwRoot $CubeFwRoot
+        Remove-StaleGeneratedSubdirMakefiles -ConfigDir $configDir
+        Remove-DuplicateGeneratedCmsisSystemSourceList -ConfigDir $configDir
         Repair-GeneratedMakefileSubdirIncludes -ConfigDir $configDir
         Repair-GeneratedCoreSourceList -ConfigDir $configDir
+        Repair-GeneratedCubeFwPaths -ConfigDir $configDir -CubeFwRoot $CubeFwRoot
+        Remove-StaleGeneratedSubdirMakefiles -ConfigDir $configDir
+        Remove-DuplicateGeneratedCmsisSystemSourceList -ConfigDir $configDir
         Repair-GeneratedMakefileSubdirIncludes -ConfigDir $configDir
         Repair-GeneratedObjectsListFromSubdirMakefiles -ConfigDir $configDir
 

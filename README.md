@@ -1,5 +1,15 @@
 # NECCS_N647 工程速查
 
+## 2026-07-04 APP build recovery
+
+- `tools/build_n647_app.ps1` is the preferred repeatable APP build entry.
+- The script now resolves the installed official `STM32Cube_FW_N6` package, rewrites generated HAL/CMSIS makefile paths to that package, removes stale generated `subdir.mk` files that point at missing sources, removes the duplicate generated CMSIS `system_stm32n6xx_s.c` source list, and rebuilds `Application/User/Core/subdir.mk` from the actual Core sources.
+- Verified commands:
+  - `powershell -ExecutionPolicy Bypass -File .\tools\build_n647_app.ps1 -Configuration Debug`
+  - `powershell -ExecutionPolicy Bypass -File .\tools\build_n647_app.ps1 -Configuration Release -CopyToFlashImages`
+- Current generated APP image for board testing: `_flash_images/appli.hex`.
+- Board flashing/debug validation was not run during this recovery pass; only local Debug/Release builds were verified.
+
 ## 2026-06-25 PCMD3180 MIC 映射辅助
 
 - 最新硬件结论：前期 PCMD3180 异常包含电源连接问题；PDMCLK/PDCLK 无时钟的根因之一是 FSYNC 虚焊。继续排查前先确认电源、FSYNC、BCLK、PDMCLK 实测正常。
