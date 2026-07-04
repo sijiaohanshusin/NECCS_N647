@@ -97,12 +97,12 @@ void TouchGFXGeneratedHAL::submitGPU2D()
 
 uint16_t* TouchGFXGeneratedHAL::getTFTFrameBuffer() const
 {
-    return (uint16_t*)LTDC_Layer1->CFBAR;
+    return (uint16_t*)LTDC_Layer2->CFBAR;
 }
 
 void TouchGFXGeneratedHAL::setTFTFrameBuffer(uint16_t* adr)
 {
-    LTDC_Layer1->CFBAR = (uint32_t)adr;
+    LTDC_Layer2->CFBAR = (uint32_t)adr;
 
     /* Reload immediate */
     LTDC->SRCR = (uint32_t)LTDC_SRCR_IMR;

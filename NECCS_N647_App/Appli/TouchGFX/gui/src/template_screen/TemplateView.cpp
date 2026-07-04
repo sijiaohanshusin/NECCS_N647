@@ -6,6 +6,11 @@
 
 namespace
 {
+constexpr int16_t CameraPreviewX = 192;
+constexpr int16_t CameraPreviewY = 60;
+constexpr int16_t CameraPreviewW = 640;
+constexpr int16_t CameraPreviewH = 480;
+
 touchgfx::colortype rgb(uint8_t r, uint8_t g, uint8_t b)
 {
     return touchgfx::Color::getColorFromRGB(r, g, b);
@@ -160,6 +165,10 @@ void TemplateView::setupStaticUi()
     background.setPosition(0, 0, 1024, 600);
     background.setColor(rgb(15, 17, 19));
     add(background);
+
+    cameraPreviewKey.setPosition(CameraPreviewX, CameraPreviewY, CameraPreviewW, CameraPreviewH);
+    cameraPreviewKey.setColor(rgb(255, 0, 255));
+    add(cameraPreviewKey);
 
     topBar.setPosition(0, 0, 1024, 64);
     topBar.setColor(rgb(26, 30, 32));
@@ -439,11 +448,36 @@ void TemplateView::refreshVisibility()
     const bool settingsVisible = (activeScreen == APP_UI_SCREEN_SETTINGS);
     const bool mediaVisible = (activeScreen == APP_UI_SCREEN_MEDIA);
 
-    heatMap.setVisible(imageVisible);
+    cameraPreviewKey.setVisible(imageVisible);
+    cameraPreviewKey.invalidate();
+
+    contentPanel.setVisible(!imageVisible);
+    detailPanel.setVisible(!imageVisible);
+    pageTitleLabel.setVisible(!imageVisible);
+    contentPanel.invalidate();
+    detailPanel.invalidate();
+    pageTitleLabel.invalidate();
+
+    for (uint32_t i = 0U; i < DetailCount; ++i)
+    {
+        detailLabel[i].setVisible(!imageVisible);
+        detailLabel[i].invalidate();
+    }
+    for (uint32_t i = 0U; i < ProfileCount; ++i)
+    {
+        profileButton[i].setVisible(!imageVisible);
+        profileTouch[i].setVisible(!imageVisible);
+        profileLabel[i].setVisible(!imageVisible);
+        profileButton[i].invalidate();
+        profileTouch[i].invalidate();
+        profileLabel[i].invalidate();
+    }
+
+    heatMap.setVisible(false);
     heatMap.invalidate();
     for (uint32_t i = 0U; i < 4U; ++i)
     {
-        heatMetricLabel[i].setVisible(imageVisible);
+        heatMetricLabel[i].setVisible(false);
         heatMetricLabel[i].invalidate();
     }
 

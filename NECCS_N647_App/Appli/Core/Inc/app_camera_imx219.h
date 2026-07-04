@@ -34,6 +34,7 @@ typedef struct
 
 int32_t AppCameraIMX219_Init(const AppCameraIMX219Config_t *config, uint16_t *chip_id);
 int32_t AppCameraIMX219_SetStream(uint8_t enable);
+int32_t AppCameraIMX219_SetTestPattern(uint8_t enable);
 
 #ifdef __cplusplus
 }

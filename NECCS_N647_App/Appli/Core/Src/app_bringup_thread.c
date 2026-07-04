@@ -58,7 +58,7 @@ void App_BringUpThreadEntry(ULONG thread_input)
   App_BringUpMirrorMediaStatus();
   if (AppCamera_Init() == APP_CAMERA_OK)
   {
-    (void)AppCamera_StartSmoke();
+    (void)AppCamera_StartPreview();
   }
 
   while (1)

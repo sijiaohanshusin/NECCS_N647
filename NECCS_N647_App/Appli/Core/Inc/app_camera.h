@@ -12,11 +12,13 @@ extern "C" {
 #define APP_CAMERA_FPS                15U
 #define APP_CAMERA_INPUT_CLOCK_HZ     24000000UL
 #define APP_CAMERA_FRAME0_ADDR        0x90400000UL
-#define APP_CAMERA_FRAME1_ADDR        0x90480000UL
+#define APP_CAMERA_FRAME1_ADDR        0x90500000UL
 #define APP_CAMERA_RAW10_FRAME_BYTES  (((APP_CAMERA_WIDTH * APP_CAMERA_HEIGHT * 10U) + 7U) / 8U)
+#define APP_CAMERA_PREVIEW_LINE_BYTES (APP_CAMERA_WIDTH * 2U)
+#define APP_CAMERA_PREVIEW_FRAME_BYTES (APP_CAMERA_PREVIEW_LINE_BYTES * APP_CAMERA_HEIGHT)
 #define APP_CAMERA_CAPTURE_LINE_BYTES APP_CAMERA_WIDTH
 #define APP_CAMERA_CAPTURE_FRAME_BYTES (APP_CAMERA_CAPTURE_LINE_BYTES * APP_CAMERA_HEIGHT)
-#define APP_CAMERA_FRAME_BUFFER_BYTES 0x00060000UL
+#define APP_CAMERA_FRAME_BUFFER_BYTES 0x000A0000UL
 
 #define APP_CAMERA_OK                         0
 #define APP_CAMERA_ERROR_INVALID_ARG         -1
@@ -27,6 +29,8 @@ extern "C" {
 #define APP_CAMERA_ERROR_SENSOR_STREAM       -6
 #define APP_CAMERA_ERROR_NOT_INITIALIZED     -7
 #define APP_CAMERA_ERROR_FALLBACK_RESTART    -8
+#define APP_CAMERA_ERROR_DISPLAY_INIT        -9
+#define APP_CAMERA_ERROR_TEST_PATTERN       -10
 
 #define APP_CAMERA_FLAG_POWERED              (1UL << 0)
 #define APP_CAMERA_FLAG_I2C_OK               (1UL << 1)
@@ -36,6 +40,9 @@ extern "C" {
 #define APP_CAMERA_FLAG_STREAMING            (1UL << 5)
 #define APP_CAMERA_FLAG_FRAME_SEEN           (1UL << 6)
 #define APP_CAMERA_FLAG_FALLBACK_PHY         (1UL << 7)
+#define APP_CAMERA_FLAG_PREVIEW              (1UL << 8)
+#define APP_CAMERA_FLAG_DISPLAY_READY        (1UL << 9)
+#define APP_CAMERA_FLAG_TEST_PATTERN         (1UL << 10)
 
 typedef struct
 {
@@ -61,6 +68,16 @@ typedef struct
   uint32_t frame1_addr;
   uint32_t frame_bytes;
   uint32_t frame_buffer_bytes;
+  uint32_t output_format;
+  uint32_t output_bpp;
+  uint32_t line_pitch;
+  uint32_t bayer_type;
+  uint32_t test_pattern_enabled;
+  uint32_t completed_frame_addr;
+  uint32_t display_addr;
+  uint32_t pending_display_addr;
+  uint32_t ltdc_swap_count;
+  uint32_t ltdc_error_count;
   uint32_t pipe_index;
   uint32_t phy_bitrate;
   uint32_t fallback_count;
@@ -89,6 +106,15 @@ extern volatile uint32_t g_app_camera_fallback_count;
 extern volatile uint32_t g_app_camera_frame0_addr;
 extern volatile uint32_t g_app_camera_frame1_addr;
 extern volatile uint32_t g_app_camera_frame_bytes;
+extern volatile uint32_t g_app_camera_output_format;
+extern volatile uint32_t g_app_camera_line_pitch;
+extern volatile uint32_t g_app_camera_bayer_type;
+extern volatile uint32_t g_app_camera_test_pattern_enabled;
+extern volatile uint32_t g_app_camera_completed_addr;
+extern volatile uint32_t g_app_camera_display_addr;
+extern volatile uint32_t g_app_camera_pending_display_addr;
+extern volatile uint32_t g_app_camera_ltdc_swap_count;
+extern volatile uint32_t g_app_camera_ltdc_error_count;
 extern volatile uint32_t g_app_camera_csi_sr0;
 extern volatile uint32_t g_app_camera_csi_sr1;
 extern volatile uint32_t g_app_camera_csi_err1;
@@ -114,6 +140,9 @@ extern volatile uint32_t g_app_camera_dcmipp_p0ppcr;
 
 int32_t AppCamera_Init(void);
 int32_t AppCamera_StartSmoke(void);
+int32_t AppCamera_StartPreview(void);
+int32_t AppCamera_Stop(void);
+int32_t AppCamera_SetTestPattern(uint8_t enable);
 void AppCamera_Poll(uint32_t elapsed_ms);
 void AppCamera_GetStatus(AppCameraStatus_t *status);
 

@@ -45,6 +45,8 @@
 
 #define IMX219_FULL_WIDTH             3280U
 #define IMX219_FULL_HEIGHT            2464U
+#define IMX219_640X480_LINE_LENGTH    3560U
+#define IMX219_640X480_FRAME_LENGTH_15FPS 3412U
 #define IMX219_TEST_PATTERN_COLOR_BARS 0x0002U
 
 typedef struct
@@ -91,7 +93,7 @@ static const AppCameraIMX219Reg_t g_imx219_base_regs[] =
 {
   {IMX219_REG_CSI_LANE_MODE,    0x0001U, 1U},
   {IMX219_REG_DPHY_CTRL,        0x0000U, 1U},
-  {IMX219_REG_LINE_LENGTH_A,    3560U,   2U},
+  {IMX219_REG_LINE_LENGTH_A,    IMX219_640X480_LINE_LENGTH, 2U},
   {IMX219_REG_X_ODD_INC_A,      0x0001U, 1U},
   {IMX219_REG_Y_ODD_INC_A,      0x0001U, 1U},
   {IMX219_REG_BINNING_MODE_H,   0x0003U, 1U},
@@ -105,11 +107,6 @@ static const AppCameraIMX219Reg_t g_imx219_raw10_regs[] =
 {
   {IMX219_REG_CSI_DATA_FORMAT_A0, 10U, 1U},
   {IMX219_REG_CSI_DATA_FORMAT_A1, 10U, 1U},
-};
-
-static const AppCameraIMX219Reg_t g_imx219_test_pattern_regs[] =
-{
-  {IMX219_REG_TEST_PATTERN, IMX219_TEST_PATTERN_COLOR_BARS, 2U},
 };
 
 static const AppCameraIMX219Reg_t g_imx219_fps15_regs[] =
@@ -247,7 +244,7 @@ static int32_t IMX219_WriteCrop(uint16_t width, uint16_t height)
     x_end = 2279U;
     y_start = 752U;
     y_end = 1711U;
-    frame_length = 853U;
+    frame_length = IMX219_640X480_FRAME_LENGTH_15FPS;
   }
 
   const AppCameraIMX219Reg_t crop_regs[] =
@@ -398,8 +395,7 @@ int32_t AppCameraIMX219_Init(const AppCameraIMX219Config_t *config, uint16_t *ch
     return status;
   }
 
-  status = IMX219_WriteTable(g_imx219_test_pattern_regs,
-                             (uint32_t)(sizeof(g_imx219_test_pattern_regs) / sizeof(g_imx219_test_pattern_regs[0])));
+  status = IMX219_WriteReg(IMX219_REG_TEST_PATTERN, 0U, 2U);
   if (status != APP_CAMERA_IMX219_OK)
   {
     return status;
@@ -432,6 +428,21 @@ int32_t AppCameraIMX219_SetStream(uint8_t enable)
   {
     status = IMX219_RecordReadback(IMX219_REG_MODE_SELECT, 1U,
                                    &g_app_camera_imx219_readback_stream);
+  }
+
+  return status;
+}
+
+int32_t AppCameraIMX219_SetTestPattern(uint8_t enable)
+{
+  uint16_t value = (enable != 0U) ? IMX219_TEST_PATTERN_COLOR_BARS : 0U;
+  int32_t status;
+
+  status = IMX219_WriteReg(IMX219_REG_TEST_PATTERN, value, 2U);
+  if (status == APP_CAMERA_IMX219_OK)
+  {
+    status = IMX219_RecordReadback(IMX219_REG_TEST_PATTERN, 2U,
+                                   &g_app_camera_imx219_readback_test_pattern);
   }
 
   return status;

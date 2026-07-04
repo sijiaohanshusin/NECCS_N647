@@ -257,6 +257,11 @@
 			<locationURI>PARENT-2-PROJECT_LOC/Appli/Core/Src/app_camera.c</locationURI>
 		</link>
 		<link>
+			<name>Application/User/Core/app_camera_display.c</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/Appli/Core/Src/app_camera_display.c</locationURI>
+		</link>
+		<link>
 			<name>Application/User/Core/app_camera_imx219.c</name>
 			<type>1</type>
 			<locationURI>PARENT-2-PROJECT_LOC/Appli/Core/Src/app_camera_imx219.c</locationURI>

@@ -30,6 +30,8 @@
 #include "./LED/led.h"
 #include "./RGBLCD/rgblcd.h"
 #include "app_boot_diag.h"
+#include "app_camera.h"
+#include "app_camera_display.h"
 
 /* USER CODE END Includes */
 
@@ -246,6 +248,7 @@ int main(void)
   App_BootDiag_SetStage(APP_BOOT_STAGE_BSP_LED_DONE);
   rgblcd_init();
   App_BootDiag_SetStage(APP_BOOT_STAGE_BSP_RGBLCD_DONE);
+  (void)AppCameraDisplay_InitLayers(APP_CAMERA_FRAME0_ADDR);
 
   /* USER CODE END 2 */
 

@@ -92,6 +92,7 @@ private:
     void onMediaPressed(const touchgfx::AbstractButton& source);
 
     touchgfx::Box background;
+    touchgfx::Box cameraPreviewKey;
     touchgfx::Box topBar;
     touchgfx::Box navPanel;
     touchgfx::Box contentPanel;

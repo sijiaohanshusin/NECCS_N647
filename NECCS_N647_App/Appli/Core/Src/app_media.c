@@ -619,10 +619,10 @@ static const uint16_t *framebuffer_ptr(void)
 {
   uint32_t address = APP_MEDIA_FB_BASE;
 
-#if defined(LTDC_Layer1)
-  if (LTDC_Layer1->CFBAR != 0U)
+#if defined(LTDC_Layer2)
+  if (LTDC_Layer2->CFBAR != 0U)
   {
-    address = LTDC_Layer1->CFBAR;
+    address = LTDC_Layer2->CFBAR;
   }
 #endif
 
