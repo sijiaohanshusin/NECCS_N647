@@ -82,13 +82,20 @@ try {
     foreach ($config in $configurations) {
         Write-Host "Building $projectName/$config ..."
 
-        & $headlessBuild `
-            -data $workspaceDir `
-            -import $projectDir `
-            -cleanBuild "$projectName/$config"
+        $previousErrorActionPreference = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            & $headlessBuild `
+                -data $workspaceDir `
+                -import $projectDir `
+                -cleanBuild "$projectName/$config"
+            $buildExitCode = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $previousErrorActionPreference
+        }
 
-        if ($LASTEXITCODE -ne 0) {
-            throw "STM32CubeIDE build failed for $config (exit code $LASTEXITCODE)."
+        if ($buildExitCode -ne 0) {
+            throw "STM32CubeIDE build failed for $config (exit code $buildExitCode)."
         }
     }
 } finally {

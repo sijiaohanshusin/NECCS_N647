@@ -16,6 +16,9 @@ __pycache__/
 _analysis/
 _cubeide_ws_*/
 _debug_logs/
+tools/acoustic_imaging/npu/generated/
+tools/acoustic_imaging/npu/st_ai_output/
+tools/acoustic_imaging/npu/st_ai_ws/
 
 # Vendor data disk copy; keep smaller curated references separately.
 【正点原子】N647开发板资料盘(A盘)/

@@ -76,3 +76,20 @@ Run from the repository root:
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\tools\build_n647_app.ps1 -Configuration Release
 ```
+
+## NPU Bring-Up Without MIC Hardware
+
+The first NPU integration step is intentionally independent of the microphone
+hardware. `APP_ACOUSTIC_BACKEND_NPU_HEATMAP` is now reserved for a Wide32 /
+BALANCED coarse heatmap backend that consumes synthetic or replayed GCC-PHAT
+features. It is disabled by default through `APP_ACOUSTIC_NPU_HEATMAP_ENABLE=0`,
+so the current F32 CMSIS-DSP SRP path remains the default.
+
+Generate the no-dependency NPU model spec:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\acoustic_imaging\generate_npu_heatmap_model.ps1 -SpecOnly
+```
+
+Full ST Edge AI generation additionally requires the optional Python `onnx`
+package, then the same script can emit the ONNX model and call `stedgeai`.

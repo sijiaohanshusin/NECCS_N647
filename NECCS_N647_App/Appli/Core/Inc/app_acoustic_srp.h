@@ -37,6 +37,10 @@ typedef struct
   uint32_t fft_cycles;
   uint32_t gcc_cycles;
   uint32_t coarse_cycles;
+  uint32_t npu_quantize_cycles;
+  uint32_t npu_cache_cycles;
+  uint32_t npu_inference_cycles;
+  uint32_t npu_output_cycles;
   uint32_t fine_cycles;
   uint32_t output_cycles;
   uint32_t total_cycles;

@@ -1,5 +1,6 @@
 #include "app_acoustic_srp.h"
 
+#include "app_acoustic_npu.h"
 #include "app_acoustic_synthetic.h"
 
 #include "arm_math.h"
@@ -94,7 +95,10 @@ static AppAcousticImagingStatus_t App_AcousticSrp_ValidateRuntimeConfig(const Ap
 
   if (backend != APP_ACOUSTIC_BACKEND_F32_CMSIS)
   {
-    return APP_ACOUSTIC_IMAGING_UNSUPPORTED_MODE;
+    if (backend != APP_ACOUSTIC_BACKEND_NPU_HEATMAP)
+    {
+      return APP_ACOUSTIC_IMAGING_UNSUPPORTED_MODE;
+    }
   }
 
   status = App_AcousticImaging_ValidateConfig(config);
@@ -110,7 +114,11 @@ static AppAcousticImagingStatus_t App_AcousticSrp_ValidateRuntimeConfig(const Ap
       (config->frame_len != APP_ACOUSTIC_SRP_MAX_FRAME_LEN) ||
       (config->nfft != APP_ACOUSTIC_SRP_MAX_NFFT) ||
       (config->pair_count > APP_ACOUSTIC_SRP_MAX_PAIRS) ||
-      (active_bins > APP_ACOUSTIC_SRP_MAX_ACTIVE_BINS))
+      (active_bins > APP_ACOUSTIC_SRP_MAX_ACTIVE_BINS) ||
+      ((backend == APP_ACOUSTIC_BACKEND_NPU_HEATMAP) &&
+       ((config->profile != APP_ACOUSTIC_IMAGING_PROFILE_BALANCED) ||
+        (config->pair_count != APP_ACOUSTIC_IMAGING_WIDE32_BALANCED_PAIRS) ||
+        (active_bins != APP_ACOUSTIC_SRP_MAX_ACTIVE_BINS))))
   {
     return APP_ACOUSTIC_IMAGING_UNSUPPORTED_MODE;
   }
@@ -648,6 +656,15 @@ AppAcousticImagingStatus_t App_AcousticSrp_Init(AppAcousticSrpContext_t *ctx,
     return APP_ACOUSTIC_IMAGING_PROCESSING_FAILED;
   }
 
+  if (backend == APP_ACOUSTIC_BACKEND_NPU_HEATMAP)
+  {
+    status = App_AcousticNpuHeatmap_Init(config);
+    if (status != APP_ACOUSTIC_IMAGING_OK)
+    {
+      return status;
+    }
+  }
+
   App_AcousticSrp_EnableCycleCounter();
 
   ctx->config = *config;
@@ -709,9 +726,34 @@ AppAcousticImagingStatus_t App_AcousticSrp_ProcessFrame(AppAcousticSrpContext_t 
   ctx->perf.gcc_cycles = App_AcousticSrp_CycleDelta(t0, t1);
 
   t0 = t1;
-  App_AcousticSrp_RunCoarseSearch(ctx);
-  t1 = App_AcousticSrp_CycleNow();
-  ctx->perf.coarse_cycles = App_AcousticSrp_CycleDelta(t0, t1);
+  if (ctx->backend == APP_ACOUSTIC_BACKEND_NPU_HEATMAP)
+  {
+    AppAcousticNpuHeatmapPerf_t npu_perf;
+
+    status = App_AcousticNpuHeatmap_RunCoarse(&ctx->config,
+                                              s_srp_workspace.gcc,
+                                              ctx->pair_count,
+                                              ctx->active_bin_count,
+                                              s_srp_workspace.srp_power,
+                                              APP_ACOUSTIC_IMAGING_COARSE_TOTAL,
+                                              &npu_perf);
+    t1 = App_AcousticSrp_CycleNow();
+    ctx->perf.coarse_cycles = App_AcousticSrp_CycleDelta(t0, t1);
+    ctx->perf.npu_quantize_cycles = npu_perf.quantize_cycles;
+    ctx->perf.npu_cache_cycles = npu_perf.cache_cycles;
+    ctx->perf.npu_inference_cycles = npu_perf.inference_cycles;
+    ctx->perf.npu_output_cycles = npu_perf.output_cycles;
+    if (status != APP_ACOUSTIC_IMAGING_OK)
+    {
+      return status;
+    }
+  }
+  else
+  {
+    App_AcousticSrp_RunCoarseSearch(ctx);
+    t1 = App_AcousticSrp_CycleNow();
+    ctx->perf.coarse_cycles = App_AcousticSrp_CycleDelta(t0, t1);
+  }
 
   App_AcousticSrp_FindTopCoarseNms(s_srp_workspace.srp_power, top_idx, ctx->config.fine_top_k);
 

@@ -73,3 +73,36 @@ Real capture should not feed the SRP pipeline until the following checks pass:
 
 `Core16 @ 192 kHz` remains a phase-2 high-frequency/near-field research mode
 after Wide32 is stable.
+
+## No-MIC NPU Bring-Up Route
+
+The first STM32N6 NPU step does not depend on PCMD3180, SAI, or DMA capture.
+It uses the existing synthetic/offline SRP path as the input source and limits
+the NPU scope to the Wide32/BALANCED coarse heatmap projection:
+
+- CPU keeps frame generation, windowing, FFT, GCC-PHAT, fine search, and UI
+  publishing.
+- NPU receives quantized GCC-PHAT features with shape
+  `1 x (160 pairs x 40 bins x 2)` and returns an `int8` 9x9 coarse heatmap.
+- Firmware exposes this through `APP_ACOUSTIC_BACKEND_NPU_HEATMAP`; it is
+  disabled by default and returns `UNSUPPORTED_MODE` until generated ST Edge AI
+  code is linked.
+
+Generate the dependency-free model spec:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\acoustic_imaging\generate_npu_heatmap_model.ps1 -SpecOnly
+```
+
+After installing the optional Python `onnx` package in the chosen local Python
+environment, generate the ONNX model and run ST Edge AI:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\acoustic_imaging\generate_npu_heatmap_model.ps1
+```
+
+The NECCS memory-pool descriptor reserves the NPU RAM banks and starts the AI
+HyperRAM pool at `0x90800000` so the first LCD framebuffer region at
+`0x90000000` remains untouched. xSPI2 is deliberately disabled in this pool
+until the board-specific external Flash address map is re-verified for NPU
+constant access.
