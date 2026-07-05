@@ -123,6 +123,8 @@ static int32_t AppCameraDisplay_ConfigUiLayer(void)
                                    APP_CAMERA_DISPLAY_SCREEN_WIDTH,
                                    APP_CAMERA_DISPLAY_SCREEN_HEIGHT,
                                    APP_CAMERA_DISPLAY_UI_FB_ADDR);
+  layer.BlendingFactor1 = LTDC_BLENDING_FACTOR1_PAxCA;
+  layer.BlendingFactor2 = LTDC_BLENDING_FACTOR2_PAxCA;
 
   if (HAL_LTDC_ConfigLayer(&hltdc, &layer, LTDC_LAYER_2) != HAL_OK)
   {
