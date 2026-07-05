@@ -7,18 +7,20 @@ extern "C" {
 
 #include <stdint.h>
 
+#include "app_camera_display.h"
+
 #define APP_CAMERA_WIDTH              640U
 #define APP_CAMERA_HEIGHT             480U
 #define APP_CAMERA_FPS                15U
 #define APP_CAMERA_INPUT_CLOCK_HZ     24000000UL
-#define APP_CAMERA_FRAME0_ADDR        0x90400000UL
-#define APP_CAMERA_FRAME1_ADDR        0x90500000UL
+#define APP_CAMERA_FRAME0_ADDR        APP_CAMERA_DISPLAY_CAMERA_FB0_ADDR
+#define APP_CAMERA_FRAME1_ADDR        APP_CAMERA_DISPLAY_CAMERA_FB1_ADDR
 #define APP_CAMERA_RAW10_FRAME_BYTES  (((APP_CAMERA_WIDTH * APP_CAMERA_HEIGHT * 10U) + 7U) / 8U)
-#define APP_CAMERA_PREVIEW_LINE_BYTES (APP_CAMERA_WIDTH * 2U)
-#define APP_CAMERA_PREVIEW_FRAME_BYTES (APP_CAMERA_PREVIEW_LINE_BYTES * APP_CAMERA_HEIGHT)
+#define APP_CAMERA_PREVIEW_LINE_BYTES APP_CAMERA_DISPLAY_CAMERA_LINE_BYTES
+#define APP_CAMERA_PREVIEW_FRAME_BYTES APP_CAMERA_DISPLAY_CAMERA_FRAME_BYTES
 #define APP_CAMERA_CAPTURE_LINE_BYTES APP_CAMERA_WIDTH
 #define APP_CAMERA_CAPTURE_FRAME_BYTES (APP_CAMERA_CAPTURE_LINE_BYTES * APP_CAMERA_HEIGHT)
-#define APP_CAMERA_FRAME_BUFFER_BYTES 0x000A0000UL
+#define APP_CAMERA_FRAME_BUFFER_BYTES APP_CAMERA_DISPLAY_CAMERA_BUFFER_BYTES
 
 #define APP_CAMERA_OK                         0
 #define APP_CAMERA_ERROR_INVALID_ARG         -1
@@ -78,6 +80,10 @@ typedef struct
   uint32_t pending_display_addr;
   uint32_t ltdc_swap_count;
   uint32_t ltdc_error_count;
+  uint32_t ltdc_ier2;
+  uint32_t ltdc_isr2;
+  uint32_t ltdc_layer2_cr;
+  uint32_t ltdc_auto_disable_count;
   uint32_t pipe_index;
   uint32_t phy_bitrate;
   uint32_t fallback_count;
@@ -115,6 +121,11 @@ extern volatile uint32_t g_app_camera_display_addr;
 extern volatile uint32_t g_app_camera_pending_display_addr;
 extern volatile uint32_t g_app_camera_ltdc_swap_count;
 extern volatile uint32_t g_app_camera_ltdc_error_count;
+extern volatile uint32_t g_app_camera_ltdc_ier2;
+extern volatile uint32_t g_app_camera_ltdc_isr2;
+extern volatile uint32_t g_app_camera_ltdc_layer2_cr;
+extern volatile uint32_t g_app_camera_ltdc_auto_disable_count;
+extern volatile uint32_t g_app_camera_debug_keepalive;
 extern volatile uint32_t g_app_camera_csi_sr0;
 extern volatile uint32_t g_app_camera_csi_sr1;
 extern volatile uint32_t g_app_camera_csi_err1;

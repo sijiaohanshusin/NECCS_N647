@@ -25,12 +25,19 @@
 #include "stm32n6xx_hal.h"
 #include "stm32n6xx_hal_ltdc.h"
 
+#define APP_TOUCHGFX_FRAMEBUFFER_ADDR 0x90072000UL
+
 using namespace touchgfx;
 
 namespace
 {
 static uint16_t lcd_int_active_line;
 static uint16_t lcd_int_porch_line;
+
+static volatile LTDC_Layer_TypeDef* uiLayer()
+{
+    return (LTDC_Layer2->CFBAR != 0U) ? LTDC_Layer2 : LTDC_Layer1;
+}
 }
 
 void TouchGFXGeneratedHAL::initialize()
@@ -42,7 +49,7 @@ void TouchGFXGeneratedHAL::initialize()
     {
         while (1);
     }
-    setFrameBufferStartAddresses((void*)0x90000000, (void*)0, (void*)0);
+    setFrameBufferStartAddresses((void*)APP_TOUCHGFX_FRAMEBUFFER_ADDR, (void*)0, (void*)0);
 }
 
 void TouchGFXGeneratedHAL::configureInterrupts()
@@ -97,14 +104,16 @@ void TouchGFXGeneratedHAL::submitGPU2D()
 
 uint16_t* TouchGFXGeneratedHAL::getTFTFrameBuffer() const
 {
-    return (uint16_t*)LTDC_Layer2->CFBAR;
+    return (uint16_t*)uiLayer()->CFBAR;
 }
 
 void TouchGFXGeneratedHAL::setTFTFrameBuffer(uint16_t* adr)
 {
-    LTDC_Layer2->CFBAR = (uint32_t)adr;
+    volatile LTDC_Layer_TypeDef* layer = uiLayer();
+    layer->CFBAR = (uint32_t)adr;
 
     /* Reload immediate */
+    layer->RCR = (uint32_t)(LTDC_LxRCR_IMR | LTDC_LxRCR_GRMSK);
     LTDC->SRCR = (uint32_t)LTDC_SRCR_IMR;
 }
 

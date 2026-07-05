@@ -36,8 +36,8 @@ static volatile AppCameraStatus_t g_app_camera_status =
   .line_pitch = APP_CAMERA_CAPTURE_LINE_BYTES,
   .bayer_type = APP_CAMERA_RAW_BAYER_TYPE,
   .completed_frame_addr = APP_CAMERA_FRAME0_ADDR,
-  .display_addr = APP_CAMERA_FRAME0_ADDR,
-  .pending_display_addr = APP_CAMERA_FRAME0_ADDR,
+  .display_addr = APP_CAMERA_DISPLAY_TARGET_ADDR,
+  .pending_display_addr = APP_CAMERA_DISPLAY_TARGET_ADDR,
   .pipe_index = APP_CAMERA_DCMIPP_PIPE,
   .phy_bitrate = APP_CAMERA_PRIMARY_PHY,
 };
@@ -78,6 +78,7 @@ volatile uint32_t g_app_camera_line_pitch = APP_CAMERA_CAPTURE_LINE_BYTES;
 volatile uint32_t g_app_camera_bayer_type = APP_CAMERA_RAW_BAYER_TYPE;
 volatile uint32_t g_app_camera_test_pattern_enabled = 0U;
 volatile uint32_t g_app_camera_completed_addr = APP_CAMERA_FRAME0_ADDR;
+volatile uint32_t g_app_camera_debug_keepalive = 0U;
 volatile uint32_t g_app_camera_csi_sr0 = 0U;
 volatile uint32_t g_app_camera_csi_sr1 = 0U;
 volatile uint32_t g_app_camera_csi_err1 = 0U;
@@ -179,6 +180,15 @@ static void AppCamera_MirrorGlobals(void)
   g_app_camera_status.pending_display_addr = g_app_camera_pending_display_addr;
   g_app_camera_status.ltdc_swap_count = g_app_camera_ltdc_swap_count;
   g_app_camera_status.ltdc_error_count = g_app_camera_ltdc_error_count;
+  g_app_camera_status.ltdc_ier2 = g_app_camera_ltdc_ier2;
+  g_app_camera_status.ltdc_isr2 = g_app_camera_ltdc_isr2;
+  g_app_camera_status.ltdc_layer2_cr = g_app_camera_ltdc_layer2_cr;
+  g_app_camera_status.ltdc_auto_disable_count = g_app_camera_ltdc_auto_disable_count;
+  g_app_camera_debug_keepalive = (uint32_t)((uintptr_t)&AppCamera_Init ^
+                                            (uintptr_t)&AppCamera_StartSmoke ^
+                                            (uintptr_t)&AppCamera_StartPreview ^
+                                            (uintptr_t)&AppCamera_Stop ^
+                                            (uintptr_t)&AppCamera_SetTestPattern);
   if ((g_app_camera_status.flags & APP_CAMERA_FLAG_DCMIPP_READY) != 0U)
   {
     AppCamera_SnapshotRegisters();
@@ -202,29 +212,48 @@ static void AppCamera_CacheCleanInvalidate(uint32_t address, uint32_t size)
   SCB_CleanInvalidateDCache_by_Addr((void *)aligned_addr, (int32_t)(end_addr - aligned_addr));
 }
 
-static void AppCamera_PrepareBuffers(void)
+static void AppCamera_CacheCleanInvalidatePreviewRows(void)
 {
-  (void)memset((void *)APP_CAMERA_FRAME0_ADDR, 0, APP_CAMERA_FRAME_BUFFER_BYTES);
-  (void)memset((void *)APP_CAMERA_FRAME1_ADDR, 0, APP_CAMERA_FRAME_BUFFER_BYTES);
   AppCamera_CacheCleanInvalidate(APP_CAMERA_FRAME0_ADDR, APP_CAMERA_FRAME_BUFFER_BYTES);
   AppCamera_CacheCleanInvalidate(APP_CAMERA_FRAME1_ADDR, APP_CAMERA_FRAME_BUFFER_BYTES);
+}
+
+static void AppCamera_PrepareBuffers(uint8_t preview)
+{
+  if (preview != 0U)
+  {
+    AppCamera_CacheCleanInvalidatePreviewRows();
+  }
+  else
+  {
+    (void)memset((void *)APP_CAMERA_FRAME0_ADDR, 0, APP_CAMERA_FRAME_BUFFER_BYTES);
+    (void)memset((void *)APP_CAMERA_FRAME1_ADDR, 0, APP_CAMERA_FRAME_BUFFER_BYTES);
+    AppCamera_CacheCleanInvalidate(APP_CAMERA_FRAME0_ADDR, APP_CAMERA_FRAME_BUFFER_BYTES);
+    AppCamera_CacheCleanInvalidate(APP_CAMERA_FRAME1_ADDR, APP_CAMERA_FRAME_BUFFER_BYTES);
+  }
 }
 
 static void AppCamera_SetOutputMode(uint8_t preview)
 {
   if (preview != 0U)
   {
+    g_app_camera_status.frame0_addr = APP_CAMERA_FRAME0_ADDR;
+    g_app_camera_status.frame1_addr = APP_CAMERA_FRAME1_ADDR;
     g_app_camera_status.output_format = APP_CAMERA_PREVIEW_OUTPUT_FORMAT;
     g_app_camera_status.output_bpp = APP_CAMERA_PREVIEW_OUTPUT_BPP;
     g_app_camera_status.line_pitch = APP_CAMERA_PREVIEW_LINE_BYTES;
     g_app_camera_status.frame_bytes = APP_CAMERA_PREVIEW_FRAME_BYTES;
+    g_app_camera_status.completed_frame_addr = APP_CAMERA_FRAME0_ADDR;
   }
   else
   {
+    g_app_camera_status.frame0_addr = APP_CAMERA_FRAME0_ADDR;
+    g_app_camera_status.frame1_addr = APP_CAMERA_FRAME1_ADDR;
     g_app_camera_status.output_format = APP_CAMERA_CAPTURE_OUTPUT_FORMAT;
     g_app_camera_status.output_bpp = APP_CAMERA_CAPTURE_OUTPUT_BPP;
     g_app_camera_status.line_pitch = APP_CAMERA_CAPTURE_LINE_BYTES;
     g_app_camera_status.frame_bytes = APP_CAMERA_CAPTURE_FRAME_BYTES;
+    g_app_camera_status.completed_frame_addr = APP_CAMERA_FRAME0_ADDR;
   }
   g_app_camera_status.bayer_type = APP_CAMERA_RAW_BAYER_TYPE;
   g_app_camera_status.frame_buffer_bytes = APP_CAMERA_FRAME_BUFFER_BYTES;
@@ -336,9 +365,11 @@ static int32_t AppCamera_ConfigureDcmipp(uint32_t phy_bitrate, uint8_t preview)
   return APP_CAMERA_OK;
 }
 
-static int32_t AppCamera_StartDcmippCapture(void)
+static int32_t AppCamera_StartDcmippCapture(uint8_t preview)
 {
   HAL_StatusTypeDef hal_status;
+
+  (void)preview;
 
   hal_status = HAL_DCMIPP_CSI_PIPE_DoubleBufferStart(&hdcmipp,
                                                      APP_CAMERA_DCMIPP_PIPE,
@@ -382,7 +413,7 @@ static int32_t AppCamera_RestartWithPhy(uint32_t phy_bitrate)
     return status;
   }
 
-  status = AppCamera_StartDcmippCapture();
+  status = AppCamera_StartDcmippCapture(((g_app_camera_status.flags & APP_CAMERA_FLAG_PREVIEW) != 0U) ? 1U : 0U);
   if (status != APP_CAMERA_OK)
   {
     AppCamera_SetError(APP_CAMERA_ERROR_FALLBACK_RESTART);
@@ -435,6 +466,10 @@ int32_t AppCamera_Init(void)
   g_app_camera_status.pending_display_addr = g_app_camera_pending_display_addr;
   g_app_camera_status.ltdc_swap_count = g_app_camera_ltdc_swap_count;
   g_app_camera_status.ltdc_error_count = g_app_camera_ltdc_error_count;
+  g_app_camera_status.ltdc_ier2 = g_app_camera_ltdc_ier2;
+  g_app_camera_status.ltdc_isr2 = g_app_camera_ltdc_isr2;
+  g_app_camera_status.ltdc_layer2_cr = g_app_camera_ltdc_layer2_cr;
+  g_app_camera_status.ltdc_auto_disable_count = g_app_camera_ltdc_auto_disable_count;
   g_app_camera_status.pipe_index = APP_CAMERA_DCMIPP_PIPE;
   g_app_camera_status.phy_bitrate = APP_CAMERA_PRIMARY_PHY;
   g_app_camera_status.fallback_count = 0U;
@@ -492,13 +527,14 @@ static int32_t AppCamera_StartCapture(uint8_t preview)
   {
     if (preview != 0U)
     {
-      status = AppCameraDisplay_InitLayers(APP_CAMERA_FRAME0_ADDR);
+      status = AppCameraDisplay_InitLayers(APP_CAMERA_DISPLAY_TARGET_ADDR);
       if (status != APP_CAMERA_DISPLAY_OK)
       {
         AppCamera_SetError(APP_CAMERA_ERROR_DISPLAY_INIT);
         g_app_camera_start_status = APP_CAMERA_ERROR_DISPLAY_INIT;
         return APP_CAMERA_ERROR_DISPLAY_INIT;
       }
+      AppCameraDisplay_SetVisible(1U);
       g_app_camera_status.flags |= APP_CAMERA_FLAG_PREVIEW | APP_CAMERA_FLAG_DISPLAY_READY;
     }
     g_app_camera_start_status = APP_CAMERA_OK;
@@ -506,18 +542,19 @@ static int32_t AppCamera_StartCapture(uint8_t preview)
     return APP_CAMERA_OK;
   }
 
-  AppCamera_PrepareBuffers();
   AppCamera_SetOutputMode(preview);
+  AppCamera_PrepareBuffers(preview);
 
   if (preview != 0U)
   {
-    status = AppCameraDisplay_InitLayers(APP_CAMERA_FRAME0_ADDR);
+    status = AppCameraDisplay_InitLayers(APP_CAMERA_DISPLAY_TARGET_ADDR);
     if (status != APP_CAMERA_DISPLAY_OK)
     {
       AppCamera_SetError(APP_CAMERA_ERROR_DISPLAY_INIT);
       g_app_camera_start_status = APP_CAMERA_ERROR_DISPLAY_INIT;
       return APP_CAMERA_ERROR_DISPLAY_INIT;
     }
+    AppCameraDisplay_SetVisible(1U);
     g_app_camera_status.flags |= APP_CAMERA_FLAG_PREVIEW | APP_CAMERA_FLAG_DISPLAY_READY;
   }
   else
@@ -532,7 +569,7 @@ static int32_t AppCamera_StartCapture(uint8_t preview)
     return status;
   }
 
-  status = AppCamera_StartDcmippCapture();
+  status = AppCamera_StartDcmippCapture(preview);
   if (status != APP_CAMERA_OK)
   {
     g_app_camera_start_status = (uint32_t)status;
@@ -576,11 +613,13 @@ int32_t AppCamera_Stop(void)
   {
     (void)HAL_DCMIPP_DeInit(&hdcmipp);
   }
+  AppCameraDisplay_SetVisible(0U);
 
   g_app_camera_status.flags &= ~(APP_CAMERA_FLAG_STREAMING |
                                  APP_CAMERA_FLAG_DCMIPP_READY |
                                  APP_CAMERA_FLAG_FRAME_SEEN |
-                                 APP_CAMERA_FLAG_PREVIEW);
+                                 APP_CAMERA_FLAG_PREVIEW |
+                                 APP_CAMERA_FLAG_DISPLAY_READY);
   g_app_camera_start_status = APP_CAMERA_OK;
   AppCamera_MirrorGlobals();
 
@@ -690,6 +729,10 @@ void HAL_DCMIPP_PIPE_FrameEventCallback(DCMIPP_HandleTypeDef *hdcmipp_cb, uint32
       g_app_camera_status.pending_display_addr = g_app_camera_pending_display_addr;
       g_app_camera_status.ltdc_swap_count = g_app_camera_ltdc_swap_count;
       g_app_camera_status.ltdc_error_count = g_app_camera_ltdc_error_count;
+      g_app_camera_status.ltdc_ier2 = g_app_camera_ltdc_ier2;
+      g_app_camera_status.ltdc_isr2 = g_app_camera_ltdc_isr2;
+      g_app_camera_status.ltdc_layer2_cr = g_app_camera_ltdc_layer2_cr;
+      g_app_camera_status.ltdc_auto_disable_count = g_app_camera_ltdc_auto_disable_count;
     }
     g_app_camera_status.frame_count++;
     g_app_camera_status.flags |= APP_CAMERA_FLAG_FRAME_SEEN;

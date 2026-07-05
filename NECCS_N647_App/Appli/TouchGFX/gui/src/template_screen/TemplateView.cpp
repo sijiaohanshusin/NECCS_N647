@@ -4,6 +4,8 @@
 
 #include <stdio.h>
 
+#include "app_camera_display.h"
+
 namespace
 {
 constexpr int16_t CameraPreviewX = 192;
@@ -154,6 +156,7 @@ void TemplateView::setupScreen()
     refreshVisibility();
     refreshNavigation();
     refreshProfileButtons();
+    invalidate();
 }
 
 void TemplateView::tearDownScreen()
@@ -168,6 +171,7 @@ void TemplateView::setupStaticUi()
 
     cameraPreviewKey.setPosition(CameraPreviewX, CameraPreviewY, CameraPreviewW, CameraPreviewH);
     cameraPreviewKey.setColor(rgb(255, 0, 255));
+    cameraPreviewKey.setVisible(false);
     add(cameraPreviewKey);
 
     topBar.setPosition(0, 0, 1024, 64);
@@ -448,8 +452,9 @@ void TemplateView::refreshVisibility()
     const bool settingsVisible = (activeScreen == APP_UI_SCREEN_SETTINGS);
     const bool mediaVisible = (activeScreen == APP_UI_SCREEN_MEDIA);
 
+    AppCameraDisplay_SetVisible(imageVisible ? 1U : 0U);
+
     cameraPreviewKey.setVisible(imageVisible);
-    cameraPreviewKey.invalidate();
 
     contentPanel.setVisible(!imageVisible);
     detailPanel.setVisible(!imageVisible);
@@ -524,6 +529,9 @@ void TemplateView::refreshVisibility()
         mediaTouch[i].invalidate();
         mediaButtonLabel[i].invalidate();
     }
+
+    cameraPreviewKey.invalidate();
+    invalidate();
 }
 
 void TemplateView::refreshNavigation()

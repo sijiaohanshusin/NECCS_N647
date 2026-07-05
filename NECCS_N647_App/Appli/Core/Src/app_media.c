@@ -24,7 +24,7 @@
 #define APP_MEDIA_FB_WIDTH                1024U
 #define APP_MEDIA_FB_HEIGHT               600U
 #define APP_MEDIA_FB_BYTES                (APP_MEDIA_FB_WIDTH * APP_MEDIA_FB_HEIGHT * 2U)
-#define APP_MEDIA_FB_BASE                 0x90000000UL
+#define APP_MEDIA_FB_BASE                 0x90072000UL
 
 #define APP_MEDIA_RECORD_WIDTH            512U
 #define APP_MEDIA_RECORD_HEIGHT           304U

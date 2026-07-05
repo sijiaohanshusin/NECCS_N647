@@ -47,7 +47,11 @@
 #define IMX219_FULL_HEIGHT            2464U
 #define IMX219_640X480_LINE_LENGTH    3560U
 #define IMX219_640X480_FRAME_LENGTH_15FPS 3412U
+#define IMX219_640X480_DEFAULT_EXPOSURE_LINES 1200U
 #define IMX219_TEST_PATTERN_COLOR_BARS 0x0002U
+#define IMX219_POWER_OFF_DELAY_MS      20U
+#define IMX219_POWER_ON_DELAY_MS       20U
+#define IMX219_RESET_RECOVERY_DELAY_MS 100U
 
 typedef struct
 {
@@ -66,6 +70,11 @@ volatile uint32_t g_app_camera_imx219_readback_data_format0 = 0xffffffffU;
 volatile uint32_t g_app_camera_imx219_readback_data_format1 = 0xffffffffU;
 volatile uint32_t g_app_camera_imx219_readback_test_pattern = 0xffffffffU;
 volatile uint32_t g_app_camera_imx219_readback_stream = 0xffffffffU;
+volatile uint32_t g_app_camera_imx219_power_cycle_count = 0U;
+volatile uint32_t g_app_camera_imx219_reset_retry_count = 0U;
+volatile uint32_t g_app_camera_imx219_scan_count = 0U;
+volatile uint32_t g_app_camera_imx219_scan_first_ack = 0xffffffffU;
+volatile uint32_t g_app_camera_imx219_scan_ack_mask[4] = {0U, 0U, 0U, 0U};
 
 static const AppCameraIMX219Reg_t g_imx219_vendor_regs[] =
 {
@@ -100,7 +109,7 @@ static const AppCameraIMX219Reg_t g_imx219_base_regs[] =
   {IMX219_REG_BINNING_MODE_V,   0x0003U, 1U},
   {IMX219_REG_DIGITAL_GAIN,     256U,    2U},
   {IMX219_REG_ANALOG_GAIN,      232U,    1U},
-  {IMX219_REG_INTEGRATION_TIME, 100U,    2U},
+  {IMX219_REG_INTEGRATION_TIME, IMX219_640X480_DEFAULT_EXPOSURE_LINES, 2U},
 };
 
 static const AppCameraIMX219Reg_t g_imx219_raw10_regs[] =
@@ -314,6 +323,47 @@ static int32_t IMX219_ReadbackSmokeConfig(void)
                                &g_app_camera_imx219_readback_stream);
 }
 
+static void IMX219_PowerCycle(uint32_t off_delay_ms, uint32_t on_delay_ms)
+{
+  HAL_GPIO_WritePin(CAM_LED_EN_GPIO_Port, CAM_LED_EN_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(CAM_EN_MODULE_GPIO_Port, CAM_EN_MODULE_Pin, GPIO_PIN_RESET);
+  HAL_Delay(off_delay_ms);
+  HAL_GPIO_WritePin(CAM_EN_MODULE_GPIO_Port, CAM_EN_MODULE_Pin, GPIO_PIN_SET);
+  HAL_Delay(on_delay_ms);
+  g_app_camera_imx219_power_cycle_count++;
+}
+
+static void IMX219_RecordI2CScan(void)
+{
+  uint32_t address;
+
+  g_app_camera_imx219_scan_count++;
+  g_app_camera_imx219_scan_first_ack = 0xffffffffU;
+  g_app_camera_imx219_scan_ack_mask[0] = 0U;
+  g_app_camera_imx219_scan_ack_mask[1] = 0U;
+  g_app_camera_imx219_scan_ack_mask[2] = 0U;
+  g_app_camera_imx219_scan_ack_mask[3] = 0U;
+
+  if (AppI2C2_Lock(IMX219_I2C_TIMEOUT_MS) == 0U)
+  {
+    return;
+  }
+
+  for (address = 0x08U; address <= 0x77U; address++)
+  {
+    if (HAL_I2C_IsDeviceReady(&hi2c2, (uint16_t)(address << 1), 1U, 2U) == HAL_OK)
+    {
+      g_app_camera_imx219_scan_ack_mask[address >> 5] |= (1UL << (address & 0x1FU));
+      if (g_app_camera_imx219_scan_first_ack == 0xffffffffU)
+      {
+        g_app_camera_imx219_scan_first_ack = address;
+      }
+    }
+  }
+
+  AppI2C2_Unlock();
+}
+
 int32_t AppCameraIMX219_Init(const AppCameraIMX219Config_t *config, uint16_t *chip_id)
 {
   uint16_t id = 0U;
@@ -332,10 +382,16 @@ int32_t AppCameraIMX219_Init(const AppCameraIMX219Config_t *config, uint16_t *ch
   g_app_camera_imx219_readback_test_pattern = 0xffffffffU;
   g_app_camera_imx219_readback_stream = 0xffffffffU;
 
-  HAL_GPIO_WritePin(CAM_EN_MODULE_GPIO_Port, CAM_EN_MODULE_Pin, GPIO_PIN_SET);
-  HAL_Delay(10U);
+  IMX219_PowerCycle(IMX219_POWER_OFF_DELAY_MS, IMX219_POWER_ON_DELAY_MS);
+  IMX219_RecordI2CScan();
 
   status = IMX219_WriteReg(IMX219_REG_SOFTWARE_RESET, 0x0001U, 1U);
+  if (status != APP_CAMERA_IMX219_OK)
+  {
+    g_app_camera_imx219_reset_retry_count++;
+    IMX219_PowerCycle(IMX219_RESET_RECOVERY_DELAY_MS, IMX219_POWER_ON_DELAY_MS);
+    status = IMX219_WriteReg(IMX219_REG_SOFTWARE_RESET, 0x0001U, 1U);
+  }
   if (status != APP_CAMERA_IMX219_OK)
   {
     return status;

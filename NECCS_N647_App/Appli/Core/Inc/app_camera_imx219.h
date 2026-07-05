@@ -23,6 +23,11 @@ extern volatile uint32_t g_app_camera_imx219_readback_data_format0;
 extern volatile uint32_t g_app_camera_imx219_readback_data_format1;
 extern volatile uint32_t g_app_camera_imx219_readback_test_pattern;
 extern volatile uint32_t g_app_camera_imx219_readback_stream;
+extern volatile uint32_t g_app_camera_imx219_power_cycle_count;
+extern volatile uint32_t g_app_camera_imx219_reset_retry_count;
+extern volatile uint32_t g_app_camera_imx219_scan_count;
+extern volatile uint32_t g_app_camera_imx219_scan_first_ack;
+extern volatile uint32_t g_app_camera_imx219_scan_ack_mask[4];
 
 typedef struct
 {

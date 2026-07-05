@@ -12,6 +12,9 @@ UINT AppI2C2_BusInit(void);
 uint8_t AppI2C2_Lock(uint32_t timeout_ms);
 void AppI2C2_Unlock(void);
 
+extern volatile uint32_t g_app_i2c2_hal_restore_count;
+extern volatile uint32_t g_app_i2c2_hal_restore_status;
+
 #ifdef __cplusplus
 }
 #endif
