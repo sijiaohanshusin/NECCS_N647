@@ -228,18 +228,19 @@ void TemplateView::setupNavigation()
 
 void TemplateView::setupImagePage()
 {
-    heatMap.setPosition(190, 140, 520, 322);
+    heatMap.setPosition(CameraPreviewX, CameraPreviewY, CameraPreviewW, CameraPreviewH);
     heatMap.setColors(rgb(20, 23, 26), rgb(53, 60, 62));
-    add(heatMap);
+    heatMap.setOverlayMode(false);
+    heatMap.setVisible(false);
 
-    setupLabel(heatMetricLabel[0], 190, 486, 122, 28, 2, "THETA 000", rgb(235, 239, 232), rgb(20, 23, 26));
-    setupLabel(heatMetricLabel[1], 330, 486, 106, 28, 2, "PHI 00", rgb(235, 239, 232), rgb(20, 23, 26));
-    setupLabel(heatMetricLabel[2], 470, 486, 88, 28, 2, "Q 00%", rgb(161, 221, 206), rgb(20, 23, 26));
-    setupLabel(heatMetricLabel[3], 590, 486, 92, 28, 2, "C 00%", rgb(214, 170, 65), rgb(20, 23, 26));
+    setupLabel(heatMetricLabel[0], 208, 510, 124, 24, 1, "THETA 000", rgb(235, 239, 232), rgb(22, 25, 28));
+    setupLabel(heatMetricLabel[1], 350, 510, 104, 24, 1, "PHI 00", rgb(235, 239, 232), rgb(22, 25, 28));
+    setupLabel(heatMetricLabel[2], 472, 510, 84, 24, 1, "Q 00%", rgb(161, 221, 206), rgb(22, 25, 28));
+    setupLabel(heatMetricLabel[3], 574, 510, 84, 24, 1, "C 00%", rgb(214, 170, 65), rgb(22, 25, 28));
 
     for (uint32_t i = 0U; i < 4U; ++i)
     {
-        add(heatMetricLabel[i]);
+        heatMetricLabel[i].setVisible(false);
     }
 }
 
@@ -249,14 +250,29 @@ void TemplateView::setupMicPage()
     {
         const int16_t col = static_cast<int16_t>(i % 8U);
         const int16_t row = static_cast<int16_t>(i / 8U);
-        micCell[i].setPosition(static_cast<int16_t>(190 + (col * 64)),
-                               static_cast<int16_t>(150 + (row * 66)),
+        const int16_t x = static_cast<int16_t>(190 + (col * 64));
+        const int16_t y = static_cast<int16_t>(150 + (row * 66));
+
+        micCell[i].setPosition(x,
+                               y,
                                52,
                                50);
         micCell[i].setColor(rgb(43, 73, 78));
         micCell[i].setBorderColor(rgb(57, 64, 65));
         micCell[i].setBorderSize(2);
         add(micCell[i]);
+
+        setupLabel(micValueLabel[i],
+                   static_cast<int16_t>(x - 2),
+                   static_cast<int16_t>(y + 16),
+                   58,
+                   18,
+                   1,
+                   "M00 --dB",
+                   rgb(235, 239, 232),
+                   rgb(43, 73, 78),
+                   AppTextLabel::ALIGN_CENTER);
+        add(micValueLabel[i]);
     }
 
     setupLabel(micSummaryLabel[0], 190, 430, 190, 28, 2, "32 MIC PLANAR", rgb(235, 239, 232), rgb(20, 23, 26));
@@ -478,6 +494,7 @@ void TemplateView::refreshVisibility()
         profileLabel[i].invalidate();
     }
 
+    heatMap.setOverlayMode(false);
     heatMap.setVisible(false);
     heatMap.invalidate();
     for (uint32_t i = 0U; i < 4U; ++i)
@@ -489,7 +506,9 @@ void TemplateView::refreshVisibility()
     for (uint32_t i = 0U; i < MicCount; ++i)
     {
         micCell[i].setVisible(micVisible);
+        micValueLabel[i].setVisible(micVisible);
         micCell[i].invalidate();
+        micValueLabel[i].invalidate();
     }
     for (uint32_t i = 0U; i < 4U; ++i)
     {
@@ -636,42 +655,71 @@ void TemplateView::refreshDetails(const AppUiSnapshot& snapshot)
 
 void TemplateView::refreshImagePage(const AppUiSnapshot& snapshot)
 {
-    char text[32];
+    char text[40];
 
-    heatMap.setValues(snapshot.heat, 81U, snapshot.peakIndex);
-
-    (void)snprintf(text, sizeof(text), "THETA %+03d", snapshot.thetaDeg);
-    heatMetricLabel[0].setText(text);
-    (void)snprintf(text, sizeof(text), "PHI %+03d", snapshot.phiDeg);
-    heatMetricLabel[1].setText(text);
-    (void)snprintf(text, sizeof(text), "Q %02u%%", snapshot.qualityPct);
-    heatMetricLabel[2].setText(text);
-    (void)snprintf(text, sizeof(text), "C %02u%%", snapshot.contrastPct);
-    heatMetricLabel[3].setText(text);
+    (void)snprintf(text, sizeof(text), "%s T%+03d P%+03d Q%02u",
+                   profileName(activeProfile),
+                   snapshot.thetaDeg,
+                   snapshot.phiDeg,
+                   snapshot.qualityPct);
+    modeLabel.setText(text);
 }
 
 void TemplateView::refreshMicPage(const AppUiSnapshot& snapshot)
 {
-    uint32_t sum = 0U;
-    uint8_t peak = 0U;
+    int32_t dbSum = 0;
+    int8_t peakDbfs = -90;
     char text[32];
+    const bool pcmdLive = ((snapshot.pcmdFlags & APP_UI_PCMD_FLAG_FRAME_VALID) != 0U);
+    const bool pcmdStarted = ((snapshot.pcmdFlags & APP_UI_PCMD_FLAG_STARTED) != 0U);
+    const bool pcmdDebug = ((snapshot.pcmdFlags & APP_UI_PCMD_FLAG_DEBUG_ENABLED) != 0U);
 
     for (uint32_t i = 0U; i < MicCount; ++i)
     {
         const uint8_t level = snapshot.micLevel[i];
-        sum += level;
-        if (level > peak)
+        const int8_t dbfs = snapshot.micDbfs[i];
+        const touchgfx::colortype color = levelColor(level);
+        dbSum += static_cast<int32_t>(dbfs);
+        if (dbfs > peakDbfs)
         {
-            peak = level;
+            peakDbfs = dbfs;
         }
-        micCell[i].setColor(levelColor(level));
+        micCell[i].setColor(color);
+        (void)snprintf(text, sizeof(text), "M%02lu %ddB",
+                       static_cast<unsigned long>(i + 1U),
+                       static_cast<int>(dbfs));
+        micValueLabel[i].setColors(rgb(235, 239, 232), color, true);
+        micValueLabel[i].setText(text);
         micCell[i].invalidate();
+        micValueLabel[i].invalidate();
     }
 
-    (void)snprintf(text, sizeof(text), "AVG %02lu%%", static_cast<unsigned long>(sum / MicCount));
+    (void)snprintf(text, sizeof(text), "AVG %lddB", static_cast<long>(dbSum / static_cast<int32_t>(MicCount)));
     micSummaryLabel[1].setText(text);
-    (void)snprintf(text, sizeof(text), "PEAK %02u%%", peak);
+    (void)snprintf(text, sizeof(text), "PEAK %ddB", static_cast<int>(peakDbfs));
     micSummaryLabel[2].setText(text);
+
+    micSummaryLabel[0].setText(pcmdLive ? "32 MIC PCMD" : "32 MIC PLANAR");
+    if (pcmdDebug)
+    {
+        (void)snprintf(text, sizeof(text), "DEV P%X C%X S%X",
+                       snapshot.pcmdDevicePresentMask,
+                       snapshot.pcmdDeviceConfigOkMask,
+                       snapshot.pcmdDeviceStatusOkMask);
+        micSummaryLabel[3].setText(text);
+    }
+    else if (pcmdLive)
+    {
+        micSummaryLabel[3].setText("PCMD LIVE");
+    }
+    else if (pcmdStarted)
+    {
+        micSummaryLabel[3].setText("PCMD START");
+    }
+    else
+    {
+        micSummaryLabel[3].setText("PCMD OFFLINE");
+    }
 }
 
 void TemplateView::refreshPerfPage(const AppUiSnapshot& snapshot)
@@ -692,16 +740,73 @@ void TemplateView::refreshPerfPage(const AppUiSnapshot& snapshot)
         perfFill[i].setColor(fillColors[i]);
         perfFill[i].invalidate();
     }
+
+    if ((snapshot.pcmdFlags & APP_UI_PCMD_FLAG_DEBUG_ENABLED) != 0U)
+    {
+        char text[24];
+        perfLabel[0].setText("CAP");
+        (void)snprintf(text, sizeof(text), "FPS %lu.%lu",
+                       static_cast<unsigned long>(snapshot.pcmdFpsX10 / 10U),
+                       static_cast<unsigned long>(snapshot.pcmdFpsX10 % 10U));
+        perfLabel[1].setText(text);
+        (void)snprintf(text, sizeof(text), "PUB %lu", static_cast<unsigned long>(snapshot.pcmdPublishedFrames % 1000U));
+        perfLabel[2].setText(text);
+        (void)snprintf(text, sizeof(text), "DRP %lu", static_cast<unsigned long>(snapshot.pcmdDroppedHalves % 1000U));
+        perfLabel[3].setText(text);
+        perfLabel[4].setText("UI");
+    }
+    else
+    {
+        const char* labels[PerfCount] = {"PRE", "FFT", "GCC", "SRP", "TOT"};
+        for (uint32_t i = 0U; i < PerfCount; ++i)
+        {
+            perfLabel[i].setText(labels[i]);
+        }
+    }
 }
 
 void TemplateView::refreshSettingsPage(const AppUiSnapshot& snapshot)
 {
     char text[48];
+    const bool pcmdLive = ((snapshot.pcmdFlags & APP_UI_PCMD_FLAG_FRAME_VALID) != 0U);
+    const bool pcmdStarted = ((snapshot.pcmdFlags & APP_UI_PCMD_FLAG_STARTED) != 0U);
+    const bool pcmdDebug = ((snapshot.pcmdFlags & APP_UI_PCMD_FLAG_DEBUG_ENABLED) != 0U);
+    const bool acousticRunning = ((snapshot.acousticFlags & APP_UI_ACOUSTIC_FLAG_RUNNING) != 0U);
+    const bool acousticValid = ((snapshot.acousticFlags & APP_UI_ACOUSTIC_FLAG_VALID) != 0U);
+    const bool acousticDegraded = ((snapshot.acousticFlags & APP_UI_ACOUSTIC_FLAG_AUTO_DEGRADED) != 0U);
+
     (void)snprintf(text, sizeof(text), "PAIRS %s %u",
                    profileName(snapshot.activeProfile),
                    (snapshot.activeProfile == APP_UI_PROFILE_FAST) ? 96U :
                    ((snapshot.activeProfile == APP_UI_PROFILE_QUALITY) ? 240U : 160U));
     settingsLabel[2].setText(text);
+
+    settingsLabel[4].setText(acousticValid ? "SOURCE PCMD SRP" :
+                             (pcmdLive ? "SOURCE PCMD WAIT SRP" :
+                             (pcmdStarted ? "SOURCE PCMD WAIT" : "SOURCE SYNTH")));
+    if (pcmdDebug)
+    {
+        (void)snprintf(text, sizeof(text), "PCMD F%lu D%lu M%lu",
+                       static_cast<unsigned long>(snapshot.pcmdPublishedFrames),
+                       static_cast<unsigned long>(snapshot.pcmdDroppedHalves),
+                       static_cast<unsigned long>(snapshot.pcmdSyncMissCount));
+        settingsLabel[6].setText(text);
+    }
+    else
+    {
+        if (acousticRunning)
+        {
+            (void)snprintf(text, sizeof(text), "%s P%lu F%lu",
+                           acousticDegraded ? "SRP FAST" : "SRP RUN",
+                           static_cast<unsigned long>(snapshot.acousticProcessedFrames % 1000U),
+                           static_cast<unsigned long>(snapshot.acousticFailedFrames % 1000U));
+            settingsLabel[6].setText(text);
+        }
+        else
+        {
+            settingsLabel[6].setText(pcmdLive ? "REAL CAPTURE ACTIVE" : "REAL CAPTURE WAITS PCMD");
+        }
+    }
 }
 
 void TemplateView::refreshMediaPage(const AppUiSnapshot& snapshot)

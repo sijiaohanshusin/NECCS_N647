@@ -11,9 +11,12 @@ extern "C" {
 UINT AppI2C2_BusInit(void);
 uint8_t AppI2C2_Lock(uint32_t timeout_ms);
 void AppI2C2_Unlock(void);
+void AppI2C2_RequestRecovery(uint32_t status);
 
 extern volatile uint32_t g_app_i2c2_hal_restore_count;
 extern volatile uint32_t g_app_i2c2_hal_restore_status;
+extern volatile uint32_t g_app_i2c2_hal_recover_request_count;
+extern volatile uint32_t g_app_i2c2_hal_recover_last_status;
 
 #ifdef __cplusplus
 }

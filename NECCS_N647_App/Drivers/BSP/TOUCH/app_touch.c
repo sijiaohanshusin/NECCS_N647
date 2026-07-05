@@ -30,7 +30,10 @@
 #define APP_TOUCH_GT_INVERT_Y 0U
 #endif
 
-#define APP_TOUCH_I2C_TIMEOUT_MS        50U
+#define APP_TOUCH_I2C_TIMEOUT_MS        5U
+#define APP_TOUCH_I2C_COOLDOWN_MS       20U
+#define APP_TOUCH_REINIT_ERROR_LIMIT    16U
+#define APP_TOUCH_REINIT_COOLDOWN_MS    1000U
 
 #define APP_TOUCH_FT_ADDR7              0x38U
 #define APP_TOUCH_FT_REG_MODE           0x00U
@@ -58,6 +61,40 @@ static AppTouchSnapshot_t g_touch;
 static uint8_t g_pins_ready;
 static uint8_t g_gt_address7;
 static uint32_t g_next_init_retry_ms;
+static uint32_t g_next_sample_retry_ms;
+
+static uint8_t time_reached(uint32_t now, uint32_t target)
+{
+  return ((int32_t)(now - target) >= 0) ? 1U : 0U;
+}
+
+static void note_i2c_sample_error(void)
+{
+  const uint32_t now = HAL_GetTick();
+
+  g_touch.last_error = APP_TOUCH_ERR_ACK;
+  ++g_touch.error_count;
+  ++g_touch.consecutive_error_count;
+  g_next_sample_retry_ms = now + APP_TOUCH_I2C_COOLDOWN_MS;
+  ++g_touch.cooldown_count;
+
+  if (g_touch.consecutive_error_count >= APP_TOUCH_REINIT_ERROR_LIMIT)
+  {
+    g_touch.ready = 0U;
+    g_touch.down = 0U;
+    g_touch.touch_count = 0U;
+    g_touch.consecutive_error_count = 0U;
+    ++g_touch.reinit_count;
+    g_next_init_retry_ms = now + APP_TOUCH_REINIT_COOLDOWN_MS;
+    g_next_sample_retry_ms = g_next_init_retry_ms;
+  }
+}
+
+static void note_i2c_sample_ok(void)
+{
+  g_touch.consecutive_error_count = 0U;
+  g_touch.last_error = APP_TOUCH_ERR_NONE;
+}
 
 static void touch_pins_init(void)
 {
@@ -136,6 +173,10 @@ static void touch_reset_with_int(GPIO_PinState int_state)
 static uint8_t i2c_status_ok(HAL_StatusTypeDef status)
 {
   g_touch.last_hal_status = (uint32_t)status;
+  if (status != HAL_OK)
+  {
+    AppI2C2_RequestRecovery((uint32_t)status);
+  }
   return (status == HAL_OK) ? 1U : 0U;
 }
 
@@ -363,6 +404,7 @@ static uint8_t ft_try_init(void)
   g_touch.ic = APP_TOUCH_IC_FT5X06;
   g_touch.ready = 1U;
   g_touch.last_error = APP_TOUCH_ERR_NONE;
+  g_touch.consecutive_error_count = 0U;
   (void)version;
   return 1U;
 }
@@ -415,6 +457,7 @@ static uint8_t gt_try_init_at(uint8_t address7, GPIO_PinState int_state)
   g_touch.ic = APP_TOUCH_IC_GT9XXX;
   g_touch.ready = 1U;
   g_touch.last_error = APP_TOUCH_ERR_NONE;
+  g_touch.consecutive_error_count = 0U;
   return 1U;
 }
 
@@ -443,8 +486,7 @@ static uint8_t ft_sample(uint16_t *x, uint16_t *y)
 
   if (ft_read_reg(APP_TOUCH_FT_REG_POINTS, &count, 1U) == 0U)
   {
-    g_touch.last_error = APP_TOUCH_ERR_ACK;
-    ++g_touch.error_count;
+    note_i2c_sample_error();
     return 0U;
   }
 
@@ -453,13 +495,13 @@ static uint8_t ft_sample(uint16_t *x, uint16_t *y)
   {
     g_touch.down = 0U;
     g_touch.touch_count = 0U;
+    note_i2c_sample_ok();
     return 0U;
   }
 
   if (ft_read_reg(APP_TOUCH_FT_REG_TP1, point, 4U) == 0U)
   {
-    g_touch.last_error = APP_TOUCH_ERR_ACK;
-    ++g_touch.error_count;
+    note_i2c_sample_error();
     return 0U;
   }
 
@@ -472,6 +514,7 @@ static uint8_t ft_sample(uint16_t *x, uint16_t *y)
               APP_TOUCH_FT_INVERT_X,
               APP_TOUCH_FT_INVERT_Y,
               count);
+  note_i2c_sample_ok();
   *x = g_touch.x;
   *y = g_touch.y;
   return 1U;
@@ -488,13 +531,13 @@ static uint8_t gt_sample(uint16_t *x, uint16_t *y)
 
   if (gt_read_reg(APP_TOUCH_GT_REG_STATUS, &status, 1U) == 0U)
   {
-    g_touch.last_error = APP_TOUCH_ERR_ACK;
-    ++g_touch.error_count;
+    note_i2c_sample_error();
     return 0U;
   }
 
   if ((status & 0x80U) == 0U)
   {
+    note_i2c_sample_ok();
     return 0U;
   }
 
@@ -504,7 +547,7 @@ static uint8_t gt_sample(uint16_t *x, uint16_t *y)
     (void)gt_write_reg(APP_TOUCH_GT_REG_STATUS, &clear, 1U);
     g_touch.down = 0U;
     g_touch.touch_count = 0U;
-    g_touch.last_error = APP_TOUCH_ERR_NONE;
+    note_i2c_sample_ok();
     return 0U;
   }
 
@@ -520,8 +563,7 @@ static uint8_t gt_sample(uint16_t *x, uint16_t *y)
   if (gt_read_reg(APP_TOUCH_GT_REG_TP1, point, 4U) == 0U)
   {
     (void)gt_write_reg(APP_TOUCH_GT_REG_STATUS, &clear, 1U);
-    g_touch.last_error = APP_TOUCH_ERR_ACK;
-    ++g_touch.error_count;
+    note_i2c_sample_error();
     return 0U;
   }
 
@@ -536,6 +578,7 @@ static uint8_t gt_sample(uint16_t *x, uint16_t *y)
               APP_TOUCH_GT_INVERT_X,
               APP_TOUCH_GT_INVERT_Y,
               count);
+  note_i2c_sample_ok();
   *x = g_touch.x;
   *y = g_touch.y;
   return 1U;
@@ -550,28 +593,34 @@ uint8_t AppTouch_Init(void)
   g_touch.ic = APP_TOUCH_IC_NONE;
   g_touch.address7 = 0U;
   g_touch.last_error = APP_TOUCH_ERR_NO_DEVICE;
+  g_touch.consecutive_error_count = 0U;
 
   if (ft_try_init() != 0U)
   {
     g_next_init_retry_ms = 0U;
+    g_next_sample_retry_ms = 0U;
     return 1U;
   }
 
   if (gt_try_init() != 0U)
   {
     g_next_init_retry_ms = 0U;
+    g_next_sample_retry_ms = 0U;
     return 1U;
   }
 
   g_touch.ready = 0U;
   g_touch.ic = APP_TOUCH_IC_NONE;
   g_next_init_retry_ms = HAL_GetTick() + 1000U;
+  g_next_sample_retry_ms = g_next_init_retry_ms;
   ++g_touch.error_count;
   return 0U;
 }
 
 uint8_t AppTouch_Sample(uint16_t *x, uint16_t *y)
 {
+  const uint32_t now = HAL_GetTick();
+
   if ((x == NULL) || (y == NULL))
   {
     g_touch.last_error = APP_TOUCH_ERR_BAD_ARGUMENT;
@@ -579,9 +628,14 @@ uint8_t AppTouch_Sample(uint16_t *x, uint16_t *y)
     return 0U;
   }
 
+  if ((g_next_sample_retry_ms != 0U) && (time_reached(now, g_next_sample_retry_ms) == 0U))
+  {
+    return 0U;
+  }
+
   if (g_touch.ready == 0U)
   {
-    if ((g_touch.init_attempts != 0U) && ((int32_t)(HAL_GetTick() - g_next_init_retry_ms) < 0))
+    if ((g_touch.init_attempts != 0U) && (time_reached(now, g_next_init_retry_ms) == 0U))
     {
       return 0U;
     }

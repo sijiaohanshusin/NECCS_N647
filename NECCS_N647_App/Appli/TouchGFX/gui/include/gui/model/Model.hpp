@@ -64,6 +64,22 @@ enum AppUiMediaFlag
     APP_UI_MEDIA_FLAG_PREVIEW_VALID = 0x00000040UL
 };
 
+enum AppUiPcmdFlag
+{
+    APP_UI_PCMD_FLAG_INITIALIZED = 0x00000001UL,
+    APP_UI_PCMD_FLAG_STARTED = 0x00000002UL,
+    APP_UI_PCMD_FLAG_FRAME_VALID = 0x00000004UL,
+    APP_UI_PCMD_FLAG_DEBUG_ENABLED = 0x00000008UL
+};
+
+enum AppUiAcousticFlag
+{
+    APP_UI_ACOUSTIC_FLAG_INITIALIZED = 0x00000001UL,
+    APP_UI_ACOUSTIC_FLAG_RUNNING = 0x00000002UL,
+    APP_UI_ACOUSTIC_FLAG_VALID = 0x00000004UL,
+    APP_UI_ACOUSTIC_FLAG_AUTO_DEGRADED = 0x00000008UL
+};
+
 struct AppUiSnapshot
 {
     uint32_t frameSeq;
@@ -83,8 +99,21 @@ struct AppUiSnapshot
     uint32_t mediaPreviewGeneration;
     uint32_t mediaPreviewFrameIndex;
     uint32_t mediaPreviewFrameCount;
+    uint32_t pcmdFlags;
+    uint32_t pcmdPublishedFrames;
+    uint32_t pcmdDroppedHalves;
+    uint32_t pcmdSyncMissCount;
+    uint32_t acousticFlags;
+    uint32_t acousticInputSeq;
+    uint32_t acousticOutputSeq;
+    uint32_t acousticProcessedFrames;
+    uint32_t acousticSkippedFrames;
+    uint32_t acousticFailedFrames;
+    uint32_t acousticDegradedCount;
+    uint32_t acousticActiveChannelMask;
     const uint16_t* mediaPreviewPixels;
     int32_t batteryCurrentMa;
+    int32_t acousticLastStatus;
     uint32_t powerPinState;
     uint16_t touchX;
     uint16_t touchY;
@@ -95,6 +124,7 @@ struct AppUiSnapshot
     uint16_t chargerStatus;
     uint16_t mediaPreviewWidth;
     uint16_t mediaPreviewHeight;
+    uint16_t pcmdFpsX10;
     int16_t thetaDeg;
     int16_t phiDeg;
     uint8_t activeScreen;
@@ -103,6 +133,10 @@ struct AppUiSnapshot
     uint8_t mediaSelectedType;
     uint8_t mediaPreviewValid;
     uint8_t mediaPreviewType;
+    uint8_t pcmdDevicePresentMask;
+    uint8_t pcmdDeviceConfigOkMask;
+    uint8_t pcmdDeviceStatusOkMask;
+    uint8_t pcmdDebugEnabled;
     uint8_t batteryPct;
     uint8_t touchReady;
     uint8_t touchDown;
@@ -112,6 +146,7 @@ struct AppUiSnapshot
     uint8_t peakIndex;
     uint8_t heat[81];
     uint8_t micLevel[32];
+    int8_t micDbfs[32];
     uint8_t perfLoad[5];
     char mediaLastFile[32];
     char mediaSelectedFile[32];

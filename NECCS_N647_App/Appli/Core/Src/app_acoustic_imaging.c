@@ -170,28 +170,67 @@ static void App_AcousticImaging_CountPairCoverage(const AppAcousticImagingPair_t
                                                   uint32_t channel_count,
                                                   uint8_t *coverage)
 {
-  for (uint32_t channel = 0U; channel < channel_count; channel++)
+  uint32_t coverage_count = channel_count;
+
+  if ((pairs == NULL) || (coverage == NULL))
+  {
+    return;
+  }
+
+  if (coverage_count > APP_MIC_ARRAY_PHYSICAL_MIC_COUNT)
+  {
+    coverage_count = APP_MIC_ARRAY_PHYSICAL_MIC_COUNT;
+  }
+
+  for (uint32_t channel = 0U; channel < coverage_count; channel++)
   {
     coverage[channel] = 0U;
   }
 
   for (uint32_t i = 0U; i < pair_count; i++)
   {
-    coverage[pairs[i].mic_a]++;
-    coverage[pairs[i].mic_b]++;
+    if (pairs[i].mic_a < coverage_count)
+    {
+      coverage[pairs[i].mic_a]++;
+    }
+    if (pairs[i].mic_b < coverage_count)
+    {
+      coverage[pairs[i].mic_b]++;
+    }
   }
 }
 
 static uint8_t App_AcousticImaging_FindReplacementIndex(const AppAcousticImagingPair_t *pairs,
                                                         uint32_t pair_count,
                                                         const uint8_t *coverage,
+                                                        uint32_t channel_count,
                                                         uint32_t *replace_index)
 {
+  uint32_t coverage_count = channel_count;
+
+  if ((pairs == NULL) || (coverage == NULL) || (replace_index == NULL))
+  {
+    return 0U;
+  }
+
+  if (coverage_count > APP_MIC_ARRAY_PHYSICAL_MIC_COUNT)
+  {
+    coverage_count = APP_MIC_ARRAY_PHYSICAL_MIC_COUNT;
+  }
+
   for (uint32_t i = pair_count; i > 0U; i--)
   {
     uint32_t index = i - 1U;
-    if ((coverage[pairs[index].mic_a] > 1U) &&
-        (coverage[pairs[index].mic_b] > 1U))
+    const uint8_t mic_a = pairs[index].mic_a;
+    const uint8_t mic_b = pairs[index].mic_b;
+
+    if ((mic_a >= coverage_count) || (mic_b >= coverage_count))
+    {
+      *replace_index = index;
+      return 1U;
+    }
+
+    if ((coverage[mic_a] > 1U) && (coverage[mic_b] > 1U))
     {
       *replace_index = index;
       return 1U;
@@ -234,13 +273,25 @@ static void App_AcousticImaging_RepairCoverage(const AppAcousticImagingConfig_t 
                                                uint32_t pair_count)
 {
   uint8_t coverage[APP_MIC_ARRAY_PHYSICAL_MIC_COUNT];
+  uint32_t channel_count;
+
+  if ((config == NULL) ||
+      (pairs == NULL) ||
+      (pair_count == 0U) ||
+      (config->channel_count == 0U) ||
+      (config->channel_count > APP_MIC_ARRAY_PHYSICAL_MIC_COUNT))
+  {
+    return;
+  }
+
+  channel_count = config->channel_count;
 
   App_AcousticImaging_CountPairCoverage(pairs,
                                         pair_count,
-                                        config->channel_count,
+                                        channel_count,
                                         coverage);
 
-  for (uint32_t missing = 0U; missing < config->channel_count; missing++)
+  for (uint32_t missing = 0U; missing < channel_count; missing++)
   {
     AppAcousticImagingPair_t best_pair;
     uint8_t found = 0U;
@@ -251,7 +302,7 @@ static void App_AcousticImaging_RepairCoverage(const AppAcousticImagingConfig_t 
       continue;
     }
 
-    for (uint32_t other = 0U; other < config->channel_count; other++)
+    for (uint32_t other = 0U; other < channel_count; other++)
     {
       const AppMicArrayMic_t *mic_a;
       const AppMicArrayMic_t *mic_b;
@@ -290,10 +341,19 @@ static void App_AcousticImaging_RepairCoverage(const AppAcousticImagingConfig_t 
         (App_AcousticImaging_FindReplacementIndex(pairs,
                                                   pair_count,
                                                   coverage,
+                                                  channel_count,
                                                   &replace_index) != 0U))
     {
-      coverage[pairs[replace_index].mic_a]--;
-      coverage[pairs[replace_index].mic_b]--;
+      const uint8_t old_a = pairs[replace_index].mic_a;
+      const uint8_t old_b = pairs[replace_index].mic_b;
+      if ((old_a < channel_count) && (coverage[old_a] > 0U))
+      {
+        coverage[old_a]--;
+      }
+      if ((old_b < channel_count) && (coverage[old_b] > 0U))
+      {
+        coverage[old_b]--;
+      }
       pairs[replace_index] = best_pair;
       coverage[best_pair.mic_a]++;
       coverage[best_pair.mic_b]++;

@@ -118,6 +118,7 @@ private:
     AppTextLabel heatMetricLabel[4];
 
     touchgfx::BoxWithBorder micCell[MicCount];
+    AppTextLabel micValueLabel[MicCount];
     AppTextLabel micSummaryLabel[4];
 
     touchgfx::Box perfTrack[PerfCount];

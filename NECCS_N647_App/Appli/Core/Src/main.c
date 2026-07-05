@@ -23,8 +23,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-#ifdef DEBUG
 #include "./SYS/sys.h"
+#ifdef DEBUG
 #include "./HyperRAM/hyperram.h"
 #endif
 #include "./LED/led.h"
@@ -45,6 +45,17 @@
 #define APP_HYPERRAM_BASE        0x90000000UL
 #define APP_HYPERRAM_TEST_BASE   (APP_HYPERRAM_BASE + 0x00200000UL)
 #define APP_HYPERRAM_TEST_BYTES  0x1000UL
+#ifndef APP_PCMD_SDOUT_BCLK_MARGIN_FIX
+#define APP_PCMD_SDOUT_BCLK_MARGIN_FIX  1U
+#endif
+#if (APP_PCMD_SDOUT_BCLK_MARGIN_FIX != 0U)
+#define APP_PCMD_SAI_CLOCK_STROBING  SAI_CLOCKSTROBING_RISINGEDGE
+#else
+#define APP_PCMD_SAI_CLOCK_STROBING  SAI_CLOCKSTROBING_FALLINGEDGE
+#endif
+#ifndef APP_PCMD_IRQ_PRIORITY
+#define APP_PCMD_IRQ_PRIORITY        10U
+#endif
 
 /* USER CODE END PD */
 
@@ -64,6 +75,15 @@ DMA2D_HandleTypeDef hdma2d;
 GPU2D_HandleTypeDef hgpu2d;
 
 LTDC_HandleTypeDef hltdc;
+
+SAI_HandleTypeDef hsai_BlockA1;
+SAI_HandleTypeDef hsai_BlockB1;
+DMA_NodeTypeDef Node_GPDMA1_Channel1 __NON_CACHEABLE;
+DMA_QListTypeDef List_GPDMA1_Channel1;
+DMA_HandleTypeDef handle_GPDMA1_Channel1;
+DMA_NodeTypeDef Node_GPDMA1_Channel0 __NON_CACHEABLE;
+DMA_QListTypeDef List_GPDMA1_Channel0;
+DMA_HandleTypeDef handle_GPDMA1_Channel0;
 
 SD_HandleTypeDef hsd2;
 
@@ -87,9 +107,11 @@ volatile uint32_t g_app_tick_recover_primask = 0;
 
 /* Private function prototypes -----------------------------------------------*/
 static void MX_GPIO_Init(void);
+static void MX_GPDMA1_Init(void);
 static void MX_DMA2D_Init(void);
 static void MX_GPU2D_Init(void);
 static void MX_LTDC_Init(void);
+static void MX_SAI1_Init(void);
 static void MX_I2C2_Init(void);
 static void MX_CRC_Init(void);
 static void SystemIsolation_Config(void);
@@ -234,6 +256,7 @@ int main(void)
   MX_GPIO_Init();
   App_BootDiag_SetStage(APP_BOOT_STAGE_GPIO_DONE);
   MX_I2C2_Init();
+  MX_GPDMA1_Init();
   MX_DMA2D_Init();
   App_BootDiag_SetStage(APP_BOOT_STAGE_DMA2D_DONE);
   MX_GPU2D_Init();
@@ -243,6 +266,11 @@ int main(void)
   App_BootDiag_SetStage(APP_BOOT_STAGE_CRC_DONE);
   SystemIsolation_Config();
   App_BootDiag_SetStage(APP_BOOT_STAGE_RIF_DONE);
+  if (sys_audio_clock_config() == 0U)
+  {
+    Error_Handler();
+  }
+  MX_SAI1_Init();
   /* USER CODE BEGIN 2 */
   led_init();
   App_BootDiag_SetStage(APP_BOOT_STAGE_BSP_LED_DONE);
@@ -269,6 +297,36 @@ int main(void)
     /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
+}
+
+/**
+  * @brief GPDMA1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_GPDMA1_Init(void)
+{
+
+  /* USER CODE BEGIN GPDMA1_Init 0 */
+
+  /* USER CODE END GPDMA1_Init 0 */
+
+  /* Peripheral clock enable */
+  __HAL_RCC_GPDMA1_CLK_ENABLE();
+
+  /* GPDMA1 interrupt Init */
+  HAL_NVIC_SetPriority(GPDMA1_Channel0_IRQn, APP_PCMD_IRQ_PRIORITY, 0);
+  HAL_NVIC_EnableIRQ(GPDMA1_Channel0_IRQn);
+  HAL_NVIC_SetPriority(GPDMA1_Channel1_IRQn, APP_PCMD_IRQ_PRIORITY, 0);
+  HAL_NVIC_EnableIRQ(GPDMA1_Channel1_IRQn);
+
+  /* USER CODE BEGIN GPDMA1_Init 1 */
+
+  /* USER CODE END GPDMA1_Init 1 */
+  /* USER CODE BEGIN GPDMA1_Init 2 */
+
+  /* USER CODE END GPDMA1_Init 2 */
+
 }
 
 /**
@@ -510,6 +568,8 @@ HAL_StatusTypeDef MX_SDMMC2_SD_Init(void)
 {
 
   /* USER CODE BEGIN RIF_Init 0 */
+  handle_GPDMA1_Channel0.Instance = GPDMA1_Channel0;
+  handle_GPDMA1_Channel1.Instance = GPDMA1_Channel1;
 
   /* USER CODE END RIF_Init 0 */
 
@@ -541,6 +601,24 @@ HAL_StatusTypeDef MX_SDMMC2_SD_Init(void)
 
   /* set up PWR configuration */
   HAL_PWR_ConfigAttributes(PWR_ITEM_0,PWR_SEC_NPRIV);
+
+  /* set up GPDMA configuration */
+  if (HAL_DMA_ConfigChannelAttributes(&handle_GPDMA1_Channel0,
+                                      DMA_CHANNEL_SEC |
+                                      DMA_CHANNEL_PRIV |
+                                      DMA_CHANNEL_SRC_SEC |
+                                      DMA_CHANNEL_DEST_SEC) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_DMA_ConfigChannelAttributes(&handle_GPDMA1_Channel1,
+                                      DMA_CHANNEL_SEC |
+                                      DMA_CHANNEL_PRIV |
+                                      DMA_CHANNEL_SRC_SEC |
+                                      DMA_CHANNEL_DEST_SEC) != HAL_OK)
+  {
+    Error_Handler();
+  }
 
   /* set up GPIO configuration */
   HAL_GPIO_ConfigPinAttributes(GPIOA,GPIO_PIN_0,GPIO_PIN_SEC|GPIO_PIN_NPRIV);
@@ -659,11 +737,97 @@ HAL_StatusTypeDef MX_SDMMC2_SD_Init(void)
   HAL_RIF_RIMC_ConfigMasterAttributes(RIF_MASTER_INDEX_GPU2D, &RIMC_master);
   HAL_RIF_RISC_SetSlaveSecureAttributes(RIF_RISC_PERIPH_INDEX_GPU2D, RIF_ATTRIBUTE_SEC | RIF_ATTRIBUTE_PRIV);
   HAL_RIF_RISC_SetSlaveSecureAttributes(RIF_RISC_PERIPH_INDEX_JPEG, RIF_ATTRIBUTE_SEC | RIF_ATTRIBUTE_PRIV);
+  HAL_RIF_RISC_SetSlaveSecureAttributes(RIF_RISC_PERIPH_INDEX_SAI1, RIF_ATTRIBUTE_SEC | RIF_ATTRIBUTE_PRIV);
+  HAL_RIF_RISC_SetSlaveSecureAttributes(RIF_RCC_PERIPH_INDEX_GPDMA1, RIF_ATTRIBUTE_SEC | RIF_ATTRIBUTE_PRIV);
 
   /* USER CODE END RIF_Init 1 */
   /* USER CODE BEGIN RIF_Init 2 */
 
   /* USER CODE END RIF_Init 2 */
+
+}
+
+/**
+  * @brief SAI1 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_SAI1_Init(void)
+{
+
+  /* USER CODE BEGIN SAI1_Init 0 */
+
+  /* USER CODE END SAI1_Init 0 */
+
+  /* USER CODE BEGIN SAI1_Init 1 */
+
+  /* USER CODE END SAI1_Init 1 */
+  hsai_BlockA1.Instance = SAI1_Block_A;
+  hsai_BlockA1.Init.Protocol = SAI_FREE_PROTOCOL;
+  hsai_BlockA1.Init.AudioMode = SAI_MODEMASTER_RX;
+  hsai_BlockA1.Init.DataSize = SAI_DATASIZE_16;
+  hsai_BlockA1.Init.FirstBit = SAI_FIRSTBIT_MSB;
+  hsai_BlockA1.Init.ClockStrobing = APP_PCMD_SAI_CLOCK_STROBING;
+  hsai_BlockA1.Init.Synchro = SAI_ASYNCHRONOUS;
+  hsai_BlockA1.Init.OutputDrive = SAI_OUTPUTDRIVE_DISABLE;
+  hsai_BlockA1.Init.NoDivider = SAI_MASTERDIVIDER_DISABLE;
+  hsai_BlockA1.Init.FIFOThreshold = SAI_FIFOTHRESHOLD_EMPTY;
+  hsai_BlockA1.Init.AudioFrequency = SAI_AUDIO_FREQUENCY_48K;
+  hsai_BlockA1.Init.SynchroExt = SAI_SYNCEXT_DISABLE;
+  hsai_BlockA1.Init.MckOutput = SAI_MCK_OUTPUT_DISABLE;
+  hsai_BlockA1.Init.MonoStereoMode = SAI_STEREOMODE;
+  hsai_BlockA1.Init.CompandingMode = SAI_NOCOMPANDING;
+  hsai_BlockA1.Init.PdmInit.Activation = DISABLE;
+  hsai_BlockA1.Init.PdmInit.MicPairsNbr = 1;
+  hsai_BlockA1.Init.PdmInit.ClockEnable = SAI_PDM_CLOCK1_ENABLE;
+  hsai_BlockA1.FrameInit.FrameLength = 256;
+  hsai_BlockA1.FrameInit.ActiveFrameLength = 1;
+  hsai_BlockA1.FrameInit.FSDefinition = SAI_FS_STARTFRAME;
+  hsai_BlockA1.FrameInit.FSPolarity = SAI_FS_ACTIVE_HIGH;
+  hsai_BlockA1.FrameInit.FSOffset = SAI_FS_BEFOREFIRSTBIT;
+  hsai_BlockA1.SlotInit.FirstBitOffset = 0;
+  hsai_BlockA1.SlotInit.SlotSize = SAI_SLOTSIZE_DATASIZE;
+  hsai_BlockA1.SlotInit.SlotNumber = 16;
+  hsai_BlockA1.SlotInit.SlotActive = 0x0000FFFF;
+  if (HAL_SAI_Init(&hsai_BlockA1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  hsai_BlockB1.Instance = SAI1_Block_B;
+  hsai_BlockB1.Init.Protocol = SAI_FREE_PROTOCOL;
+  hsai_BlockB1.Init.AudioMode = SAI_MODESLAVE_RX;
+  hsai_BlockB1.Init.DataSize = SAI_DATASIZE_16;
+  hsai_BlockB1.Init.FirstBit = SAI_FIRSTBIT_MSB;
+  hsai_BlockB1.Init.ClockStrobing = APP_PCMD_SAI_CLOCK_STROBING;
+  hsai_BlockB1.Init.Synchro = SAI_SYNCHRONOUS;
+  hsai_BlockB1.Init.OutputDrive = SAI_OUTPUTDRIVE_DISABLE;
+  hsai_BlockB1.Init.NoDivider = SAI_MASTERDIVIDER_ENABLE;
+  hsai_BlockB1.Init.FIFOThreshold = SAI_FIFOTHRESHOLD_EMPTY;
+  hsai_BlockB1.Init.SynchroExt = SAI_SYNCEXT_DISABLE;
+  hsai_BlockB1.Init.MckOutput = SAI_MCK_OUTPUT_ENABLE;
+  hsai_BlockB1.Init.MonoStereoMode = SAI_STEREOMODE;
+  hsai_BlockB1.Init.CompandingMode = SAI_NOCOMPANDING;
+  hsai_BlockB1.Init.TriState = SAI_OUTPUT_NOTRELEASED;
+  hsai_BlockB1.Init.PdmInit.Activation = DISABLE;
+  hsai_BlockB1.Init.PdmInit.MicPairsNbr = 1;
+  hsai_BlockB1.Init.PdmInit.ClockEnable = SAI_PDM_CLOCK1_ENABLE;
+  hsai_BlockB1.FrameInit.FrameLength = 256;
+  hsai_BlockB1.FrameInit.ActiveFrameLength = 1;
+  hsai_BlockB1.FrameInit.FSDefinition = SAI_FS_STARTFRAME;
+  hsai_BlockB1.FrameInit.FSPolarity = SAI_FS_ACTIVE_HIGH;
+  hsai_BlockB1.FrameInit.FSOffset = SAI_FS_BEFOREFIRSTBIT;
+  hsai_BlockB1.SlotInit.FirstBitOffset = 0;
+  hsai_BlockB1.SlotInit.SlotSize = SAI_SLOTSIZE_DATASIZE;
+  hsai_BlockB1.SlotInit.SlotNumber = 16;
+  hsai_BlockB1.SlotInit.SlotActive = 0x0000FFFF;
+  if (HAL_SAI_Init(&hsai_BlockB1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN SAI1_Init 2 */
+
+  /* USER CODE END SAI1_Init 2 */
 
 }
 

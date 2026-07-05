@@ -4,6 +4,33 @@
 #define PCMD3180_MAX_TDM_SLOT                63U
 #define PCMD3180_ASI_CFG0_TDM_MODE           0x00U
 #define PCMD3180_ASI_CFG0_TX_HIGH_Z          0x01U
+#define PCMD3180_WRITE_VERIFY_RETRY_COUNT    4U
+#define PCMD3180_WRITE_VERIFY_DELAY_MS       1U
+#define PCMD3180_ASI_ROUTING_RETRY_COUNT     4U
+#define PCMD3180_ASI_ROUTING_RETRY_DELAY_MS  2U
+#define PCMD3180_SLOT_REWRITE_PASSES         3U
+#define PCMD3180_SLOT_REWRITE_DELAY_MS       1U
+
+#define PCMD3180_H7_ASI_CFG0                 0x01U
+#define PCMD3180_H7_ASI_CFG1                 0x01U
+#define PCMD3180_H7_ASI_CFG2                 0x00U
+#define PCMD3180_H7_MST_CFG0                 0x00U
+#define PCMD3180_H7_MST_CFG1                 0x00U
+#define PCMD3180_H7_CLK_SRC                  0x00U
+#define PCMD3180_H7_PDMCLK_CFG               0x40U
+#define PCMD3180_H7_PDMIN_CFG                0x00U
+#define PCMD3180_H7_GPIO_CFG0                0x00U
+#define PCMD3180_H7_BIAS_CFG                 0x00U
+#define PCMD3180_H7_DSP_CFG0                 0x02U
+#define PCMD3180_H7_DSP_CFG1                 0x00U
+
+static const uint8_t PCMD3180_WIDE32_MIC_MAP[PCMD3180_ARRAY_DEVICE_COUNT][PCMD3180_ARRAY_MAX_MICS_PER_DEV] =
+{
+    { 1U,  2U,  9U, 10U, 17U, 18U, 19U, 20U },
+    { 3U,  4U, 11U, 12U, 29U, 30U, 31U, 32U },
+    { 5U,  6U, 13U, 14U, 25U, 26U, 27U, 28U },
+    { 7U,  8U, 15U, 16U, 21U, 22U, 23U, 24U }
+};
 
 static PCMD3180_StatusTypeDef PCMD3180_CheckHandle(const PCMD3180_HandleTypeDef *handle)
 {
@@ -31,21 +58,47 @@ static PCMD3180_StatusTypeDef PCMD3180_WriteChecked(PCMD3180_HandleTypeDef *hand
                                                     uint8_t verify)
 {
     uint8_t readback = 0U;
-    PCMD3180_StatusTypeDef status;
+    PCMD3180_StatusTypeDef status = PCMD3180_ERROR;
 
-    status = PCMD3180_WriteRegister(handle, reg, value);
-    if ((status != PCMD3180_OK) || (verify == 0U))
+    if (handle == NULL)
     {
-        return status;
+        return PCMD3180_INVALID_ARGUMENT;
     }
 
-    status = PCMD3180_ReadRegister(handle, reg, &readback);
-    if (status != PCMD3180_OK)
+    handle->last_reg = reg;
+    handle->last_write_value = value;
+    handle->last_read_value = 0U;
+
+    for (uint32_t attempt = 0U; attempt < PCMD3180_WRITE_VERIFY_RETRY_COUNT; attempt++)
     {
-        return status;
+        status = PCMD3180_WriteRegister(handle, reg, value);
+        if (status != PCMD3180_OK)
+        {
+            handle->last_status = status;
+            PCMD3180_Delay(handle, PCMD3180_WRITE_VERIFY_DELAY_MS);
+            continue;
+        }
+
+        if (verify == 0U)
+        {
+            handle->last_status = PCMD3180_OK;
+            return PCMD3180_OK;
+        }
+
+        PCMD3180_Delay(handle, PCMD3180_WRITE_VERIFY_DELAY_MS);
+        status = PCMD3180_ReadRegister(handle, reg, &readback);
+        handle->last_read_value = readback;
+        if ((status == PCMD3180_OK) && (readback == value))
+        {
+            handle->last_status = PCMD3180_OK;
+            return PCMD3180_OK;
+        }
+
+        handle->last_status = (status == PCMD3180_OK) ? PCMD3180_VERIFY_ERROR : status;
+        PCMD3180_Delay(handle, PCMD3180_WRITE_VERIFY_DELAY_MS);
     }
 
-    return (readback == value) ? PCMD3180_OK : PCMD3180_VERIFY_ERROR;
+    return handle->last_status;
 }
 
 static PCMD3180_StatusTypeDef PCMD3180_WriteChannelSlots(PCMD3180_HandleTypeDef *handle,
@@ -78,11 +131,28 @@ static PCMD3180_StatusTypeDef PCMD3180_WriteChannelSlots(PCMD3180_HandleTypeDef 
 
 static uint8_t PCMD3180_BuildAsiCfg0(const PCMD3180_ConfigTypeDef *config)
 {
+    if ((config->slot_width == PCMD3180_SLOT_WIDTH_16_BITS) &&
+        (config->invert_fsync == 0U) &&
+        (config->invert_bclk == 0U))
+    {
+        return PCMD3180_H7_ASI_CFG0;
+    }
+
     return (uint8_t)(PCMD3180_ASI_CFG0_TDM_MODE |
                     (uint8_t)(((uint8_t)config->slot_width & 0x03U) << 4) |
                     (uint8_t)((config->invert_fsync == 0U) ? 0U : 0x08U) |
                     (uint8_t)((config->invert_bclk == 0U) ? 0U : 0x04U) |
                     PCMD3180_ASI_CFG0_TX_HIGH_Z);
+}
+
+static uint8_t PCMD3180_BuildAsiCfg1(const PCMD3180_ConfigTypeDef *config)
+{
+    if (config->tdm_tx_offset == PCMD3180_H7_ASI_CFG1)
+    {
+        return PCMD3180_H7_ASI_CFG1;
+    }
+
+    return config->tdm_tx_offset;
 }
 
 static PCMD3180_StatusTypeDef PCMD3180_WriteAsiRouting(PCMD3180_HandleTypeDef *handle,
@@ -97,13 +167,13 @@ static PCMD3180_StatusTypeDef PCMD3180_WriteAsiRouting(PCMD3180_HandleTypeDef *h
         return status;
     }
 
-    status = PCMD3180_WriteChecked(handle, PCMD3180_REG_ASI_CFG1, config->tdm_tx_offset, verify);
+    status = PCMD3180_WriteChecked(handle, PCMD3180_REG_ASI_CFG1, PCMD3180_BuildAsiCfg1(config), verify);
     if (status != PCMD3180_OK)
     {
         return status;
     }
 
-    status = PCMD3180_WriteChecked(handle, PCMD3180_REG_ASI_CFG2, 0U, verify);
+    status = PCMD3180_WriteChecked(handle, PCMD3180_REG_ASI_CFG2, PCMD3180_H7_ASI_CFG2, verify);
     if (status != PCMD3180_OK)
     {
         return status;
@@ -112,19 +182,140 @@ static PCMD3180_StatusTypeDef PCMD3180_WriteAsiRouting(PCMD3180_HandleTypeDef *h
     return PCMD3180_WriteChannelSlots(handle, config->start_slot, verify);
 }
 
-static PCMD3180_StatusTypeDef PCMD3180_ApplyAsiRouting(PCMD3180_HandleTypeDef *handle,
-                                                       const PCMD3180_ConfigTypeDef *config,
-                                                       uint8_t verify)
+static PCMD3180_StatusTypeDef PCMD3180_VerifyRegisterEquals(PCMD3180_HandleTypeDef *handle,
+                                                            uint8_t reg,
+                                                            uint8_t expected)
+{
+    uint8_t readback = 0U;
+    PCMD3180_StatusTypeDef status;
+
+    status = PCMD3180_ReadRegister(handle, reg, &readback);
+    handle->last_reg = reg;
+    handle->last_write_value = expected;
+    handle->last_read_value = readback;
+
+    if (status != PCMD3180_OK)
+    {
+        handle->last_status = status;
+        return status;
+    }
+
+    if (readback != expected)
+    {
+        handle->last_status = PCMD3180_VERIFY_ERROR;
+        return PCMD3180_VERIFY_ERROR;
+    }
+
+    handle->last_status = PCMD3180_OK;
+    return PCMD3180_OK;
+}
+
+static PCMD3180_StatusTypeDef PCMD3180_VerifySlotRouting(PCMD3180_HandleTypeDef *handle,
+                                                         const PCMD3180_ConfigTypeDef *config)
+{
+    for (uint8_t channel = 0U; channel < PCMD3180_MAX_CHANNELS_PER_DEVICE; channel++)
+    {
+        PCMD3180_StatusTypeDef status;
+
+        status = PCMD3180_VerifyRegisterEquals(handle,
+                                               (uint8_t)(PCMD3180_REG_ASI_CH1 + channel),
+                                               (uint8_t)(config->start_slot + channel));
+        if (status != PCMD3180_OK)
+        {
+            return status;
+        }
+    }
+
+    return PCMD3180_OK;
+}
+
+static PCMD3180_StatusTypeDef PCMD3180_VerifyAsiRouting(PCMD3180_HandleTypeDef *handle,
+                                                        const PCMD3180_ConfigTypeDef *config)
 {
     PCMD3180_StatusTypeDef status;
 
-    status = PCMD3180_SelectPage(handle, 0U);
+    status = PCMD3180_VerifyRegisterEquals(handle,
+                                           PCMD3180_REG_ASI_CFG0,
+                                           PCMD3180_BuildAsiCfg0(config));
     if (status != PCMD3180_OK)
     {
         return status;
     }
 
-    return PCMD3180_WriteAsiRouting(handle, config, verify);
+    status = PCMD3180_VerifyRegisterEquals(handle,
+                                           PCMD3180_REG_ASI_CFG1,
+                                           PCMD3180_BuildAsiCfg1(config));
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    status = PCMD3180_VerifyRegisterEquals(handle, PCMD3180_REG_ASI_CFG2, PCMD3180_H7_ASI_CFG2);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    return PCMD3180_VerifySlotRouting(handle, config);
+}
+
+static PCMD3180_StatusTypeDef PCMD3180_ApplyAsiRouting(PCMD3180_HandleTypeDef *handle,
+                                                       const PCMD3180_ConfigTypeDef *config,
+                                                       uint8_t verify)
+{
+    PCMD3180_StatusTypeDef status = PCMD3180_ERROR;
+
+    for (uint32_t attempt = 0U; attempt < PCMD3180_ASI_ROUTING_RETRY_COUNT; attempt++)
+    {
+        status = PCMD3180_SelectPage(handle, 0U);
+        if (status != PCMD3180_OK)
+        {
+            handle->last_status = status;
+            PCMD3180_Delay(handle, PCMD3180_ASI_ROUTING_RETRY_DELAY_MS);
+            continue;
+        }
+
+        status = PCMD3180_WriteAsiRouting(handle, config, verify);
+        if (status == PCMD3180_OK)
+        {
+            PCMD3180_Delay(handle, PCMD3180_ASI_ROUTING_RETRY_DELAY_MS);
+            status = PCMD3180_VerifyAsiRouting(handle, config);
+            if (status == PCMD3180_OK)
+            {
+                return PCMD3180_OK;
+            }
+        }
+
+        PCMD3180_Delay(handle, PCMD3180_ASI_ROUTING_RETRY_DELAY_MS);
+    }
+
+    return status;
+}
+
+static PCMD3180_StatusTypeDef PCMD3180_RewriteSlotRouting(PCMD3180_HandleTypeDef *handle,
+                                                          const PCMD3180_ConfigTypeDef *config,
+                                                          uint8_t verify)
+{
+    PCMD3180_StatusTypeDef status = PCMD3180_OK;
+
+    for (uint32_t pass = 0U; pass < PCMD3180_SLOT_REWRITE_PASSES; pass++)
+    {
+        status = PCMD3180_SelectPage(handle, 0U);
+        if (status != PCMD3180_OK)
+        {
+            return status;
+        }
+
+        status = PCMD3180_WriteChannelSlots(handle, config->start_slot, verify);
+        if (status != PCMD3180_OK)
+        {
+            return status;
+        }
+
+        PCMD3180_Delay(handle, PCMD3180_SLOT_REWRITE_DELAY_MS);
+    }
+
+    return PCMD3180_VerifySlotRouting(handle, config);
 }
 
 static PCMD3180_StatusTypeDef PCMD3180_WritePdmInputConfig(PCMD3180_HandleTypeDef *handle,
@@ -149,6 +340,82 @@ static PCMD3180_StatusTypeDef PCMD3180_WritePdmInputConfig(PCMD3180_HandleTypeDe
     return PCMD3180_OK;
 }
 
+static void PCMD3180_ClearModeConfig(PCMD3180_ArrayModeConfigTypeDef *mode_config)
+{
+    if (mode_config == NULL)
+    {
+        return;
+    }
+
+    mode_config->mode = PCMD3180_ARRAY_MODE_32CH_48K;
+    mode_config->sample_rate_hz = 0U;
+    mode_config->frame_samples = 0U;
+    mode_config->slot_width = PCMD3180_SLOT_WIDTH_16_BITS;
+    mode_config->tdm_slots_per_bus = 0U;
+    mode_config->physical_mic_count = 0U;
+    mode_config->capture_channel_count = 0U;
+    mode_config->recommended_pair_count = 0U;
+    mode_config->band_low_hz = 0U;
+    mode_config->band_high_hz = 0U;
+    mode_config->expected_bclk_hz = 0U;
+
+    for (uint32_t device = 0U; device < PCMD3180_ARRAY_DEVICE_COUNT; device++)
+    {
+        mode_config->devices[device].device = (PCMD3180_ArrayDeviceTypeDef)device;
+        mode_config->devices[device].tdm_bus =
+            (device < 2U) ? PCMD3180_TDM_BUS_A : PCMD3180_TDM_BUS_B;
+        mode_config->devices[device].address7 = (uint8_t)(PCMD3180_I2C_ADDR_0 + device);
+        mode_config->devices[device].start_slot = 0U;
+        mode_config->devices[device].input_channel_mask = 0U;
+        mode_config->devices[device].output_channel_mask = 0U;
+        mode_config->devices[device].mic_count = 0U;
+
+        for (uint32_t mic = 0U; mic < PCMD3180_ARRAY_MAX_MICS_PER_DEV; mic++)
+        {
+            mode_config->devices[device].mic_id[mic] = 0U;
+        }
+    }
+}
+
+static void PCMD3180_SetDevicePlan(PCMD3180_ArrayModeConfigTypeDef *mode_config,
+                                   uint32_t device,
+                                   uint8_t start_slot,
+                                   uint8_t channel_mask,
+                                   uint8_t mic_count)
+{
+    mode_config->devices[device].start_slot = start_slot;
+    mode_config->devices[device].input_channel_mask = channel_mask;
+    mode_config->devices[device].output_channel_mask = channel_mask;
+    mode_config->devices[device].mic_count = mic_count;
+
+    for (uint32_t mic = 0U; mic < PCMD3180_ARRAY_MAX_MICS_PER_DEV; mic++)
+    {
+        mode_config->devices[device].mic_id[mic] =
+            (mic < mic_count) ? PCMD3180_WIDE32_MIC_MAP[device][mic] : 0U;
+    }
+}
+
+static void PCMD3180_Set32ChannelPlan(PCMD3180_ArrayModeConfigTypeDef *mode_config)
+{
+    PCMD3180_SetDevicePlan(mode_config, PCMD3180_ARRAY_DEVICE_U1, 0U, PCMD3180_CHANNEL_ALL, 8U);
+    PCMD3180_SetDevicePlan(mode_config, PCMD3180_ARRAY_DEVICE_U2, 8U, PCMD3180_CHANNEL_ALL, 8U);
+    PCMD3180_SetDevicePlan(mode_config, PCMD3180_ARRAY_DEVICE_U3, 0U, PCMD3180_CHANNEL_ALL, 8U);
+    PCMD3180_SetDevicePlan(mode_config, PCMD3180_ARRAY_DEVICE_U4, 8U, PCMD3180_CHANNEL_ALL, 8U);
+}
+
+static void PCMD3180_SetCore16Plan(PCMD3180_ArrayModeConfigTypeDef *mode_config)
+{
+    const uint8_t core4_mask = PCMD3180_CHANNEL_1 |
+                               PCMD3180_CHANNEL_2 |
+                               PCMD3180_CHANNEL_3 |
+                               PCMD3180_CHANNEL_4;
+
+    PCMD3180_SetDevicePlan(mode_config, PCMD3180_ARRAY_DEVICE_U1, 0U, core4_mask, 4U);
+    PCMD3180_SetDevicePlan(mode_config, PCMD3180_ARRAY_DEVICE_U2, 4U, core4_mask, 4U);
+    PCMD3180_SetDevicePlan(mode_config, PCMD3180_ARRAY_DEVICE_U3, 0U, core4_mask, 4U);
+    PCMD3180_SetDevicePlan(mode_config, PCMD3180_ARRAY_DEVICE_U4, 4U, core4_mask, 4U);
+}
+
 PCMD3180_StatusTypeDef PCMD3180_Init(PCMD3180_HandleTypeDef *handle,
                                      const PCMD3180_BusTypeDef *bus,
                                      uint8_t address7)
@@ -165,6 +432,10 @@ PCMD3180_StatusTypeDef PCMD3180_Init(PCMD3180_HandleTypeDef *handle,
     handle->address7 = address7;
     handle->current_page = 0U;
     handle->configured = 0U;
+    handle->last_status = PCMD3180_OK;
+    handle->last_reg = 0U;
+    handle->last_write_value = 0U;
+    handle->last_read_value = 0U;
     handle->bus = *bus;
 
     return PCMD3180_OK;
@@ -197,6 +468,90 @@ void PCMD3180_GetDefaultConfig(PCMD3180_ConfigTypeDef *config)
     /* Optional readback verification is left off for the normal ordered-write path. */
     config->verify_writes = 0U;
     config->defer_power_up = 0U;
+}
+
+PCMD3180_StatusTypeDef PCMD3180_GetArrayModeConfig(PCMD3180_ArrayModeTypeDef mode,
+                                                   PCMD3180_ArrayModeConfigTypeDef *mode_config)
+{
+    if (mode_config == NULL)
+    {
+        return PCMD3180_INVALID_ARGUMENT;
+    }
+
+    PCMD3180_ClearModeConfig(mode_config);
+    mode_config->mode = mode;
+    mode_config->slot_width = PCMD3180_SLOT_WIDTH_16_BITS;
+
+    switch (mode)
+    {
+    case PCMD3180_ARRAY_MODE_32CH_48K:
+        mode_config->sample_rate_hz = PCMD3180_SAMPLE_RATE_48K;
+        mode_config->frame_samples = 256U;
+        mode_config->tdm_slots_per_bus = 16U;
+        mode_config->physical_mic_count = 32U;
+        mode_config->capture_channel_count = 32U;
+        mode_config->recommended_pair_count = 96U;
+        mode_config->band_low_hz = 562U;
+        mode_config->band_high_hz = 7875U;
+        PCMD3180_Set32ChannelPlan(mode_config);
+        break;
+
+    case PCMD3180_ARRAY_MODE_CORE16_192K:
+        mode_config->sample_rate_hz = PCMD3180_SAMPLE_RATE_192K;
+        mode_config->frame_samples = 512U;
+        mode_config->tdm_slots_per_bus = 8U;
+        mode_config->physical_mic_count = 16U;
+        mode_config->capture_channel_count = 16U;
+        mode_config->recommended_pair_count = 48U;
+        mode_config->band_low_hz = 6000U;
+        mode_config->band_high_hz = 40000U;
+        PCMD3180_SetCore16Plan(mode_config);
+        break;
+
+    default:
+        return PCMD3180_INVALID_ARGUMENT;
+    }
+
+    mode_config->expected_bclk_hz =
+        PCMD3180_CalculateBitClockHz(mode_config->sample_rate_hz,
+                                     mode_config->tdm_slots_per_bus,
+                                     mode_config->slot_width);
+
+    return PCMD3180_OK;
+}
+
+PCMD3180_StatusTypeDef PCMD3180_BuildDeviceConfig(const PCMD3180_ArrayModeConfigTypeDef *mode_config,
+                                                  uint32_t device_index,
+                                                  PCMD3180_ConfigTypeDef *device_config)
+{
+    const PCMD3180_ArrayDevicePlanTypeDef *plan;
+
+    if ((mode_config == NULL) ||
+        (device_config == NULL) ||
+        (device_index >= PCMD3180_ARRAY_DEVICE_COUNT))
+    {
+        return PCMD3180_INVALID_ARGUMENT;
+    }
+
+    plan = &mode_config->devices[device_index];
+    PCMD3180_GetDefaultConfig(device_config);
+    device_config->start_slot = plan->start_slot;
+    device_config->input_channel_mask = plan->input_channel_mask;
+    device_config->output_channel_mask = plan->output_channel_mask;
+    device_config->logical_channel_count = plan->mic_count;
+    device_config->slot_width = mode_config->slot_width;
+    device_config->sample_rate_hz = mode_config->sample_rate_hz;
+    device_config->tdm_slots_per_bus = mode_config->tdm_slots_per_bus;
+    device_config->expected_bclk_hz = mode_config->expected_bclk_hz;
+    device_config->tdm_tx_offset = PCMD3180_H7_ASI_CFG1;
+    device_config->invert_bclk = 0U;
+    device_config->invert_fsync = 0U;
+    device_config->pdmin_edge_mask = PCMD3180_H7_PDMIN_CFG;
+    device_config->hpf_select = PCMD3180_HPF_96HZ_AT_48K;
+    device_config->verify_writes = 0U;
+    device_config->defer_power_up = 0U;
+
+    return PCMD3180_OK;
 }
 
 PCMD3180_StatusTypeDef PCMD3180_HardwareReset(PCMD3180_HandleTypeDef *handle,
@@ -268,6 +623,7 @@ PCMD3180_StatusTypeDef PCMD3180_Configure(PCMD3180_HandleTypeDef *handle,
                                           const PCMD3180_ConfigTypeDef *config)
 {
     uint8_t pwr_cfg;
+    uint8_t pdmin_cfg;
     uint8_t verify;
     uint8_t defer_power_up;
     PCMD3180_StatusTypeDef status;
@@ -290,6 +646,7 @@ PCMD3180_StatusTypeDef PCMD3180_Configure(PCMD3180_HandleTypeDef *handle,
 
     verify = (config->verify_writes == 0U) ? 0U : 1U;
     defer_power_up = (config->defer_power_up == 0U) ? 0U : 1U;
+    pdmin_cfg = (config->pdmin_edge_mask == 0U) ? PCMD3180_H7_PDMIN_CFG : config->pdmin_edge_mask;
 
     status = PCMD3180_SelectPage(handle, 0U);
     if (status != PCMD3180_OK)
@@ -327,9 +684,15 @@ PCMD3180_StatusTypeDef PCMD3180_Configure(PCMD3180_HandleTypeDef *handle,
         return status;
     }
 
+    status = PCMD3180_RewriteSlotRouting(handle, config, verify);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
     status = PCMD3180_WriteChecked(handle,
                                    PCMD3180_REG_PDMCLK_CFG,
-                                   (uint8_t)(PCMD3180_PDMCLK_CFG_RESET_MASK |
+                                   (uint8_t)(PCMD3180_H7_PDMCLK_CFG |
                                              ((uint8_t)config->pdmclk_divider & 0x03U)),
                                    verify);
     if (status != PCMD3180_OK)
@@ -337,13 +700,13 @@ PCMD3180_StatusTypeDef PCMD3180_Configure(PCMD3180_HandleTypeDef *handle,
         return status;
     }
 
-    status = PCMD3180_WriteChecked(handle, PCMD3180_REG_PDMIN_CFG, config->pdmin_edge_mask, verify);
+    status = PCMD3180_WriteChecked(handle, PCMD3180_REG_PDMIN_CFG, pdmin_cfg, verify);
     if (status != PCMD3180_OK)
     {
         return status;
     }
 
-    status = PCMD3180_WriteChecked(handle, PCMD3180_REG_GPIO_CFG0, 0U, verify);
+    status = PCMD3180_WriteChecked(handle, PCMD3180_REG_GPIO_CFG0, PCMD3180_H7_GPIO_CFG0, verify);
     if (status != PCMD3180_OK)
     {
         return status;
@@ -385,38 +748,50 @@ PCMD3180_StatusTypeDef PCMD3180_Configure(PCMD3180_HandleTypeDef *handle,
         return status;
     }
 
+    status = PCMD3180_WriteChecked(handle, PCMD3180_REG_BIAS_CFG, PCMD3180_H7_BIAS_CFG, verify);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
     status = PCMD3180_WritePdmInputConfig(handle, verify);
     if (status != PCMD3180_OK)
     {
         return status;
     }
 
-    status = PCMD3180_WriteChecked(handle, PCMD3180_REG_DSP_CFG0, (uint8_t)config->hpf_select, verify);
+    status = PCMD3180_RewriteSlotRouting(handle, config, verify);
     if (status != PCMD3180_OK)
     {
         return status;
     }
 
-    status = PCMD3180_WriteChecked(handle, PCMD3180_REG_DSP_CFG1, 0U, verify);
+    status = PCMD3180_WriteChecked(handle, PCMD3180_REG_DSP_CFG0, PCMD3180_H7_DSP_CFG0, verify);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    status = PCMD3180_WriteChecked(handle, PCMD3180_REG_DSP_CFG1, PCMD3180_H7_DSP_CFG1, verify);
     if (status != PCMD3180_OK)
     {
         return status;
     }
 
     /* Default slave-clock setup: BCLK/FSYNC must be provided by the host or another master. */
-    status = PCMD3180_WriteChecked(handle, PCMD3180_REG_MST_CFG0, 0U, verify);
+    status = PCMD3180_WriteChecked(handle, PCMD3180_REG_MST_CFG0, PCMD3180_H7_MST_CFG0, verify);
     if (status != PCMD3180_OK)
     {
         return status;
     }
 
-    status = PCMD3180_WriteChecked(handle, PCMD3180_REG_MST_CFG1, 0U, verify);
+    status = PCMD3180_WriteChecked(handle, PCMD3180_REG_MST_CFG1, PCMD3180_H7_MST_CFG1, verify);
     if (status != PCMD3180_OK)
     {
         return status;
     }
 
-    status = PCMD3180_WriteChecked(handle, PCMD3180_REG_CLK_SRC, 0U, verify);
+    status = PCMD3180_WriteChecked(handle, PCMD3180_REG_CLK_SRC, PCMD3180_H7_CLK_SRC, verify);
     if (status != PCMD3180_OK)
     {
         return status;
@@ -429,6 +804,12 @@ PCMD3180_StatusTypeDef PCMD3180_Configure(PCMD3180_HandleTypeDef *handle,
     }
 
     status = PCMD3180_WriteChecked(handle, PCMD3180_REG_ASI_OUT_CH_EN, config->output_channel_mask, verify);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    status = PCMD3180_RewriteSlotRouting(handle, config, verify);
     if (status != PCMD3180_OK)
     {
         return status;
@@ -456,6 +837,12 @@ PCMD3180_StatusTypeDef PCMD3180_Configure(PCMD3180_HandleTypeDef *handle,
         }
 
         status = PCMD3180_ApplyAsiRouting(handle, config, verify);
+        if (status != PCMD3180_OK)
+        {
+            return status;
+        }
+
+        status = PCMD3180_RewriteSlotRouting(handle, config, verify);
         if (status != PCMD3180_OK)
         {
             return status;
@@ -514,7 +901,64 @@ PCMD3180_StatusTypeDef PCMD3180_Activate(PCMD3180_HandleTypeDef *handle,
         return status;
     }
 
+    status = PCMD3180_RewriteSlotRouting(handle, config, verify);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
     handle->configured = 1U;
+    return PCMD3180_OK;
+}
+
+PCMD3180_StatusTypeDef PCMD3180_ConfigureArrayMode(PCMD3180_HandleTypeDef *handles,
+                                                   const uint8_t *addresses,
+                                                   const PCMD3180_BusTypeDef *bus,
+                                                   PCMD3180_ArrayModeTypeDef mode)
+{
+    PCMD3180_ArrayModeConfigTypeDef mode_config;
+    PCMD3180_StatusTypeDef status;
+
+    if ((handles == NULL) || (bus == NULL))
+    {
+        return PCMD3180_INVALID_ARGUMENT;
+    }
+
+    status = PCMD3180_GetArrayModeConfig(mode, &mode_config);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    for (uint32_t index = 0U; index < PCMD3180_ARRAY_DEVICE_COUNT; index++)
+    {
+        PCMD3180_ConfigTypeDef device_config;
+        uint8_t address7 = mode_config.devices[index].address7;
+
+        if (addresses != NULL)
+        {
+            address7 = addresses[index];
+        }
+
+        status = PCMD3180_Init(&handles[index], bus, address7);
+        if (status != PCMD3180_OK)
+        {
+            return status;
+        }
+
+        status = PCMD3180_BuildDeviceConfig(&mode_config, index, &device_config);
+        if (status != PCMD3180_OK)
+        {
+            return status;
+        }
+
+        status = PCMD3180_Configure(&handles[index], &device_config);
+        if (status != PCMD3180_OK)
+        {
+            return status;
+        }
+    }
+
     return PCMD3180_OK;
 }
 
@@ -607,6 +1051,77 @@ PCMD3180_StatusTypeDef PCMD3180_ReadStatus(PCMD3180_HandleTypeDef *handle,
     }
 
     status = PCMD3180_ReadRegister(handle, PCMD3180_REG_ASI_STS, &status_snapshot->asi_sts);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    for (uint32_t channel = 0U; channel < PCMD3180_ARRAY_MAX_MICS_PER_DEV; channel++)
+    {
+        status = PCMD3180_ReadRegister(handle,
+                                       (uint8_t)(PCMD3180_REG_ASI_CH1 + channel),
+                                       &status_snapshot->asi_ch_slot[channel]);
+        if (status != PCMD3180_OK)
+        {
+            return status;
+        }
+    }
+
+    status = PCMD3180_ReadRegister(handle, PCMD3180_REG_PDMCLK_CFG, &status_snapshot->pdmclk_cfg);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    status = PCMD3180_ReadRegister(handle, PCMD3180_REG_PDMIN_CFG, &status_snapshot->pdmin_cfg);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    status = PCMD3180_ReadRegister(handle, PCMD3180_REG_GPO_CFG0, &status_snapshot->gpo_cfg0);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    status = PCMD3180_ReadRegister(handle, PCMD3180_REG_GPO_CFG1, &status_snapshot->gpo_cfg1);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    status = PCMD3180_ReadRegister(handle, PCMD3180_REG_GPO_CFG2, &status_snapshot->gpo_cfg2);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    status = PCMD3180_ReadRegister(handle, PCMD3180_REG_GPO_CFG3, &status_snapshot->gpo_cfg3);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    status = PCMD3180_ReadRegister(handle, PCMD3180_REG_GPI_CFG0, &status_snapshot->gpi_cfg0);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    status = PCMD3180_ReadRegister(handle, PCMD3180_REG_GPI_CFG1, &status_snapshot->gpi_cfg1);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    status = PCMD3180_ReadRegister(handle, PCMD3180_REG_IN_CH_EN, &status_snapshot->in_ch_en);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    status = PCMD3180_ReadRegister(handle, PCMD3180_REG_ASI_OUT_CH_EN, &status_snapshot->asi_out_ch_en);
     if (status != PCMD3180_OK)
     {
         return status;

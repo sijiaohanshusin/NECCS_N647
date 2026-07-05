@@ -23,6 +23,8 @@
 
 #include "main.h"
 
+uint8_t sys_audio_clock_config(void);
+
 /* 函数声明 */
 void sys_clock_config_debug(void);  /* 配置系统时钟 */
 void sys_delay_us(uint32_t us);     /* 微秒级延时 */

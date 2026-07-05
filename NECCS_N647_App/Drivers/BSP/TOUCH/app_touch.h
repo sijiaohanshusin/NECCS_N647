@@ -35,6 +35,9 @@ typedef struct
   uint32_t error_count;
   uint32_t last_error;
   uint32_t last_hal_status;
+  uint32_t consecutive_error_count;
+  uint32_t cooldown_count;
+  uint32_t reinit_count;
 } AppTouchSnapshot_t;
 
 uint8_t AppTouch_Init(void);

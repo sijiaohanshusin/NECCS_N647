@@ -23,10 +23,18 @@
 /* USER CODE BEGIN STM32TouchController */
 
 #include <STM32TouchController.hpp>
+#include "stm32n6xx_hal.h"
 
 extern "C"
 {
 #include "TOUCH/app_touch.h"
+}
+
+#define APP_TOUCH_CONTROLLER_POLL_MS 20U
+
+static bool appTouchTimeReached(uint32_t now, uint32_t target)
+{
+    return static_cast<int32_t>(now - target) >= 0;
 }
 
 void STM32TouchController::init()
@@ -36,16 +44,39 @@ void STM32TouchController::init()
 
 bool STM32TouchController::sampleTouch(int32_t& x, int32_t& y)
 {
+    static uint32_t nextPollMs = 0U;
+    static bool cachedDown = false;
+    static int32_t cachedX = 0;
+    static int32_t cachedY = 0;
     uint16_t touchX = 0U;
     uint16_t touchY = 0U;
+    const uint32_t now = HAL_GetTick();
+
+    if ((nextPollMs != 0U) && !appTouchTimeReached(now, nextPollMs))
+    {
+        if (!cachedDown)
+        {
+            return false;
+        }
+
+        x = cachedX;
+        y = cachedY;
+        return true;
+    }
+
+    nextPollMs = now + APP_TOUCH_CONTROLLER_POLL_MS;
 
     if (AppTouch_Sample(&touchX, &touchY) == 0U)
     {
+        cachedDown = false;
         return false;
     }
 
-    x = static_cast<int32_t>(touchX);
-    y = static_cast<int32_t>(touchY);
+    cachedX = static_cast<int32_t>(touchX);
+    cachedY = static_cast<int32_t>(touchY);
+    cachedDown = true;
+    x = cachedX;
+    y = cachedY;
     return true;
 }
 

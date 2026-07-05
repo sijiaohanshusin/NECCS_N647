@@ -373,7 +373,8 @@ touchgfx::Rect AppAsciiLabel::getSolidRect() const
 AppHeatMap::AppHeatMap()
     : peak(40U),
       backgroundColor(touchgfx::Color::getColorFromRGB(18, 20, 23)),
-      gridColor(touchgfx::Color::getColorFromRGB(44, 49, 54))
+      gridColor(touchgfx::Color::getColorFromRGB(44, 49, 54)),
+      overlayMode(false)
 {
     for (uint32_t i = 0U; i < CellCount; ++i)
     {
@@ -405,11 +406,23 @@ void AppHeatMap::setColors(touchgfx::colortype background, touchgfx::colortype g
     invalidate();
 }
 
+void AppHeatMap::setOverlayMode(bool enabled)
+{
+    if (overlayMode != enabled)
+    {
+        overlayMode = enabled;
+        invalidate();
+    }
+}
+
 void AppHeatMap::draw(const touchgfx::Rect& area) const
 {
-    fillLocalRect(*this, area, touchgfx::Rect(0, 0, getWidth(), getHeight()), backgroundColor);
+    if (!overlayMode)
+    {
+        fillLocalRect(*this, area, touchgfx::Rect(0, 0, getWidth(), getHeight()), backgroundColor);
+    }
 
-    const int16_t gap = 4;
+    const int16_t gap = overlayMode ? 0 : 4;
     const int16_t cellW = static_cast<int16_t>((getWidth() - ((GridSize + 1U) * gap)) / GridSize);
     const int16_t cellH = static_cast<int16_t>((getHeight() - ((GridSize + 1U) * gap)) / GridSize);
 
@@ -422,27 +435,53 @@ void AppHeatMap::draw(const touchgfx::Rect& area) const
             const int16_t y = static_cast<int16_t>(gap + (row * (cellH + gap)));
             const touchgfx::Rect cell(x, y, cellW, cellH);
 
-            fillLocalRect(*this, area, cell, heatColor(values[index]));
-
-            if (index == peak)
+            if (overlayMode)
             {
-                fillLocalRect(*this, area, touchgfx::Rect(x, y, cellW, 3), touchgfx::Color::getColorFromRGB(240, 244, 236));
-                fillLocalRect(*this, area, touchgfx::Rect(x, static_cast<int16_t>(y + cellH - 3), cellW, 3), touchgfx::Color::getColorFromRGB(240, 244, 236));
-                fillLocalRect(*this, area, touchgfx::Rect(x, y, 3, cellH), touchgfx::Color::getColorFromRGB(240, 244, 236));
-                fillLocalRect(*this, area, touchgfx::Rect(static_cast<int16_t>(x + cellW - 3), y, 3, cellH), touchgfx::Color::getColorFromRGB(240, 244, 236));
+                const uint8_t value = values[index];
+                if (value > 8U)
+                {
+                    const int16_t markerW = static_cast<int16_t>(6 + (((uint32_t)value * (uint32_t)(cellW / 2)) / 255U));
+                    const int16_t markerH = static_cast<int16_t>(6 + (((uint32_t)value * (uint32_t)(cellH / 2)) / 255U));
+                    const int16_t markerX = static_cast<int16_t>(x + ((cellW - markerW) / 2));
+                    const int16_t markerY = static_cast<int16_t>(y + ((cellH - markerH) / 2));
+                    fillLocalRect(*this,
+                                  area,
+                                  touchgfx::Rect(markerX, markerY, markerW, markerH),
+                                  heatColor(value));
+                }
+            }
+            else
+            {
+                fillLocalRect(*this, area, cell, heatColor(values[index]));
+            }
+
+            if ((index == peak) && ((!overlayMode) || (values[index] > 8U)))
+            {
+                const int16_t border = overlayMode ? 2 : 3;
+                fillLocalRect(*this, area, touchgfx::Rect(x, y, cellW, border), touchgfx::Color::getColorFromRGB(240, 244, 236));
+                fillLocalRect(*this, area, touchgfx::Rect(x, static_cast<int16_t>(y + cellH - border), cellW, border), touchgfx::Color::getColorFromRGB(240, 244, 236));
+                fillLocalRect(*this, area, touchgfx::Rect(x, y, border, cellH), touchgfx::Color::getColorFromRGB(240, 244, 236));
+                fillLocalRect(*this, area, touchgfx::Rect(static_cast<int16_t>(x + cellW - border), y, border, cellH), touchgfx::Color::getColorFromRGB(240, 244, 236));
             }
         }
     }
 
-    for (uint32_t row = 0U; row <= GridSize; ++row)
+    if (!overlayMode)
     {
-        const int16_t y = static_cast<int16_t>(row * (cellH + gap));
-        fillLocalRect(*this, area, touchgfx::Rect(0, y, getWidth(), 1), gridColor, 160U);
+        for (uint32_t row = 0U; row <= GridSize; ++row)
+        {
+            const int16_t y = static_cast<int16_t>(row * (cellH + gap));
+            fillLocalRect(*this, area, touchgfx::Rect(0, y, getWidth(), 1), gridColor, 160U);
+        }
     }
 }
 
 touchgfx::Rect AppHeatMap::getSolidRect() const
 {
+    if (overlayMode)
+    {
+        return touchgfx::Rect();
+    }
     return touchgfx::Rect(0, 0, getWidth(), getHeight());
 }
 

@@ -32,6 +32,9 @@ extern "C" {
 #define PCMD3180_CHANNEL_8               0x01U
 #define PCMD3180_CHANNEL_ALL             0xFFU
 
+#define PCMD3180_ARRAY_DEVICE_COUNT      4U
+#define PCMD3180_ARRAY_MAX_MICS_PER_DEV  8U
+
 #define PCMD3180_REG_PAGE_CFG            0x00U
 #define PCMD3180_REG_SW_RESET            0x01U
 #define PCMD3180_REG_SLEEP_CFG           0x02U
@@ -54,6 +57,7 @@ extern "C" {
 #define PCMD3180_REG_GPI_CFG0            0x2BU
 #define PCMD3180_REG_GPI_CFG1            0x2CU
 #define PCMD3180_REG_GPI_MON             0x2FU
+#define PCMD3180_REG_BIAS_CFG            0x3BU
 #define PCMD3180_REG_CH1_CFG0            0x3CU
 #define PCMD3180_REG_CH1_CFG1            0x3DU
 #define PCMD3180_REG_DSP_CFG0            0x6BU
@@ -66,6 +70,7 @@ extern "C" {
 #define PCMD3180_REG_INT_LTCH0           0x36U
 #define PCMD3180_REG_INT_LTCH1           0x37U
 
+#define PCMD3180_SLEEP_CFG_SLEEP         0x80U
 #define PCMD3180_SLEEP_CFG_WAKE          0x81U
 #define PCMD3180_SW_RESET_ASSERT         0x01U
 #define PCMD3180_PDMCLK_CFG_RESET_MASK   0x40U
@@ -117,6 +122,26 @@ typedef enum
     PCMD3180_SAMPLE_RATE_192K = 192000U
 } PCMD3180_SampleRateTypeDef;
 
+typedef enum
+{
+    PCMD3180_TDM_BUS_A = 0,
+    PCMD3180_TDM_BUS_B = 1
+} PCMD3180_TdmBusTypeDef;
+
+typedef enum
+{
+    PCMD3180_ARRAY_DEVICE_U1 = 0,
+    PCMD3180_ARRAY_DEVICE_U2 = 1,
+    PCMD3180_ARRAY_DEVICE_U3 = 2,
+    PCMD3180_ARRAY_DEVICE_U4 = 3
+} PCMD3180_ArrayDeviceTypeDef;
+
+typedef enum
+{
+    PCMD3180_ARRAY_MODE_32CH_48K = 0,
+    PCMD3180_ARRAY_MODE_CORE16_192K = 1
+} PCMD3180_ArrayModeTypeDef;
+
 typedef PCMD3180_StatusTypeDef (*PCMD3180_WriteRegFn)(void *context,
                                                       uint8_t address7,
                                                       uint8_t reg,
@@ -142,6 +167,10 @@ typedef struct
     uint8_t address7;
     uint8_t current_page;
     uint8_t configured;
+    PCMD3180_StatusTypeDef last_status;
+    uint8_t last_reg;
+    uint8_t last_write_value;
+    uint8_t last_read_value;
     PCMD3180_BusTypeDef bus;
 } PCMD3180_HandleTypeDef;
 
@@ -168,9 +197,48 @@ typedef struct
 
 typedef struct
 {
+    PCMD3180_ArrayDeviceTypeDef device;
+    PCMD3180_TdmBusTypeDef tdm_bus;
+    uint8_t address7;
+    uint8_t start_slot;
+    uint8_t input_channel_mask;
+    uint8_t output_channel_mask;
+    uint8_t mic_count;
+    uint8_t mic_id[PCMD3180_ARRAY_MAX_MICS_PER_DEV];
+} PCMD3180_ArrayDevicePlanTypeDef;
+
+typedef struct
+{
+    PCMD3180_ArrayModeTypeDef mode;
+    uint32_t sample_rate_hz;
+    uint16_t frame_samples;
+    PCMD3180_SlotWidthTypeDef slot_width;
+    uint8_t tdm_slots_per_bus;
+    uint8_t physical_mic_count;
+    uint8_t capture_channel_count;
+    uint16_t recommended_pair_count;
+    uint32_t band_low_hz;
+    uint32_t band_high_hz;
+    uint32_t expected_bclk_hz;
+    PCMD3180_ArrayDevicePlanTypeDef devices[PCMD3180_ARRAY_DEVICE_COUNT];
+} PCMD3180_ArrayModeConfigTypeDef;
+
+typedef struct
+{
     uint8_t dev_sts0;
     uint8_t dev_sts1;
     uint8_t asi_sts;
+    uint8_t asi_ch_slot[PCMD3180_ARRAY_MAX_MICS_PER_DEV];
+    uint8_t pdmclk_cfg;
+    uint8_t pdmin_cfg;
+    uint8_t gpo_cfg0;
+    uint8_t gpo_cfg1;
+    uint8_t gpo_cfg2;
+    uint8_t gpo_cfg3;
+    uint8_t gpi_cfg0;
+    uint8_t gpi_cfg1;
+    uint8_t in_ch_en;
+    uint8_t asi_out_ch_en;
     uint8_t int_latch0;
     uint8_t int_latch1;
     uint8_t pwr_cfg;
@@ -182,6 +250,13 @@ PCMD3180_StatusTypeDef PCMD3180_Init(PCMD3180_HandleTypeDef *handle,
                                      uint8_t address7);
 
 void PCMD3180_GetDefaultConfig(PCMD3180_ConfigTypeDef *config);
+
+PCMD3180_StatusTypeDef PCMD3180_GetArrayModeConfig(PCMD3180_ArrayModeTypeDef mode,
+                                                   PCMD3180_ArrayModeConfigTypeDef *mode_config);
+
+PCMD3180_StatusTypeDef PCMD3180_BuildDeviceConfig(const PCMD3180_ArrayModeConfigTypeDef *mode_config,
+                                                  uint32_t device_index,
+                                                  PCMD3180_ConfigTypeDef *device_config);
 
 PCMD3180_StatusTypeDef PCMD3180_HardwareReset(PCMD3180_HandleTypeDef *handle,
                                               uint32_t reset_low_ms,
@@ -196,6 +271,11 @@ PCMD3180_StatusTypeDef PCMD3180_Configure(PCMD3180_HandleTypeDef *handle,
 
 PCMD3180_StatusTypeDef PCMD3180_Activate(PCMD3180_HandleTypeDef *handle,
                                          const PCMD3180_ConfigTypeDef *config);
+
+PCMD3180_StatusTypeDef PCMD3180_ConfigureArrayMode(PCMD3180_HandleTypeDef *handles,
+                                                   const uint8_t *addresses,
+                                                   const PCMD3180_BusTypeDef *bus,
+                                                   PCMD3180_ArrayModeTypeDef mode);
 
 PCMD3180_StatusTypeDef PCMD3180_SelectPage(PCMD3180_HandleTypeDef *handle,
                                            uint8_t page);

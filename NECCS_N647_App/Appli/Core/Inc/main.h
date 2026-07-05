@@ -77,6 +77,14 @@ void MX_XSPIM_Init(void);
 extern SD_HandleTypeDef hsd2;
 extern I2C_HandleTypeDef hi2c2;
 extern DCMIPP_HandleTypeDef hdcmipp;
+extern SAI_HandleTypeDef hsai_BlockA1;
+extern SAI_HandleTypeDef hsai_BlockB1;
+extern DMA_NodeTypeDef Node_GPDMA1_Channel1;
+extern DMA_QListTypeDef List_GPDMA1_Channel1;
+extern DMA_HandleTypeDef handle_GPDMA1_Channel1;
+extern DMA_NodeTypeDef Node_GPDMA1_Channel0;
+extern DMA_QListTypeDef List_GPDMA1_Channel0;
+extern DMA_HandleTypeDef handle_GPDMA1_Channel0;
 
 /* USER CODE END EFP */
 

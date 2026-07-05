@@ -42,6 +42,16 @@
 			<locationURI>PARENT-2-PROJECT_LOC/Drivers/BSP</locationURI>
 		</link>
 		<link>
+			<name>Drivers/BSP/PCMD3180/pcmd3180.c</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/Drivers/BSP/PCMD3180/pcmd3180.c</locationURI>
+		</link>
+		<link>
+			<name>Drivers/BSP/PCMD3180/pcmd3180_hal.c</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/Drivers/BSP/PCMD3180/pcmd3180_hal.c</locationURI>
+		</link>
+		<link>
 			<name>Drivers/CMSIS/system_stm32n6xx_s.c</name>
 			<type>1</type>
 			<locationURI>PARENT-2-PROJECT_LOC/Appli/Core/Src/system_stm32n6xx_s.c</locationURI>
@@ -237,6 +247,11 @@
 			<locationURI>PARENT-2-PROJECT_LOC/Appli/Core/Src/app_acoustic_srp.c</locationURI>
 		</link>
 		<link>
+			<name>Application/User/Core/app_acoustic_service.c</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/Appli/Core/Src/app_acoustic_service.c</locationURI>
+		</link>
+		<link>
 			<name>Application/User/Core/app_acoustic_synthetic.c</name>
 			<type>1</type>
 			<locationURI>PARENT-2-PROJECT_LOC/Appli/Core/Src/app_acoustic_synthetic.c</locationURI>
@@ -245,6 +260,11 @@
 			<name>Application/User/Core/app_audio_frame.c</name>
 			<type>1</type>
 			<locationURI>PARENT-2-PROJECT_LOC/Appli/Core/Src/app_audio_frame.c</locationURI>
+		</link>
+		<link>
+			<name>Application/User/Core/app_pcmd_capture.c</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/Appli/Core/Src/app_pcmd_capture.c</locationURI>
 		</link>
 		<link>
 			<name>Application/User/Core/app_bringup_thread.c</name>

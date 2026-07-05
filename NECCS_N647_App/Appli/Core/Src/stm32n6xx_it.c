@@ -75,6 +75,10 @@ extern DMA2D_HandleTypeDef hdma2d;
 extern GPU2D_HandleTypeDef hgpu2d;
 extern LTDC_HandleTypeDef hltdc;
 extern DCMIPP_HandleTypeDef hdcmipp;
+extern DMA_HandleTypeDef handle_GPDMA1_Channel0;
+extern DMA_HandleTypeDef handle_GPDMA1_Channel1;
+extern SAI_HandleTypeDef hsai_BlockA1;
+extern SAI_HandleTypeDef hsai_BlockB1;
 
 /* USER CODE END EV */
 
@@ -198,6 +202,36 @@ void DebugMon_Handler(void)
 /******************************************************************************/
 
 /**
+  * @brief This function handles GPDMA1 Channel 0 global interrupt.
+  */
+void GPDMA1_Channel0_IRQHandler(void)
+{
+  /* USER CODE BEGIN GPDMA1_Channel0_IRQn 0 */
+  g_app_boot_diag.last_irqn = (uint32_t)GPDMA1_Channel0_IRQn;
+
+  /* USER CODE END GPDMA1_Channel0_IRQn 0 */
+  HAL_DMA_IRQHandler(&handle_GPDMA1_Channel0);
+  /* USER CODE BEGIN GPDMA1_Channel0_IRQn 1 */
+
+  /* USER CODE END GPDMA1_Channel0_IRQn 1 */
+}
+
+/**
+  * @brief This function handles GPDMA1 Channel 1 global interrupt.
+  */
+void GPDMA1_Channel1_IRQHandler(void)
+{
+  /* USER CODE BEGIN GPDMA1_Channel1_IRQn 0 */
+  g_app_boot_diag.last_irqn = (uint32_t)GPDMA1_Channel1_IRQn;
+
+  /* USER CODE END GPDMA1_Channel1_IRQn 0 */
+  HAL_DMA_IRQHandler(&handle_GPDMA1_Channel1);
+  /* USER CODE BEGIN GPDMA1_Channel1_IRQn 1 */
+
+  /* USER CODE END GPDMA1_Channel1_IRQn 1 */
+}
+
+/**
   * @brief This function handles DMA2D global interrupt.
   */
 void DMA2D_IRQHandler(void)
@@ -303,6 +337,36 @@ void DCMIPP_IRQHandler(void)
   /* USER CODE BEGIN DCMIPP_IRQn 1 */
 
   /* USER CODE END DCMIPP_IRQn 1 */
+}
+
+/**
+  * @brief This function handles Serial Audio Interface 1 block A interrupt.
+  */
+void SAI1_A_IRQHandler(void)
+{
+  /* USER CODE BEGIN SAI1_A_IRQn 0 */
+  g_app_boot_diag.last_irqn = (uint32_t)SAI1_A_IRQn;
+
+  /* USER CODE END SAI1_A_IRQn 0 */
+  HAL_SAI_IRQHandler(&hsai_BlockA1);
+  /* USER CODE BEGIN SAI1_A_IRQn 1 */
+
+  /* USER CODE END SAI1_A_IRQn 1 */
+}
+
+/**
+  * @brief This function handles Serial Audio Interface 1 block B interrupt.
+  */
+void SAI1_B_IRQHandler(void)
+{
+  /* USER CODE BEGIN SAI1_B_IRQn 0 */
+  g_app_boot_diag.last_irqn = (uint32_t)SAI1_B_IRQn;
+
+  /* USER CODE END SAI1_B_IRQn 0 */
+  HAL_SAI_IRQHandler(&hsai_BlockB1);
+  /* USER CODE BEGIN SAI1_B_IRQn 1 */
+
+  /* USER CODE END SAI1_B_IRQn 1 */
 }
 
 /**

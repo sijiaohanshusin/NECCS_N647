@@ -53,6 +53,8 @@ void BusFault_Handler(void);
 void UsageFault_Handler(void);
 void SecureFault_Handler(void);
 void DebugMon_Handler(void);
+void GPDMA1_Channel0_IRQHandler(void);
+void GPDMA1_Channel1_IRQHandler(void);
 void DMA2D_IRQHandler(void);
 void GPU2D_IRQHandler(void);
 void GPU2D_ER_IRQHandler(void);
@@ -60,6 +62,8 @@ void LTDC_UP_IRQHandler(void);
 void LTDC_UP_ERR_IRQHandler(void);
 void CSI_IRQHandler(void);
 void DCMIPP_IRQHandler(void);
+void SAI1_A_IRQHandler(void);
+void SAI1_B_IRQHandler(void);
 void USART1_IRQHandler(void);
 /* USER CODE BEGIN EFP */
 

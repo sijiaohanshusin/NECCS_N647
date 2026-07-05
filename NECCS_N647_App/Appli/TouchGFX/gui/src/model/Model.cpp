@@ -20,6 +20,9 @@ extern "C"
 {
 #include "app_power.h"
 #include "app_media.h"
+#include "app_acoustic_service.h"
+#include "app_camera_display.h"
+#include "app_pcmd_capture.h"
 #include "TOUCH/app_touch.h"
 }
 #else
@@ -150,6 +153,93 @@ static const uint16_t* AppMedia_GetPreviewBuffer(AppMediaPreviewInfo_t* info)
     }
     return 0;
 }
+
+typedef struct
+{
+    uint8_t initialized;
+    uint8_t started;
+    uint8_t latest_frame_valid;
+    uint8_t debug_ui_enabled;
+    uint8_t device_present_mask;
+    uint8_t device_config_ok_mask;
+    uint8_t device_status_ok_mask;
+    uint8_t mic_level[32];
+    int8_t mic_dbfs[32];
+    uint32_t published_frames;
+    uint32_t dropped_halves;
+    uint32_t sync_miss_count;
+    uint16_t published_fps_x10;
+} AppPcmdCaptureSnapshot_t;
+
+static void AppPcmdCapture_GetSnapshot(AppPcmdCaptureSnapshot_t* snapshot)
+{
+    if (snapshot != 0)
+    {
+        memset(snapshot, 0, sizeof(*snapshot));
+    }
+}
+
+typedef enum
+{
+    APP_ACOUSTIC_IMAGING_PROFILE_FAST = 0,
+    APP_ACOUSTIC_IMAGING_PROFILE_BALANCED = 1,
+    APP_ACOUSTIC_IMAGING_PROFILE_QUALITY = 2
+} AppAcousticImagingProfile_t;
+
+typedef struct
+{
+    uint8_t initialized;
+    uint8_t running;
+    uint8_t valid;
+    uint8_t auto_degraded;
+    AppAcousticImagingProfile_t active_profile;
+    AppAcousticImagingProfile_t requested_profile;
+    int32_t last_status;
+    int32_t service_status;
+    uint32_t input_seq;
+    uint32_t output_seq;
+    uint32_t processed_frames;
+    uint32_t skipped_frames;
+    uint32_t failed_frames;
+    uint32_t degraded_count;
+    uint32_t active_channel_mask;
+    uint16_t srp_ms_x100;
+    uint16_t fps_x10;
+    int16_t theta_deg;
+    int16_t phi_deg;
+    uint8_t quality_pct;
+    uint8_t contrast_pct;
+    uint8_t peak_index;
+    uint8_t heat[81];
+    uint8_t perf_load[5];
+} AppAcousticServiceSnapshot_t;
+
+static void AppAcousticService_GetSnapshot(AppAcousticServiceSnapshot_t* snapshot)
+{
+    if (snapshot != 0)
+    {
+        memset(snapshot, 0, sizeof(*snapshot));
+    }
+}
+
+static int32_t AppAcousticService_SetProfile(AppAcousticImagingProfile_t profile)
+{
+    (void)profile;
+    return 0;
+}
+
+static void AppCameraDisplay_SetAcousticOverlay(const uint8_t* heat,
+                                                uint32_t count,
+                                                uint8_t peakIndex,
+                                                uint8_t qualityPct,
+                                                uint8_t enabled)
+{
+    (void)heat;
+    (void)count;
+    (void)peakIndex;
+    (void)qualityPct;
+    (void)enabled;
+}
 #endif
 
 namespace
@@ -157,6 +247,32 @@ namespace
 uint8_t clampPercent(uint32_t value)
 {
     return (value > 100U) ? 100U : static_cast<uint8_t>(value);
+}
+
+AppAcousticImagingProfile_t acousticProfileFromUi(uint8_t profile)
+{
+    switch (profile)
+    {
+    case APP_UI_PROFILE_FAST:
+        return APP_ACOUSTIC_IMAGING_PROFILE_FAST;
+    case APP_UI_PROFILE_QUALITY:
+        return APP_ACOUSTIC_IMAGING_PROFILE_QUALITY;
+    default:
+        return APP_ACOUSTIC_IMAGING_PROFILE_BALANCED;
+    }
+}
+
+uint8_t uiProfileFromAcoustic(AppAcousticImagingProfile_t profile)
+{
+    switch (profile)
+    {
+    case APP_ACOUSTIC_IMAGING_PROFILE_FAST:
+        return APP_UI_PROFILE_FAST;
+    case APP_ACOUSTIC_IMAGING_PROFILE_QUALITY:
+        return APP_UI_PROFILE_QUALITY;
+    default:
+        return APP_UI_PROFILE_BALANCED;
+    }
 }
 
 void copyFileName(char* destination, const char* source, uint32_t length)
@@ -195,42 +311,89 @@ void Model::tick()
     ++tickCount;
     snapshot.frameSeq = tickCount;
 
-    const uint32_t peakX = (tickCount / 5U) % 9U;
-    const int32_t peakYOffset = static_cast<int32_t>((tickCount / 17U) % 3U) - 1;
-    const uint32_t peakY = static_cast<uint32_t>(4 + peakYOffset);
-    snapshot.peakIndex = static_cast<uint8_t>((peakY * 9U) + peakX);
-
-    for (uint32_t row = 0U; row < 9U; ++row)
+    AppAcousticServiceSnapshot_t acoustic;
+    memset(&acoustic, 0, sizeof(acoustic));
+    AppAcousticService_GetSnapshot(&acoustic);
+    snapshot.acousticFlags = 0U;
+    if (acoustic.initialized != 0U)
     {
-        for (uint32_t col = 0U; col < 9U; ++col)
+        snapshot.acousticFlags |= APP_UI_ACOUSTIC_FLAG_INITIALIZED;
+    }
+    if (acoustic.running != 0U)
+    {
+        snapshot.acousticFlags |= APP_UI_ACOUSTIC_FLAG_RUNNING;
+    }
+    if (acoustic.valid != 0U)
+    {
+        snapshot.acousticFlags |= APP_UI_ACOUSTIC_FLAG_VALID;
+    }
+    if (acoustic.auto_degraded != 0U)
+    {
+        snapshot.acousticFlags |= APP_UI_ACOUSTIC_FLAG_AUTO_DEGRADED;
+    }
+    if ((acoustic.initialized != 0U) || (acoustic.running != 0U))
+    {
+        snapshot.activeProfile = uiProfileFromAcoustic(acoustic.active_profile);
+    }
+    snapshot.acousticInputSeq = acoustic.input_seq;
+    snapshot.acousticOutputSeq = acoustic.output_seq;
+    snapshot.acousticProcessedFrames = acoustic.processed_frames;
+    snapshot.acousticSkippedFrames = acoustic.skipped_frames;
+    snapshot.acousticFailedFrames = acoustic.failed_frames;
+    snapshot.acousticDegradedCount = acoustic.degraded_count;
+    snapshot.acousticActiveChannelMask = acoustic.active_channel_mask;
+    snapshot.acousticLastStatus = acoustic.last_status;
+    snapshot.thetaDeg = acoustic.theta_deg;
+    snapshot.phiDeg = acoustic.phi_deg;
+    snapshot.qualityPct = acoustic.quality_pct;
+    snapshot.contrastPct = acoustic.contrast_pct;
+    snapshot.peakIndex = acoustic.peak_index;
+    snapshot.srpMsX100 = acoustic.srp_ms_x100;
+    snapshot.uiFpsX10 = (acoustic.fps_x10 != 0U) ? acoustic.fps_x10 : 200U;
+    memcpy(snapshot.heat, acoustic.heat, sizeof(snapshot.heat));
+    memcpy(snapshot.perfLoad, acoustic.perf_load, sizeof(snapshot.perfLoad));
+    AppCameraDisplay_SetAcousticOverlay(snapshot.heat,
+                                        sizeof(snapshot.heat),
+                                        snapshot.peakIndex,
+                                        snapshot.qualityPct,
+                                        ((snapshot.activeScreen == APP_UI_SCREEN_IMAGE) &&
+                                         (acoustic.valid != 0U)) ? 1U : 0U);
+    memset(snapshot.micLevel, 0, sizeof(snapshot.micLevel));
+    memset(snapshot.micDbfs, -90, sizeof(snapshot.micDbfs));
+
+    AppPcmdCaptureSnapshot_t pcmd;
+    memset(&pcmd, 0, sizeof(pcmd));
+    AppPcmdCapture_GetSnapshot(&pcmd);
+    snapshot.pcmdFlags = 0U;
+    if (pcmd.initialized != 0U)
+    {
+        snapshot.pcmdFlags |= APP_UI_PCMD_FLAG_INITIALIZED;
+    }
+    if (pcmd.started != 0U)
+    {
+        snapshot.pcmdFlags |= APP_UI_PCMD_FLAG_STARTED;
+    }
+    if (pcmd.latest_frame_valid != 0U)
+    {
+        snapshot.pcmdFlags |= APP_UI_PCMD_FLAG_FRAME_VALID;
+        for (uint32_t i = 0U; i < 32U; ++i)
         {
-            const int32_t dx = static_cast<int32_t>(col) - static_cast<int32_t>(peakX);
-            const int32_t dy = static_cast<int32_t>(row) - static_cast<int32_t>(peakY);
-            const uint32_t dist = static_cast<uint32_t>((dx * dx) + (dy * dy));
-            const uint32_t shoulder = ((row + col + (tickCount / 9U)) % 5U) * 7U;
-            const int32_t value = 236 - static_cast<int32_t>(dist * 34U) + static_cast<int32_t>(shoulder);
-            snapshot.heat[(row * 9U) + col] = (value <= 0) ? 18U : ((value > 255) ? 255U : static_cast<uint8_t>(value));
+            snapshot.micLevel[i] = clampPercent(pcmd.mic_level[i]);
+            snapshot.micDbfs[i] = pcmd.mic_dbfs[i];
         }
     }
-
-    for (uint32_t i = 0U; i < 32U; ++i)
+    if (pcmd.debug_ui_enabled != 0U)
     {
-        const uint32_t wave = ((tickCount / 2U) + (i * 11U)) % 97U;
-        snapshot.micLevel[i] = clampPercent(18U + ((wave * (i + 5U)) % 78U));
+        snapshot.pcmdFlags |= APP_UI_PCMD_FLAG_DEBUG_ENABLED;
     }
-
-    snapshot.perfLoad[0] = clampPercent(18U + ((tickCount / 3U) % 18U));
-    snapshot.perfLoad[1] = clampPercent(34U + ((tickCount / 5U) % 28U));
-    snapshot.perfLoad[2] = clampPercent(26U + ((tickCount / 7U) % 30U));
-    snapshot.perfLoad[3] = clampPercent(12U + ((tickCount / 11U) % 22U));
-    snapshot.perfLoad[4] = clampPercent(42U + ((tickCount / 13U) % 18U));
-
-    snapshot.thetaDeg = static_cast<int16_t>(((tickCount * 3U) % 121U) - 60U);
-    snapshot.phiDeg = static_cast<int16_t>(((tickCount * 2U) % 61U) - 30U);
-    snapshot.qualityPct = static_cast<uint8_t>(68U + ((tickCount / 4U) % 24U));
-    snapshot.contrastPct = static_cast<uint8_t>(42U + ((tickCount / 6U) % 34U));
-    snapshot.srpMsX100 = static_cast<uint16_t>(560U + ((tickCount / 5U) % 220U));
-    snapshot.uiFpsX10 = 200U;
+    snapshot.pcmdDebugEnabled = pcmd.debug_ui_enabled;
+    snapshot.pcmdDevicePresentMask = pcmd.device_present_mask;
+    snapshot.pcmdDeviceConfigOkMask = pcmd.device_config_ok_mask;
+    snapshot.pcmdDeviceStatusOkMask = pcmd.device_status_ok_mask;
+    snapshot.pcmdPublishedFrames = pcmd.published_frames;
+    snapshot.pcmdDroppedHalves = pcmd.dropped_halves;
+    snapshot.pcmdSyncMissCount = pcmd.sync_miss_count;
+    snapshot.pcmdFpsX10 = pcmd.published_fps_x10;
 
     AppTouchSnapshot_t touch;
     memset(&touch, 0, sizeof(touch));
@@ -338,18 +501,7 @@ void Model::setActiveProfile(uint8_t profile)
     if (profile <= APP_UI_PROFILE_QUALITY)
     {
         snapshot.activeProfile = profile;
-        if (profile == APP_UI_PROFILE_FAST)
-        {
-            snapshot.srpMsX100 = 390U;
-        }
-        else if (profile == APP_UI_PROFILE_QUALITY)
-        {
-            snapshot.srpMsX100 = 930U;
-        }
-        else
-        {
-            snapshot.srpMsX100 = 640U;
-        }
+        (void)AppAcousticService_SetProfile(acousticProfileFromUi(profile));
 
         if (modelListener != 0)
         {

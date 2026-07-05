@@ -45,7 +45,14 @@ _Min_Stack_Size = 0x800; /* required amount of stack */
 MEMORY
 {
   RAM    (xrw)    : ORIGIN = 0x34000400,   LENGTH = 2047K
-  EXTRAM (rw)     : ORIGIN = 0x90000000,   LENGTH = 32M
+  /*
+   * 0x90000000..0x905FFFFF is reserved for fixed HyperRAM users:
+   * - 0x90072000 UI/TouchGFX RGB565 framebuffer
+   * - 0x90200000 short Debug HyperRAM self-test window
+   * - 0x90400000/0x90500000 camera display ping-pong buffers
+   * Keep linker-managed buffers above these fixed display ranges.
+   */
+  EXTRAM (rw)     : ORIGIN = 0x90600000,   LENGTH = 0x01A00000
 }
 
 /* Keep code and data in separate ELF segments even though both run from RAM. */

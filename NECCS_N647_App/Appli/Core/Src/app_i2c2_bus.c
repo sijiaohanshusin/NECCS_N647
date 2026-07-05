@@ -6,19 +6,20 @@
 
 static TX_MUTEX g_app_i2c2_mutex;
 static uint8_t g_app_i2c2_mutex_ready;
+static volatile uint32_t g_app_i2c2_hal_recover_pending = 0U;
 
 volatile uint32_t g_app_i2c2_hal_restore_count = 0U;
 volatile uint32_t g_app_i2c2_hal_restore_status = HAL_OK;
+volatile uint32_t g_app_i2c2_hal_recover_request_count = 0U;
+volatile uint32_t g_app_i2c2_hal_recover_last_status = HAL_OK;
 
-static HAL_StatusTypeDef AppI2C2_RestoreHalIfNeeded(void)
+static HAL_StatusTypeDef AppI2C2_ReinitHal(void)
 {
   HAL_StatusTypeDef status;
 
-  if ((hi2c2.Instance == I2C2) &&
-      (hi2c2.State != HAL_I2C_STATE_RESET) &&
-      ((I2C2->CR1 & I2C_CR1_PE) != 0U))
+  if ((hi2c2.Instance == I2C2) && (hi2c2.State != HAL_I2C_STATE_RESET))
   {
-    return HAL_OK;
+    (void)HAL_I2C_DeInit(&hi2c2);
   }
 
   hi2c2.Instance = I2C2;
@@ -43,7 +44,24 @@ static HAL_StatusTypeDef AppI2C2_RestoreHalIfNeeded(void)
 
   g_app_i2c2_hal_restore_count++;
   g_app_i2c2_hal_restore_status = status;
+  if (status == HAL_OK)
+  {
+    g_app_i2c2_hal_recover_pending = 0U;
+  }
   return status;
+}
+
+static HAL_StatusTypeDef AppI2C2_RestoreHalIfNeeded(void)
+{
+  if ((g_app_i2c2_hal_recover_pending == 0U) &&
+      (hi2c2.Instance == I2C2) &&
+      (hi2c2.State != HAL_I2C_STATE_RESET) &&
+      ((I2C2->CR1 & I2C_CR1_PE) != 0U))
+  {
+    return HAL_OK;
+  }
+
+  return AppI2C2_ReinitHal();
 }
 
 static ULONG timeout_ms_to_ticks(uint32_t timeout_ms)
@@ -117,4 +135,11 @@ void AppI2C2_Unlock(void)
   {
     (void)tx_mutex_put(&g_app_i2c2_mutex);
   }
+}
+
+void AppI2C2_RequestRecovery(uint32_t status)
+{
+  g_app_i2c2_hal_recover_last_status = status;
+  g_app_i2c2_hal_recover_pending = 1U;
+  ++g_app_i2c2_hal_recover_request_count;
 }

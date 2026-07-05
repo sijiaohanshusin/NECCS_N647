@@ -42,7 +42,11 @@ typedef struct
   uint32_t error_count;
   uint32_t ltdc_ier2;
   uint32_t ltdc_isr2;
+  uint32_t ltdc_layer1_cr;
+  uint32_t ltdc_layer1_cfbar;
   uint32_t ltdc_layer2_cr;
+  uint32_t ltdc_layer2_cfbar;
+  uint32_t ui_fb_addr;
   uint32_t auto_disable_count;
   int32_t init_status;
 } AppCameraDisplayStatus_t;
@@ -55,11 +59,20 @@ extern volatile uint32_t g_app_camera_ltdc_swap_count;
 extern volatile uint32_t g_app_camera_ltdc_error_count;
 extern volatile uint32_t g_app_camera_ltdc_ier2;
 extern volatile uint32_t g_app_camera_ltdc_isr2;
+extern volatile uint32_t g_app_camera_ltdc_layer1_cr;
+extern volatile uint32_t g_app_camera_ltdc_layer1_cfbar;
 extern volatile uint32_t g_app_camera_ltdc_layer2_cr;
+extern volatile uint32_t g_app_camera_ltdc_layer2_cfbar;
+extern volatile uint32_t g_app_camera_ui_fb_addr;
 extern volatile uint32_t g_app_camera_ltdc_auto_disable_count;
 
 int32_t AppCameraDisplay_InitLayers(uint32_t initial_camera_addr);
 void AppCameraDisplay_SetVisible(uint8_t visible);
+void AppCameraDisplay_SetAcousticOverlay(const uint8_t *heat,
+                                         uint32_t count,
+                                         uint8_t peak_index,
+                                         uint8_t quality_pct,
+                                         uint8_t enabled);
 void AppCameraDisplay_RequestSwap(uint32_t frame_addr);
 void AppCameraDisplay_RefreshColorKeyHole(int32_t x,
                                           int32_t y,

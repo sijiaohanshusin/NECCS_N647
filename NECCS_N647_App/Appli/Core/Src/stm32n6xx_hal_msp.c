@@ -31,6 +31,9 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN Define */
+#ifndef APP_PCMD_IRQ_PRIORITY
+#define APP_PCMD_IRQ_PRIORITY 10U
+#endif
 
 /* USER CODE END Define */
 
@@ -41,6 +44,7 @@
 
 /* Private variables ---------------------------------------------------------*/
 /* USER CODE BEGIN PV */
+static uint32_t SAI1_client = 0U;
 
 /* USER CODE END PV */
 
@@ -55,6 +59,70 @@
 /* USER CODE END ExternalFunctions */
 
 /* USER CODE BEGIN 0 */
+static void App_SAI_ConfigCircularRxDma(DMA_HandleTypeDef *dma,
+                                        DMA_NodeTypeDef *node,
+                                        DMA_QListTypeDef *list,
+                                        DMA_Channel_TypeDef *instance,
+                                        uint32_t request)
+{
+  DMA_NodeConfTypeDef node_config = {0};
+
+  node_config.NodeType = DMA_GPDMA_LINEAR_NODE;
+  node_config.Init.Request = request;
+  node_config.Init.BlkHWRequest = DMA_BREQ_SINGLE_BURST;
+  node_config.Init.Direction = DMA_PERIPH_TO_MEMORY;
+  node_config.Init.SrcInc = DMA_SINC_FIXED;
+  node_config.Init.DestInc = DMA_DINC_INCREMENTED;
+  node_config.Init.SrcDataWidth = DMA_SRC_DATAWIDTH_HALFWORD;
+  node_config.Init.DestDataWidth = DMA_DEST_DATAWIDTH_HALFWORD;
+  node_config.Init.SrcBurstLength = 1;
+  node_config.Init.DestBurstLength = 1;
+  node_config.Init.TransferAllocatedPort = DMA_SRC_ALLOCATED_PORT0 | DMA_DEST_ALLOCATED_PORT0;
+  node_config.Init.TransferEventMode = DMA_TCEM_BLOCK_TRANSFER;
+  node_config.Init.Mode = DMA_NORMAL;
+  node_config.TriggerConfig.TriggerPolarity = DMA_TRIG_POLARITY_MASKED;
+  node_config.TriggerConfig.TriggerSelection = GPDMA1_TRIGGER_GPDMA1_CH0_TCF;
+  node_config.DataHandlingConfig.DataExchange = DMA_EXCHANGE_NONE;
+  node_config.DataHandlingConfig.DataAlignment = DMA_DATA_RIGHTALIGN_ZEROPADDED;
+  node_config.SrcSecure = DMA_CHANNEL_SRC_SEC;
+  node_config.DestSecure = DMA_CHANNEL_DEST_SEC;
+
+  if (HAL_DMAEx_List_BuildNode(&node_config, node) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_DMAEx_List_InsertNode(list, NULL, node) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_DMAEx_List_SetCircularMode(list) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  dma->Instance = instance;
+  dma->InitLinkedList.Priority = DMA_HIGH_PRIORITY;
+  dma->InitLinkedList.LinkStepMode = DMA_LSM_FULL_EXECUTION;
+  dma->InitLinkedList.LinkAllocatedPort = DMA_LINK_ALLOCATED_PORT0;
+  dma->InitLinkedList.TransferEventMode = DMA_TCEM_BLOCK_TRANSFER;
+  dma->InitLinkedList.LinkedListMode = DMA_LINKEDLIST_CIRCULAR;
+  if (HAL_DMAEx_List_Init(dma) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_DMA_ConfigChannelAttributes(dma,
+                                      DMA_CHANNEL_SEC |
+                                      DMA_CHANNEL_PRIV |
+                                      DMA_CHANNEL_SRC_SEC |
+                                      DMA_CHANNEL_DEST_SEC) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_DMAEx_List_LinkQ(dma, list) != HAL_OK)
+  {
+    Error_Handler();
+  }
+}
 
 /* USER CODE END 0 */
 /**
@@ -733,6 +801,125 @@ void HAL_GPU2D_MspDeInit(GPU2D_HandleTypeDef* hgpu2d)
     __HAL_RCC_GPU2D_FORCE_RESET();
     __HAL_RCC_GPU2D_RELEASE_RESET();
     __HAL_RCC_GPU2D_CLK_DISABLE();
+  }
+}
+
+void HAL_SAI_MspInit(SAI_HandleTypeDef* hsai)
+{
+  GPIO_InitTypeDef GPIO_InitStruct = {0};
+  RCC_PeriphCLKInitTypeDef PeriphClkInitStruct = {0};
+
+  if (hsai->Instance == SAI1_Block_A)
+  {
+    PeriphClkInitStruct.PeriphClockSelection = RCC_PERIPHCLK_SAI1;
+    PeriphClkInitStruct.Sai1ClockSelection = RCC_SAI1CLKSOURCE_IC7;
+    PeriphClkInitStruct.ICSelection[RCC_IC7].ClockSelection = RCC_ICCLKSOURCE_PLL2;
+    PeriphClkInitStruct.ICSelection[RCC_IC7].ClockDivider = 20;
+    if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInitStruct) != HAL_OK)
+    {
+      Error_Handler();
+    }
+
+    if (SAI1_client == 0U)
+    {
+      __HAL_RCC_SAI1_CLK_ENABLE();
+      HAL_NVIC_SetPriority(SAI1_A_IRQn, APP_PCMD_IRQ_PRIORITY, 0);
+      HAL_NVIC_EnableIRQ(SAI1_A_IRQn);
+      HAL_NVIC_SetPriority(SAI1_B_IRQn, APP_PCMD_IRQ_PRIORITY, 0);
+      HAL_NVIC_EnableIRQ(SAI1_B_IRQn);
+    }
+    SAI1_client++;
+
+    __HAL_RCC_GPIOB_CLK_ENABLE();
+    GPIO_InitStruct.Pin = GPIO_PIN_0 | GPIO_PIN_7 | GPIO_PIN_6;
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+    GPIO_InitStruct.Alternate = GPIO_AF6_SAI1;
+    HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+    App_SAI_ConfigCircularRxDma(&handle_GPDMA1_Channel0,
+                                &Node_GPDMA1_Channel0,
+                                &List_GPDMA1_Channel0,
+                                GPDMA1_Channel0,
+                                GPDMA1_REQUEST_SAI1_A);
+
+    __HAL_LINKDMA(hsai, hdmarx, handle_GPDMA1_Channel0);
+  }
+
+  if (hsai->Instance == SAI1_Block_B)
+  {
+    PeriphClkInitStruct.PeriphClockSelection = RCC_PERIPHCLK_SAI1;
+    PeriphClkInitStruct.Sai1ClockSelection = RCC_SAI1CLKSOURCE_IC7;
+    PeriphClkInitStruct.ICSelection[RCC_IC7].ClockSelection = RCC_ICCLKSOURCE_PLL2;
+    PeriphClkInitStruct.ICSelection[RCC_IC7].ClockDivider = 20;
+    if (HAL_RCCEx_PeriphCLKConfig(&PeriphClkInitStruct) != HAL_OK)
+    {
+      Error_Handler();
+    }
+
+    if (SAI1_client == 0U)
+    {
+      __HAL_RCC_SAI1_CLK_ENABLE();
+      HAL_NVIC_SetPriority(SAI1_A_IRQn, APP_PCMD_IRQ_PRIORITY, 0);
+      HAL_NVIC_EnableIRQ(SAI1_A_IRQn);
+      HAL_NVIC_SetPriority(SAI1_B_IRQn, APP_PCMD_IRQ_PRIORITY, 0);
+      HAL_NVIC_EnableIRQ(SAI1_B_IRQn);
+    }
+    SAI1_client++;
+
+    __HAL_RCC_GPIOE_CLK_ENABLE();
+    GPIO_InitStruct.Pin = GPIO_PIN_3;
+    GPIO_InitStruct.Mode = GPIO_MODE_AF_PP;
+    GPIO_InitStruct.Pull = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+    GPIO_InitStruct.Alternate = GPIO_AF6_SAI1;
+    HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
+
+    App_SAI_ConfigCircularRxDma(&handle_GPDMA1_Channel1,
+                                &Node_GPDMA1_Channel1,
+                                &List_GPDMA1_Channel1,
+                                GPDMA1_Channel1,
+                                GPDMA1_REQUEST_SAI1_B);
+
+    __HAL_LINKDMA(hsai, hdmarx, handle_GPDMA1_Channel1);
+  }
+}
+
+void HAL_SAI_MspDeInit(SAI_HandleTypeDef* hsai)
+{
+  if (hsai->Instance == SAI1_Block_A)
+  {
+    if (SAI1_client > 0U)
+    {
+      SAI1_client--;
+    }
+    if (SAI1_client == 0U)
+    {
+      __HAL_RCC_SAI1_CLK_DISABLE();
+      HAL_NVIC_DisableIRQ(SAI1_A_IRQn);
+      HAL_NVIC_DisableIRQ(SAI1_B_IRQn);
+    }
+
+    HAL_GPIO_DeInit(GPIOB, GPIO_PIN_0 | GPIO_PIN_7 | GPIO_PIN_6);
+    HAL_DMA_DeInit(hsai->hdmarx);
+  }
+
+  if (hsai->Instance == SAI1_Block_B)
+  {
+    if (SAI1_client > 0U)
+    {
+      SAI1_client--;
+    }
+    if (SAI1_client == 0U)
+    {
+      __HAL_RCC_SAI1_CLK_DISABLE();
+      HAL_NVIC_DisableIRQ(SAI1_A_IRQn);
+      HAL_NVIC_DisableIRQ(SAI1_B_IRQn);
+    }
+
+    HAL_GPIO_DeInit(GPIOE, GPIO_PIN_3);
+    HAL_DMA_DeInit(hsai->hdmarx);
   }
 }
 

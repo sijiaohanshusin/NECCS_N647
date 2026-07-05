@@ -24,8 +24,10 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "app_bringup_thread.h"
+#include "app_acoustic_service.h"
 #include "app_i2c2_bus.h"
 #include "app_media.h"
+#include "app_pcmd_capture.h"
 
 /* USER CODE END Includes */
 
@@ -37,7 +39,11 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define APP_BRINGUP_THREAD_STACK_SIZE  4096U
-#define APP_BRINGUP_THREAD_PRIORITY    18U
+#define APP_BRINGUP_THREAD_PRIORITY    11U
+#define APP_PCMD_THREAD_STACK_SIZE     8192U
+#define APP_PCMD_THREAD_PRIORITY       12U
+#define APP_ACOUSTIC_THREAD_STACK_SIZE 12288U
+#define APP_ACOUSTIC_THREAD_PRIORITY   13U
 
 /* USER CODE END PD */
 
@@ -50,6 +56,10 @@
 /* USER CODE BEGIN PV */
 static TX_THREAD app_bringup_thread;
 static ULONG app_bringup_thread_stack[APP_BRINGUP_THREAD_STACK_SIZE / sizeof(ULONG)];
+static TX_THREAD app_pcmd_thread;
+static ULONG app_pcmd_thread_stack[APP_PCMD_THREAD_STACK_SIZE / sizeof(ULONG)];
+static TX_THREAD app_acoustic_thread;
+static ULONG app_acoustic_thread_stack[APP_ACOUSTIC_THREAD_STACK_SIZE / sizeof(ULONG)];
 
 /* USER CODE END PV */
 
@@ -82,6 +92,33 @@ UINT App_ThreadX_Init(VOID *memory_ptr)
                            APP_BRINGUP_THREAD_STACK_SIZE,
                            APP_BRINGUP_THREAD_PRIORITY,
                            APP_BRINGUP_THREAD_PRIORITY,
+                           TX_NO_TIME_SLICE,
+                           TX_AUTO_START);
+  }
+  if (ret == TX_SUCCESS)
+  {
+    ret = tx_thread_create(&app_pcmd_thread,
+                           "app_pcmd_capture",
+                           AppPcmdCapture_ThreadEntry,
+                           0U,
+                           app_pcmd_thread_stack,
+                           APP_PCMD_THREAD_STACK_SIZE,
+                           APP_PCMD_THREAD_PRIORITY,
+                           APP_PCMD_THREAD_PRIORITY,
+                           TX_NO_TIME_SLICE,
+                           TX_AUTO_START);
+  }
+  if (ret == TX_SUCCESS)
+  {
+    (void)AppAcousticService_Init();
+    ret = tx_thread_create(&app_acoustic_thread,
+                           "app_acoustic",
+                           AppAcousticService_ThreadEntry,
+                           0U,
+                           app_acoustic_thread_stack,
+                           APP_ACOUSTIC_THREAD_STACK_SIZE,
+                           APP_ACOUSTIC_THREAD_PRIORITY,
+                           APP_ACOUSTIC_THREAD_PRIORITY,
                            TX_NO_TIME_SLICE,
                            TX_AUTO_START);
   }
