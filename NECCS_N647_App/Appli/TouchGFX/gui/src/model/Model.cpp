@@ -160,6 +160,8 @@ typedef struct
     uint8_t started;
     uint8_t latest_frame_valid;
     uint8_t debug_ui_enabled;
+    uint8_t raw_audio_valid;
+    uint8_t raw_active_slot_count;
     uint8_t device_present_mask;
     uint8_t device_config_ok_mask;
     uint8_t device_status_ok_mask;
@@ -168,7 +170,10 @@ typedef struct
     uint32_t published_frames;
     uint32_t dropped_halves;
     uint32_t sync_miss_count;
+    uint32_t raw_quality_flags;
     uint16_t published_fps_x10;
+    int8_t raw_peak_dbfs;
+    int8_t raw_avg_dbfs;
 } AppPcmdCaptureSnapshot_t;
 
 static void AppPcmdCapture_GetSnapshot(AppPcmdCaptureSnapshot_t* snapshot)
@@ -386,6 +391,10 @@ void Model::tick()
     {
         snapshot.pcmdFlags |= APP_UI_PCMD_FLAG_DEBUG_ENABLED;
     }
+    if (pcmd.raw_audio_valid != 0U)
+    {
+        snapshot.pcmdFlags |= APP_UI_PCMD_FLAG_RAW_VALID;
+    }
     snapshot.pcmdDebugEnabled = pcmd.debug_ui_enabled;
     snapshot.pcmdDevicePresentMask = pcmd.device_present_mask;
     snapshot.pcmdDeviceConfigOkMask = pcmd.device_config_ok_mask;
@@ -393,7 +402,11 @@ void Model::tick()
     snapshot.pcmdPublishedFrames = pcmd.published_frames;
     snapshot.pcmdDroppedHalves = pcmd.dropped_halves;
     snapshot.pcmdSyncMissCount = pcmd.sync_miss_count;
+    snapshot.pcmdRawQualityFlags = pcmd.raw_quality_flags;
     snapshot.pcmdFpsX10 = pcmd.published_fps_x10;
+    snapshot.pcmdRawActiveSlotCount = pcmd.raw_active_slot_count;
+    snapshot.pcmdRawPeakDbfs = pcmd.raw_peak_dbfs;
+    snapshot.pcmdRawAvgDbfs = pcmd.raw_avg_dbfs;
 
     AppTouchSnapshot_t touch;
     memset(&touch, 0, sizeof(touch));

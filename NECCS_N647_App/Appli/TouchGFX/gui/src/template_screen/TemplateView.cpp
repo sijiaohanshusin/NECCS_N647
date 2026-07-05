@@ -673,6 +673,7 @@ void TemplateView::refreshMicPage(const AppUiSnapshot& snapshot)
     const bool pcmdLive = ((snapshot.pcmdFlags & APP_UI_PCMD_FLAG_FRAME_VALID) != 0U);
     const bool pcmdStarted = ((snapshot.pcmdFlags & APP_UI_PCMD_FLAG_STARTED) != 0U);
     const bool pcmdDebug = ((snapshot.pcmdFlags & APP_UI_PCMD_FLAG_DEBUG_ENABLED) != 0U);
+    const bool pcmdRawValid = ((snapshot.pcmdFlags & APP_UI_PCMD_FLAG_RAW_VALID) != 0U);
 
     for (uint32_t i = 0U; i < MicCount; ++i)
     {
@@ -699,22 +700,22 @@ void TemplateView::refreshMicPage(const AppUiSnapshot& snapshot)
     (void)snprintf(text, sizeof(text), "PEAK %ddB", static_cast<int>(peakDbfs));
     micSummaryLabel[2].setText(text);
 
-    micSummaryLabel[0].setText(pcmdLive ? "32 MIC PCMD" : "32 MIC PLANAR");
+    micSummaryLabel[0].setText(pcmdRawValid ? "32 MIC PCMD RAW" : "32 MIC RAW WAIT");
     if (pcmdDebug)
     {
-        (void)snprintf(text, sizeof(text), "DEV P%X C%X S%X",
+        (void)snprintf(text, sizeof(text), "P%X C%X R%lX",
                        snapshot.pcmdDevicePresentMask,
                        snapshot.pcmdDeviceConfigOkMask,
-                       snapshot.pcmdDeviceStatusOkMask);
+                       static_cast<unsigned long>(snapshot.pcmdRawQualityFlags & 0xFFU));
         micSummaryLabel[3].setText(text);
     }
     else if (pcmdLive)
     {
-        micSummaryLabel[3].setText("PCMD LIVE");
+        micSummaryLabel[3].setText(pcmdRawValid ? "PCMD RAW OK" : "PCMD FRAME WAIT RAW");
     }
     else if (pcmdStarted)
     {
-        micSummaryLabel[3].setText("PCMD START");
+        micSummaryLabel[3].setText("PCMD RAW WAIT");
     }
     else
     {
@@ -771,6 +772,7 @@ void TemplateView::refreshSettingsPage(const AppUiSnapshot& snapshot)
     const bool pcmdLive = ((snapshot.pcmdFlags & APP_UI_PCMD_FLAG_FRAME_VALID) != 0U);
     const bool pcmdStarted = ((snapshot.pcmdFlags & APP_UI_PCMD_FLAG_STARTED) != 0U);
     const bool pcmdDebug = ((snapshot.pcmdFlags & APP_UI_PCMD_FLAG_DEBUG_ENABLED) != 0U);
+    const bool pcmdRawValid = ((snapshot.pcmdFlags & APP_UI_PCMD_FLAG_RAW_VALID) != 0U);
     const bool acousticRunning = ((snapshot.acousticFlags & APP_UI_ACOUSTIC_FLAG_RUNNING) != 0U);
     const bool acousticValid = ((snapshot.acousticFlags & APP_UI_ACOUSTIC_FLAG_VALID) != 0U);
     const bool acousticDegraded = ((snapshot.acousticFlags & APP_UI_ACOUSTIC_FLAG_AUTO_DEGRADED) != 0U);
@@ -783,7 +785,8 @@ void TemplateView::refreshSettingsPage(const AppUiSnapshot& snapshot)
 
     settingsLabel[4].setText(acousticValid ? "SOURCE PCMD SRP" :
                              (pcmdLive ? "SOURCE PCMD WAIT SRP" :
-                             (pcmdStarted ? "SOURCE PCMD WAIT" : "SOURCE SYNTH")));
+                             (pcmdRawValid ? "SOURCE RAW WAIT FRAME" :
+                             (pcmdStarted ? "SOURCE RAW VERIFY" : "SOURCE SYNTH"))));
     if (pcmdDebug)
     {
         (void)snprintf(text, sizeof(text), "PCMD F%lu D%lu M%lu",
@@ -804,7 +807,7 @@ void TemplateView::refreshSettingsPage(const AppUiSnapshot& snapshot)
         }
         else
         {
-            settingsLabel[6].setText(pcmdLive ? "REAL CAPTURE ACTIVE" : "REAL CAPTURE WAITS PCMD");
+            settingsLabel[6].setText(pcmdRawValid ? "REAL CAPTURE RAW OK" : "REAL CAPTURE RAW WAIT");
         }
     }
 }

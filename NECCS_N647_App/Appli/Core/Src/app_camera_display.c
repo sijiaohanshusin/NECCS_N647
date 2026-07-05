@@ -448,13 +448,14 @@ static int32_t AppCameraDisplay_ConfigCameraLayer(uint32_t initial_camera_addr)
 static int32_t AppCameraDisplay_ConfigUiLayer(void)
 {
   LTDC_LayerCfgTypeDef layer = {0};
+  uint32_t ui_fb_addr = AppCameraDisplay_GetUiFramebufferAddr();
 
   AppCameraDisplay_FillRgb565Layer(&layer,
                                    0U,
                                    0U,
                                    APP_CAMERA_DISPLAY_SCREEN_WIDTH,
                                    APP_CAMERA_DISPLAY_SCREEN_HEIGHT,
-                                   APP_CAMERA_DISPLAY_UI_FB_ADDR);
+                                   ui_fb_addr);
   layer.BlendingFactor1 = LTDC_BLENDING_FACTOR1_PAxCA;
   layer.BlendingFactor2 = LTDC_BLENDING_FACTOR2_PAxCA;
 
@@ -686,6 +687,8 @@ void AppCameraDisplay_GetStatus(AppCameraDisplayStatus_t *status)
     status->ltdc_layer2_cfbar = g_app_camera_ltdc_layer2_cfbar;
     status->ui_fb_addr = g_app_camera_ui_fb_addr;
     status->auto_disable_count = g_app_camera_ltdc_auto_disable_count;
+    status->overlay_update_count = g_app_camera_overlay_update_count;
+    status->overlay_draw_count = g_app_camera_overlay_draw_count;
     status->init_status = (int32_t)g_app_camera_display_init_status;
   }
 }

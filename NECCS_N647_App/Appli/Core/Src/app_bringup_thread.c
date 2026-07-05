@@ -10,12 +10,152 @@
 
 #define APP_HEARTBEAT_TICKS  ((ULONG)TX_TIMER_TICKS_PER_SECOND)
 
+volatile AppBringUpSnapshot_t g_app_bringup_snapshot =
+{
+  .magic = APP_BRINGUP_STATUS_MAGIC,
+};
+
 volatile uint32_t g_app_sd_card_present = 0U;
 volatile uint32_t g_app_sd_card_init_status = SD_NAND_ERROR_NOT_READY;
 volatile uint32_t g_app_sd_card_block_count = 0U;
 volatile uint32_t g_app_sd_card_block_size = 0U;
 volatile uint64_t g_app_sd_card_capacity_bytes = 0U;
 volatile uint32_t g_app_sd_card_block0_read_status = SD_NAND_ERROR_NOT_READY;
+
+static uint32_t App_BringUpModuleMask(AppBringUpModule_t module)
+{
+  return (module < APP_BRINGUP_MODULE_COUNT) ? (1UL << (uint32_t)module) : 0U;
+}
+
+static void App_BringUpStatusTouch(AppBringUpModule_t module, int32_t status)
+{
+  if (module >= APP_BRINGUP_MODULE_COUNT)
+  {
+    return;
+  }
+
+  g_app_bringup_snapshot.magic = APP_BRINGUP_STATUS_MAGIC;
+  g_app_bringup_snapshot.seq++;
+  g_app_bringup_snapshot.last_status[module] = status;
+  g_app_bringup_snapshot.last_update_ms[module] = HAL_GetTick();
+  __DMB();
+}
+
+void App_BringUpStatus_Reset(void)
+{
+  uint32_t primask = __get_PRIMASK();
+
+  __disable_irq();
+  for (uint32_t module = 0U; module < (uint32_t)APP_BRINGUP_MODULE_COUNT; module++)
+  {
+    g_app_bringup_snapshot.init_status[module] = 0;
+    g_app_bringup_snapshot.start_status[module] = 0;
+    g_app_bringup_snapshot.last_status[module] = 0;
+    g_app_bringup_snapshot.last_update_ms[module] = 0U;
+    g_app_bringup_snapshot.heartbeat[module] = 0U;
+  }
+  g_app_bringup_snapshot.magic = APP_BRINGUP_STATUS_MAGIC;
+  g_app_bringup_snapshot.seq++;
+  g_app_bringup_snapshot.enabled_mask = 0U;
+  g_app_bringup_snapshot.started_mask = 0U;
+  g_app_bringup_snapshot.ready_mask = 0U;
+  g_app_bringup_snapshot.failed_mask = 0U;
+  g_app_bringup_snapshot.loop_count = 0U;
+  if (primask == 0U)
+  {
+    __enable_irq();
+  }
+}
+
+void App_BringUpStatus_Enable(AppBringUpModule_t module)
+{
+  uint32_t mask = App_BringUpModuleMask(module);
+
+  if (mask == 0U)
+  {
+    return;
+  }
+
+  g_app_bringup_snapshot.enabled_mask |= mask;
+  App_BringUpStatusTouch(module, 0);
+}
+
+void App_BringUpStatus_Start(AppBringUpModule_t module, int32_t status)
+{
+  uint32_t mask = App_BringUpModuleMask(module);
+
+  if (mask == 0U)
+  {
+    return;
+  }
+
+  g_app_bringup_snapshot.started_mask |= mask;
+  g_app_bringup_snapshot.start_status[module] = status;
+  if (status != 0)
+  {
+    g_app_bringup_snapshot.failed_mask |= mask;
+  }
+  App_BringUpStatusTouch(module, status);
+}
+
+void App_BringUpStatus_Ready(AppBringUpModule_t module, int32_t status)
+{
+  uint32_t mask = App_BringUpModuleMask(module);
+
+  if (mask == 0U)
+  {
+    return;
+  }
+
+  g_app_bringup_snapshot.ready_mask |= mask;
+  g_app_bringup_snapshot.failed_mask &= ~mask;
+  g_app_bringup_snapshot.init_status[module] = status;
+  App_BringUpStatusTouch(module, status);
+}
+
+void App_BringUpStatus_Fail(AppBringUpModule_t module, int32_t status)
+{
+  uint32_t mask = App_BringUpModuleMask(module);
+
+  if (mask == 0U)
+  {
+    return;
+  }
+
+  g_app_bringup_snapshot.failed_mask |= mask;
+  g_app_bringup_snapshot.ready_mask &= ~mask;
+  g_app_bringup_snapshot.last_status[module] = status;
+  App_BringUpStatusTouch(module, status);
+}
+
+void App_BringUpStatus_Heartbeat(AppBringUpModule_t module, int32_t status)
+{
+  if (module >= APP_BRINGUP_MODULE_COUNT)
+  {
+    return;
+  }
+
+  g_app_bringup_snapshot.heartbeat[module]++;
+  App_BringUpStatusTouch(module, status);
+}
+
+void App_BringUpStatus_GetSnapshot(AppBringUpSnapshot_t *snapshot)
+{
+  uint32_t primask;
+
+  if (snapshot == 0)
+  {
+    return;
+  }
+
+  primask = __get_PRIMASK();
+  __disable_irq();
+  *snapshot = g_app_bringup_snapshot;
+  if (primask == 0U)
+  {
+    __enable_irq();
+  }
+}
 
 static void App_BringUpMirrorMediaStatus(void)
 {
@@ -51,23 +191,47 @@ static void App_BringUpMirrorMediaStatus(void)
 
 void App_BringUpThreadEntry(ULONG thread_input)
 {
+  int32_t camera_status;
+
   (void)thread_input;
   App_BootDiag_SetStage(APP_BOOT_STAGE_BRINGUP_THREAD_ENTER);
+  App_BringUpStatus_Start(APP_BRINGUP_MODULE_CAMERA, 0);
+  App_BringUpStatus_Start(APP_BRINGUP_MODULE_MEDIA, 0);
 
   AppPower_Init();
+  App_BringUpStatus_Ready(APP_BRINGUP_MODULE_I2C, 0);
   App_BringUpMirrorMediaStatus();
-  if (AppCamera_Init() == APP_CAMERA_OK)
+  App_BringUpStatus_Ready(APP_BRINGUP_MODULE_MEDIA, (int32_t)g_app_sd_card_init_status);
+
+  camera_status = AppCamera_Init();
+  if (camera_status == APP_CAMERA_OK)
   {
-    (void)AppCamera_StartPreview();
+    App_BringUpStatus_Ready(APP_BRINGUP_MODULE_CAMERA, camera_status);
+    camera_status = AppCamera_StartPreview();
+    if (camera_status == APP_CAMERA_OK)
+    {
+      App_BringUpStatus_Ready(APP_BRINGUP_MODULE_UI_OVERLAY, camera_status);
+    }
+    else
+    {
+      App_BringUpStatus_Fail(APP_BRINGUP_MODULE_UI_OVERLAY, camera_status);
+    }
+  }
+  else
+  {
+    App_BringUpStatus_Fail(APP_BRINGUP_MODULE_CAMERA, camera_status);
   }
 
   while (1)
   {
     App_BootDiag_SetStage(APP_BOOT_STAGE_BRINGUP_THREAD_LOOP);
     g_app_boot_diag.bringup_loop_count++;
+    g_app_bringup_snapshot.loop_count++;
     App_BringUpMirrorMediaStatus();
+    App_BringUpStatus_Heartbeat(APP_BRINGUP_MODULE_MEDIA, (int32_t)g_app_sd_card_init_status);
     AppPower_Poll(1000U);
     AppCamera_Poll(1000U);
+    App_BringUpStatus_Heartbeat(APP_BRINGUP_MODULE_CAMERA, (int32_t)g_app_camera_last_error);
     LED0_TOGGLE();
     tx_thread_sleep(APP_HEARTBEAT_TICKS);
   }

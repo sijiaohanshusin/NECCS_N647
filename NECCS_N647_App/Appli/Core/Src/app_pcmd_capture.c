@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "main.h"
+#include "app_bringup_thread.h"
 #include "PCMD3180/pcmd3180_hal.h"
 
 #define APP_PCMD_CAPTURE_SLOTS_PER_BUS       APP_MIC_ARRAY_WIDE32_SLOTS_PER_BUS
@@ -12,7 +13,7 @@
 #define APP_PCMD_CAPTURE_DMA_WORDS_PER_HALF  (APP_PCMD_CAPTURE_SLOTS_PER_BUS * APP_PCMD_CAPTURE_FRAME_LEN)
 #define APP_PCMD_CAPTURE_DMA_WORDS           (APP_PCMD_CAPTURE_DMA_WORDS_PER_HALF * APP_PCMD_CAPTURE_DMA_HALVES)
 #define APP_PCMD_CAPTURE_AUDIO_SCALE         APP_MIC_ARRAY_Q15_TO_FLOAT_SCALE
-#define APP_PCMD_CAPTURE_I2C_TIMEOUT_MS      100U
+#define APP_PCMD_CAPTURE_I2C_TIMEOUT_MS      20U
 #define APP_PCMD_CAPTURE_RESET_LOW_MS        100U
 #define APP_PCMD_CAPTURE_RESET_SETTLE_MS     10U
 #define APP_PCMD_CAPTURE_CLOCK_SETTLE_MS     1000U
@@ -216,6 +217,35 @@ static void AppPcmdCapture_ClearRuntime(void)
   {
     s_snapshot.mic_dbfs[mic] = -90;
   }
+  s_snapshot.raw_peak_dbfs = -90;
+  s_snapshot.raw_avg_dbfs = -90;
+}
+
+static void AppPcmdCapture_ClearPendingDmaEvents(void)
+{
+  ULONG events;
+  uint32_t primask;
+
+  primask = __get_PRIMASK();
+  __disable_irq();
+  s_half_ready_mask[0] = 0U;
+  s_half_ready_mask[1] = 0U;
+  if (primask == 0U)
+  {
+    __enable_irq();
+  }
+
+  if (s_event_flags_created != 0U)
+  {
+    while (tx_event_flags_get(&s_event_flags,
+                              APP_PCMD_CAPTURE_EVENT_MASK,
+                              TX_OR_CLEAR,
+                              &events,
+                              TX_NO_WAIT) == TX_SUCCESS)
+    {
+      s_snapshot.stale_event_flush_count++;
+    }
+  }
 }
 
 static void AppPcmdCapture_MarkHalfReady(uint8_t bus, uint8_t half)
@@ -327,6 +357,10 @@ static void AppPcmdCapture_UpdateSlotLevels(uint8_t bus,
 
 static void AppPcmdCapture_UpdateMicLevels(void)
 {
+  int32_t dbfs_sum = 0;
+  int8_t peak_dbfs = -90;
+  uint32_t active_slots = 0U;
+
   for (uint32_t channel = 0U; channel < APP_MIC_ARRAY_PHYSICAL_MIC_COUNT; channel++)
   {
     AppMicArraySource_t source;
@@ -341,7 +375,46 @@ static void AppPcmdCapture_UpdateMicLevels(void)
 
     s_snapshot.mic_dbfs[channel] = dbfs;
     s_snapshot.mic_level[channel] = AppPcmdCapture_ClampPercent(AppPcmdCapture_DbfsToPercent(dbfs));
+    dbfs_sum += dbfs;
+    if (dbfs > peak_dbfs)
+    {
+      peak_dbfs = dbfs;
+    }
+    if (dbfs > -90)
+    {
+      active_slots++;
+    }
   }
+
+  s_snapshot.raw_peak_dbfs = peak_dbfs;
+  s_snapshot.raw_avg_dbfs =
+      (int8_t)(dbfs_sum / (int32_t)APP_MIC_ARRAY_PHYSICAL_MIC_COUNT);
+  s_snapshot.raw_active_slot_count = (active_slots > 255U) ? 255U : (uint8_t)active_slots;
+  s_snapshot.raw_quality_flags = 0U;
+  if (s_snapshot.device_config_ok_mask == 0x0FU)
+  {
+    s_snapshot.raw_quality_flags |= APP_PCMD_CAPTURE_RAW_FLAG_CONFIG_OK;
+  }
+  if ((s_snapshot.sai_a_half_count != 0U) &&
+      (s_snapshot.sai_b_half_count != 0U))
+  {
+    s_snapshot.raw_quality_flags |= APP_PCMD_CAPTURE_RAW_FLAG_DMA_SYNC;
+  }
+  if (active_slots != 0U)
+  {
+    s_snapshot.raw_quality_flags |= APP_PCMD_CAPTURE_RAW_FLAG_NONZERO;
+  }
+  if (peak_dbfs <= -50)
+  {
+    s_snapshot.raw_quality_flags |= APP_PCMD_CAPTURE_RAW_FLAG_LOW_NOISE;
+  }
+  s_snapshot.raw_audio_valid =
+      ((s_snapshot.raw_quality_flags & (APP_PCMD_CAPTURE_RAW_FLAG_CONFIG_OK |
+                                        APP_PCMD_CAPTURE_RAW_FLAG_DMA_SYNC |
+                                        APP_PCMD_CAPTURE_RAW_FLAG_NONZERO)) ==
+       (APP_PCMD_CAPTURE_RAW_FLAG_CONFIG_OK |
+        APP_PCMD_CAPTURE_RAW_FLAG_DMA_SYNC |
+        APP_PCMD_CAPTURE_RAW_FLAG_NONZERO)) ? 1U : 0U;
 }
 
 static void AppPcmdCapture_UpdateFrameRate(uint32_t now_ms)
@@ -397,12 +470,21 @@ static void AppPcmdCapture_ProcessHalf(uint8_t half)
   frame->drop_count = s_snapshot.dropped_halves;
   frame->error_count = s_snapshot.sai_a_error_count + s_snapshot.sai_b_error_count;
   AppPcmdCapture_UpdateMicLevels();
+  if (s_snapshot.raw_audio_valid == 0U)
+  {
+    s_snapshot.sync_miss_count++;
+    s_snapshot.latest_frame_valid = 0U;
+    App_BringUpStatus_Fail(APP_BRINGUP_MODULE_AUDIO_FRAME, (int32_t)s_snapshot.raw_quality_flags);
+    return;
+  }
 
   s_frame_seq = next_seq;
   s_latest_frame_index = frame_index;
   s_snapshot.latest_seq = next_seq;
   s_snapshot.latest_frame_valid = 1U;
   s_snapshot.published_frames++;
+  App_BringUpStatus_Ready(APP_BRINGUP_MODULE_AUDIO_FRAME, 0);
+  App_BringUpStatus_Heartbeat(APP_BRINGUP_MODULE_PCMD_RAW, 0);
   AppPcmdCapture_UpdateFrameRate(HAL_GetTick());
 }
 
@@ -616,11 +698,15 @@ AppPcmdCaptureStatus_t AppPcmdCapture_Start(void)
   {
     s_snapshot.start_status = config_status;
     AppPcmdCapture_StopDma();
+    App_BringUpStatus_Fail(APP_BRINGUP_MODULE_PCMD_RAW, (int32_t)config_status);
     return config_status;
   }
 
+  AppPcmdCapture_ClearPendingDmaEvents();
+
   s_snapshot.started = 1U;
   s_snapshot.start_status = APP_PCMD_CAPTURE_OK;
+  App_BringUpStatus_Ready(APP_BRINGUP_MODULE_PCMD_RAW, APP_PCMD_CAPTURE_OK);
   return APP_PCMD_CAPTURE_OK;
 }
 

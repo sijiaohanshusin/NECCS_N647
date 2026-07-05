@@ -1,5 +1,29 @@
 # NECCS_N647 Project Notes
 
+## 2026-07-06 N647 bring-up reset point
+
+- Current checkpoint before the cleanup/rebuild pass:
+  `3f084b08 wip: checkpoint n6 pcmd acoustic bringup`.
+- Active integration target: final product path, built in layers:
+  clock/memory -> display/touch -> I2C -> camera -> PCMD raw capture ->
+  audio frame -> acoustic SRP -> camera overlay.
+- Do not debug from memory. The current bug ledger, module order, GDB symbols,
+  and validation results live in `docs/n647_bringup_status.md`.
+- Current firmware exposes `g_app_bringup_snapshot` and `g_app_i2c2_snapshot`
+  for GDB-first diagnosis before changing UI or algorithm code.
+- Hardware debug uses the scripted N647 loop first:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\debug\n647_debug_env.ps1 -CheckOnly
+powershell -ExecutionPolicy Bypass -File .\tools\debug\debug_n647_ram.ps1 -Batch
+```
+
+- Release flashing is allowed only after RAM Debug passes:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\debug\flash_n647_release.ps1 -BuildBundle -ResetAfter
+```
+
 ## 2026-06-28 N6 SRP-PHAT runtime initial port
 
 - Added `app_acoustic_srp.*`, a hardware-neutral SRP-PHAT runtime for

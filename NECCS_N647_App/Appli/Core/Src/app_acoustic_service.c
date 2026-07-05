@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "app_pcmd_capture.h"
+#include "app_bringup_thread.h"
 #include "main.h"
 
 #define APP_ACOUSTIC_SERVICE_TARGET_FPS          20U
@@ -573,6 +574,8 @@ void AppAcousticService_ThreadEntry(ULONG thread_input)
       snapshot.service_status = APP_ACOUSTIC_SERVICE_STATUS_WAIT_FRAME;
       AppAcousticService_ClearHeat(&snapshot);
       AppAcousticService_PublishSnapshot(&snapshot);
+      App_BringUpStatus_Heartbeat(APP_BRINGUP_MODULE_ACOUSTIC,
+                                  APP_ACOUSTIC_SERVICE_STATUS_WAIT_FRAME);
       continue;
     }
 
@@ -582,6 +585,8 @@ void AppAcousticService_ThreadEntry(ULONG thread_input)
       snapshot.input_seq = capture_frame.seq;
       snapshot.service_status = APP_ACOUSTIC_SERVICE_STATUS_WAIT_FRAME;
       AppAcousticService_PublishSnapshot(&snapshot);
+      App_BringUpStatus_Heartbeat(APP_BRINGUP_MODULE_ACOUSTIC,
+                                  APP_ACOUSTIC_SERVICE_STATUS_WAIT_FRAME);
       continue;
     }
 
@@ -593,6 +598,8 @@ void AppAcousticService_ThreadEntry(ULONG thread_input)
       snapshot.service_status = APP_ACOUSTIC_SERVICE_STATUS_COPY_FAILED;
       AppAcousticService_ClearHeat(&snapshot);
       AppAcousticService_PublishSnapshot(&snapshot);
+      App_BringUpStatus_Fail(APP_BRINGUP_MODULE_ACOUSTIC,
+                             APP_ACOUSTIC_SERVICE_STATUS_COPY_FAILED);
       continue;
     }
 
@@ -612,6 +619,7 @@ void AppAcousticService_ThreadEntry(ULONG thread_input)
       App_AcousticSrp_GetPerf(&s_srp_ctx, &snapshot.perf);
       AppAcousticService_UpdatePerf(&snapshot, &snapshot.perf, process_elapsed_ms);
       AppAcousticService_UpdateFps(&snapshot);
+      App_BringUpStatus_Ready(APP_BRINGUP_MODULE_ACOUSTIC, (int32_t)status);
     }
     else
     {
@@ -619,6 +627,7 @@ void AppAcousticService_ThreadEntry(ULONG thread_input)
       snapshot.valid = 0U;
       snapshot.service_status = (int32_t)status;
       AppAcousticService_ClearHeat(&snapshot);
+      App_BringUpStatus_Fail(APP_BRINGUP_MODULE_ACOUSTIC, (int32_t)status);
     }
 
     AppAcousticService_UpdateDegrade(&snapshot, status, process_elapsed_ms);

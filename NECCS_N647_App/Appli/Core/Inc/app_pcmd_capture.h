@@ -24,6 +24,11 @@ extern "C" {
 #define APP_PCMD_DIAG_UI_ENABLE             0U
 #endif
 
+#define APP_PCMD_CAPTURE_RAW_FLAG_CONFIG_OK  (1UL << 0)
+#define APP_PCMD_CAPTURE_RAW_FLAG_DMA_SYNC   (1UL << 1)
+#define APP_PCMD_CAPTURE_RAW_FLAG_NONZERO    (1UL << 2)
+#define APP_PCMD_CAPTURE_RAW_FLAG_LOW_NOISE  (1UL << 3)
+
 typedef enum
 {
   APP_PCMD_CAPTURE_OK = 0,
@@ -41,6 +46,8 @@ typedef struct
   uint8_t started;
   uint8_t latest_frame_valid;
   uint8_t debug_ui_enabled;
+  uint8_t raw_audio_valid;
+  uint8_t raw_active_slot_count;
   AppMicArrayMode_t mode;
   uint32_t sample_rate_hz;
   uint32_t expected_bclk_hz;
@@ -70,7 +77,11 @@ typedef struct
   uint32_t dropped_halves;
   uint32_t sync_miss_count;
   uint32_t latest_seq;
+  uint32_t stale_event_flush_count;
+  uint32_t raw_quality_flags;
   uint16_t published_fps_x10;
+  int8_t raw_peak_dbfs;
+  int8_t raw_avg_dbfs;
   uint16_t slot_level[APP_PCMD_CAPTURE_BUS_COUNT][APP_MIC_ARRAY_WIDE32_SLOTS_PER_BUS];
   uint16_t slot_level_raw[APP_PCMD_CAPTURE_BUS_COUNT][APP_MIC_ARRAY_WIDE32_SLOTS_PER_BUS];
   int16_t slot_dc_level[APP_PCMD_CAPTURE_BUS_COUNT][APP_MIC_ARRAY_WIDE32_SLOTS_PER_BUS];

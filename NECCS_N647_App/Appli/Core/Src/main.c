@@ -30,6 +30,7 @@
 #include "./LED/led.h"
 #include "./RGBLCD/rgblcd.h"
 #include "app_boot_diag.h"
+#include "app_bringup_thread.h"
 #include "app_camera.h"
 #include "app_camera_display.h"
 
@@ -119,6 +120,7 @@ HAL_StatusTypeDef MX_SDMMC2_SD_Init(void);
 /* USER CODE BEGIN PFP */
 static uint32_t App_HyperRAM_SelfTest(void);
 static void App_RecoverHalTick(void);
+static void App_EnableBringUpModules(void);
 
 /* USER CODE END PFP */
 
@@ -187,6 +189,14 @@ static uint32_t App_HyperRAM_SelfTest(void)
   return 1;
 }
 
+static void App_EnableBringUpModules(void)
+{
+  for (uint32_t module = 0U; module < (uint32_t)APP_BRINGUP_MODULE_COUNT; module++)
+  {
+    App_BringUpStatus_Enable((AppBringUpModule_t)module);
+  }
+}
+
 /* USER CODE END 0 */
 
 /**
@@ -211,6 +221,8 @@ int main(void)
 
   /* MCU Configuration--------------------------------------------------------*/
   HAL_Init();
+  App_BringUpStatus_Reset();
+  App_EnableBringUpModules();
   App_BootDiag_SetStage(APP_BOOT_STAGE_HAL_INIT_DONE);
 
   /* USER CODE BEGIN Init */
@@ -219,6 +231,7 @@ int main(void)
 #endif
   SystemCoreClockUpdate();
   App_BootDiag_SetStage(APP_BOOT_STAGE_CLOCK_DONE);
+  App_BringUpStatus_Ready(APP_BRINGUP_MODULE_CLOCK, 0);
   App_RecoverHalTick();
   App_BootDiag_SetStage(APP_BOOT_STAGE_TICK_RECOVER_DONE);
 
@@ -246,8 +259,10 @@ int main(void)
   g_app_hyperram_test_ok = App_HyperRAM_SelfTest();
   if (g_app_hyperram_test_ok == 0)
   {
+    App_BringUpStatus_Fail(APP_BRINGUP_MODULE_MEMORY, -1);
     Error_Handler();
   }
+  App_BringUpStatus_Ready(APP_BRINGUP_MODULE_MEMORY, 0);
   App_BootDiag_SetStage(APP_BOOT_STAGE_HYPERRAM_TEST_DONE);
 
   /* USER CODE END SysInit */
@@ -276,7 +291,17 @@ int main(void)
   App_BootDiag_SetStage(APP_BOOT_STAGE_BSP_LED_DONE);
   rgblcd_init();
   App_BootDiag_SetStage(APP_BOOT_STAGE_BSP_RGBLCD_DONE);
-  (void)AppCameraDisplay_InitLayers(APP_CAMERA_DISPLAY_TARGET_ADDR);
+  {
+    int32_t display_status = AppCameraDisplay_InitLayers(APP_CAMERA_DISPLAY_TARGET_ADDR);
+    if (display_status == APP_CAMERA_DISPLAY_OK)
+    {
+      App_BringUpStatus_Ready(APP_BRINGUP_MODULE_DISPLAY, display_status);
+    }
+    else
+    {
+      App_BringUpStatus_Fail(APP_BRINGUP_MODULE_DISPLAY, display_status);
+    }
+  }
 
   /* USER CODE END 2 */
 

@@ -84,6 +84,15 @@ UINT App_ThreadX_Init(VOID *memory_ptr)
   ret = AppI2C2_BusInit();
   if (ret == TX_SUCCESS)
   {
+    App_BringUpStatus_Ready(APP_BRINGUP_MODULE_I2C, (int32_t)ret);
+  }
+  else
+  {
+    App_BringUpStatus_Fail(APP_BRINGUP_MODULE_I2C, (int32_t)ret);
+  }
+  if (ret == TX_SUCCESS)
+  {
+    App_BringUpStatus_Start(APP_BRINGUP_MODULE_CAMERA, 0);
     ret = tx_thread_create(&app_bringup_thread,
                            "app_bringup",
                            App_BringUpThreadEntry,
@@ -94,9 +103,14 @@ UINT App_ThreadX_Init(VOID *memory_ptr)
                            APP_BRINGUP_THREAD_PRIORITY,
                            TX_NO_TIME_SLICE,
                            TX_AUTO_START);
+    if (ret != TX_SUCCESS)
+    {
+      App_BringUpStatus_Fail(APP_BRINGUP_MODULE_CAMERA, (int32_t)ret);
+    }
   }
   if (ret == TX_SUCCESS)
   {
+    App_BringUpStatus_Start(APP_BRINGUP_MODULE_PCMD_RAW, 0);
     ret = tx_thread_create(&app_pcmd_thread,
                            "app_pcmd_capture",
                            AppPcmdCapture_ThreadEntry,
@@ -107,10 +121,22 @@ UINT App_ThreadX_Init(VOID *memory_ptr)
                            APP_PCMD_THREAD_PRIORITY,
                            TX_NO_TIME_SLICE,
                            TX_AUTO_START);
+    if (ret != TX_SUCCESS)
+    {
+      App_BringUpStatus_Fail(APP_BRINGUP_MODULE_PCMD_RAW, (int32_t)ret);
+    }
   }
   if (ret == TX_SUCCESS)
   {
-    (void)AppAcousticService_Init();
+    AppAcousticImagingStatus_t acoustic_status = AppAcousticService_Init();
+    if (acoustic_status == APP_ACOUSTIC_IMAGING_OK)
+    {
+      App_BringUpStatus_Ready(APP_BRINGUP_MODULE_ACOUSTIC, (int32_t)acoustic_status);
+    }
+    else
+    {
+      App_BringUpStatus_Fail(APP_BRINGUP_MODULE_ACOUSTIC, (int32_t)acoustic_status);
+    }
     ret = tx_thread_create(&app_acoustic_thread,
                            "app_acoustic",
                            AppAcousticService_ThreadEntry,
@@ -121,10 +147,22 @@ UINT App_ThreadX_Init(VOID *memory_ptr)
                            APP_ACOUSTIC_THREAD_PRIORITY,
                            TX_NO_TIME_SLICE,
                            TX_AUTO_START);
+    if (ret != TX_SUCCESS)
+    {
+      App_BringUpStatus_Fail(APP_BRINGUP_MODULE_ACOUSTIC, (int32_t)ret);
+    }
   }
   if (ret == TX_SUCCESS)
   {
     ret = AppMedia_Init(memory_ptr);
+    if (ret == TX_SUCCESS)
+    {
+      App_BringUpStatus_Ready(APP_BRINGUP_MODULE_MEDIA, (int32_t)ret);
+    }
+    else
+    {
+      App_BringUpStatus_Fail(APP_BRINGUP_MODULE_MEDIA, (int32_t)ret);
+    }
   }
   /* USER CODE END App_ThreadX_Init */
 

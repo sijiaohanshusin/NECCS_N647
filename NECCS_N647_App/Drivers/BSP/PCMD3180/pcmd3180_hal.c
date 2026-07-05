@@ -3,8 +3,13 @@
 #include "app_i2c2_bus.h"
 #include "tx_api.h"
 
-#define PCMD3180_HAL_I2C_RETRY_COUNT       3U
+#ifndef PCMD3180_HAL_I2C_RETRY_COUNT
+#define PCMD3180_HAL_I2C_RETRY_COUNT       2U
+#endif
+
+#ifndef PCMD3180_HAL_I2C_RETRY_DELAY_MS
 #define PCMD3180_HAL_I2C_RETRY_DELAY_MS    2U
+#endif
 
 static uint32_t PCMD3180_HAL_GetTimeout(const PCMD3180_HAL_BusContextTypeDef *context)
 {
