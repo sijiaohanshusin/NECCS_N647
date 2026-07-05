@@ -64,6 +64,9 @@ static AppAudioFrameStatus_t App_AudioFrame_PrepareCommon(AppAudioFrame_t *frame
   frame->samples_per_channel = samples_per_channel;
   frame->seq = seq;
   frame->timestamp_us = timestamp_us;
+  frame->channel_valid_mask = (channel_count >= 32U) ? 0xFFFFFFFFUL : ((1UL << channel_count) - 1UL);
+  frame->channel_suspect_mask = 0U;
+  frame->temperature_c = 20.0f;
 
   return APP_AUDIO_FRAME_OK;
 }
@@ -201,6 +204,9 @@ void App_AudioFrame_Clear(AppAudioFrame_t *frame)
   frame->timestamp_us = 0ULL;
   frame->drop_count = 0U;
   frame->error_count = 0U;
+  frame->channel_valid_mask = 0U;
+  frame->channel_suspect_mask = 0U;
+  frame->temperature_c = 20.0f;
   frame->planar_i16 = NULL;
   frame->planar_f32 = NULL;
 }
@@ -350,6 +356,13 @@ AppAudioFrameStatus_t App_AudioFrame_Validate(const AppAudioFrame_t *frame)
   expected_sample_rate = App_MicArray_GetModeSampleRateHz(frame->mic_mode);
   if ((frame->channel_count != expected_channels) ||
       (frame->sample_rate_hz != expected_sample_rate))
+  {
+    return APP_AUDIO_FRAME_LAYOUT_MISMATCH;
+  }
+
+  if ((frame->channel_valid_mask == 0U) ||
+      ((expected_channels < 32U) &&
+       (((frame->channel_valid_mask | frame->channel_suspect_mask) & ~((1UL << expected_channels) - 1UL)) != 0U)))
   {
     return APP_AUDIO_FRAME_LAYOUT_MISMATCH;
   }

@@ -33,6 +33,11 @@ extern "C" {
 #define APP_ACOUSTIC_IMAGING_CORE16_QUALITY_PAIRS      120U
 #define APP_ACOUSTIC_IMAGING_PAIR_COUNT_MAX            APP_ACOUSTIC_IMAGING_WIDE32_QUALITY_PAIRS
 #define APP_ACOUSTIC_IMAGING_VIS_CANDIDATE_MAX         3U
+#define APP_ACOUSTIC_IMAGING_ALL_CHANNELS_MASK         0xFFFFFFFFUL
+#define APP_ACOUSTIC_IMAGING_DEFAULT_TEMP_C            20.0f
+#define APP_ACOUSTIC_IMAGING_DEFAULT_SMOOTHING_ALPHA   0.35f
+#define APP_ACOUSTIC_IMAGING_HF_HINT_BIN_START         43U
+#define APP_ACOUSTIC_IMAGING_HF_HINT_BIN_END           80U
 
 typedef enum
 {
@@ -51,10 +56,27 @@ typedef enum
   APP_ACOUSTIC_IMAGING_PROFILE_QUALITY = 2
 } AppAcousticImagingProfile_t;
 
+typedef enum
+{
+  APP_ACOUSTIC_IMAGING_ALGO_WIDE32_FAST_SRP = 0,
+  APP_ACOUSTIC_IMAGING_ALGO_WIDE32_GENERAL_SRP = 1,
+  APP_ACOUSTIC_IMAGING_ALGO_WIDE32_QUALITY_SRP = 2,
+  APP_ACOUSTIC_IMAGING_ALGO_WIDE32_HF_HINT = 3,
+  APP_ACOUSTIC_IMAGING_ALGO_CORE16_HF_NEARFIELD = 4
+} AppAcousticImagingAlgorithm_t;
+
+typedef enum
+{
+  APP_ACOUSTIC_IMAGING_PAIR_SELECT_LONG_BASELINE = 0,
+  APP_ACOUSTIC_IMAGING_PAIR_SELECT_SHORT_BASELINE = 1
+} AppAcousticImagingPairSelect_t;
+
 typedef struct
 {
+  AppAcousticImagingAlgorithm_t algorithm;
   AppMicArrayMode_t mic_mode;
   AppAcousticImagingProfile_t profile;
+  AppAcousticImagingPairSelect_t pair_select;
   uint32_t sample_rate_hz;
   uint32_t channel_count;
   uint32_t frame_len;
@@ -70,6 +92,14 @@ typedef struct
   float fine_span_deg;
   uint8_t ui_target_fps;
   uint8_t ui_min_fps;
+  uint32_t channel_mask;
+  uint32_t bad_channel_mask;
+  float temperature_c;
+  float speed_of_sound_mps;
+  float smoothing_alpha;
+  float quality_min;
+  float energy_min;
+  uint8_t adaptive_profile_enable;
 } AppAcousticImagingConfig_t;
 
 typedef struct
@@ -78,7 +108,10 @@ typedef struct
   uint8_t mic_b;
   float dx_m;
   float dy_m;
+  float baseline_m;
   float baseline_sq_m2;
+  float selection_score;
+  float weight;
 } AppAcousticImagingPair_t;
 
 typedef struct
@@ -101,6 +134,7 @@ typedef struct
   float peak_value;
   float quality;
   float contrast;
+  AppAcousticImagingAlgorithm_t algorithm;
   AppAcousticImagingProfile_t active_profile;
   AppMicArrayMode_t mic_mode;
   uint32_t frame_seq;
@@ -112,9 +146,17 @@ AppAcousticImagingStatus_t App_AcousticImaging_GetDefaultConfig(AppMicArrayMode_
                                                                 AppAcousticImagingProfile_t profile,
                                                                 AppAcousticImagingConfig_t *config);
 
+AppAcousticImagingStatus_t App_AcousticImaging_GetDefaultAlgorithmConfig(AppAcousticImagingAlgorithm_t algorithm,
+                                                                         AppAcousticImagingConfig_t *config);
+
 AppAcousticImagingStatus_t App_AcousticImaging_ValidateConfig(const AppAcousticImagingConfig_t *config);
 
 const char *App_AcousticImaging_ProfileName(AppAcousticImagingProfile_t profile);
+
+const char *App_AcousticImaging_AlgorithmName(AppAcousticImagingAlgorithm_t algorithm);
+
+AppAcousticImagingStatus_t App_AcousticImaging_SetTemperature(AppAcousticImagingConfig_t *config,
+                                                              float temperature_c);
 
 AppAcousticImagingStatus_t App_AcousticImaging_BuildPairSet(const AppAcousticImagingConfig_t *config,
                                                             AppAcousticImagingPair_t *pairs,

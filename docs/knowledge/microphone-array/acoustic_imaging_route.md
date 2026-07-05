@@ -26,21 +26,26 @@ The first real-time imaging route is `Wide32 @ 48 kHz`:
 - active bins `3..42`
 - coarse grid `9 x 9`, `-60..60 deg`
 - fine-search contract `top3 x 4 x 4`, span `10 deg`
-- default profile `BALANCED`, `160` selected microphone pairs
+- default firmware profile `Wide32-General-SRP`, `160` selected microphone pairs
+- temperature-corrected sound speed, channel health masks, pair/bin weighting,
+  confidence gates, and temporal heatmap smoothing
 
-Profile pair counts:
+Implemented profile family:
 
-| Mode | FAST | BALANCED | QUALITY |
-| --- | ---: | ---: | ---: |
-| Wide32 @ 48 kHz | 96 | 160 | 240 |
-| Core16 @ 192 kHz | 80 | 120 | 120 |
+| Algorithm | Firmware profile | Pair selection | Intended use |
+| --- | --- | ---: | --- |
+| `Wide32-Fast-SRP` | `FAST` | 96 | UI/camera pressure or thermal fallback |
+| `Wide32-General-SRP` | `BALANCED` | 160 | default product route |
+| `Wide32-Quality-SRP` | `QUALITY` | 240 | enable only after N6 timing proves budget |
+| `Wide32-HF-Hint` | `FAST` | 96 short-baseline | high-frequency leakage hint, not main DOA accuracy |
+| `Core16-HF-Nearfield` | reserved | 120 | phase-2, 192 kHz near-field route |
 
 The full 496-pair Wide32 set is an offline-only comparison target.
 
-`app_acoustic_srp.*` v1 implements the Wide32 FAST/BALANCED F32 path. QUALITY
-and Core16 remain reserved entry points until the first N6 timing data is
-available. Large runtime buffers are placed in `.EXTRAM`; CubeIDE links only the
-needed CMSIS-DSP F32 source files from the STM32Cube repository.
+`app_acoustic_srp.*` v1 implements the Wide32 FAST/BALANCED/QUALITY and
+HF-Hint F32 path. Core16 remains a reserved entry point until the 192 kHz clock
+and capture chain are verified. Large runtime buffers are placed in `.EXTRAM`;
+hot scalar state stays in the context. The runtime uses no dynamic allocation.
 
 ## Offline Tools
 
@@ -59,7 +64,33 @@ python .\tools\acoustic_imaging\srp_sanity_check.py --mode wide32 --profile bala
 python -m unittest discover .\tools\acoustic_imaging
 ```
 
+Run the profile robustness matrix:
+
+```powershell
+python .\tools\acoustic_imaging\evaluate_srp_profiles.py --random-trials 8
+```
+
+The evaluator reuses `array_32ch_coords.csv` and covers single source,
+multi-source, near-field distance hints, SNR sweeps, gain/delay errors,
+reflections, bad channels, slot swaps, and polarity flips. It reports angular
+error percentiles, confidence, miss counts, relative work units, and the
+recommended first firmware profile.
+
 Generated assets are written to `docs/knowledge/microphone-array/generated/`.
+
+## No-MIC Firmware Benchmark
+
+Before PCMD/SAI/DMA capture is ready, firmware can exercise the real SRP path
+with deterministic synthetic frames through:
+
+- `App_AcousticSrp_RunSelfTest(...)`: validates FAST/BALANCED/QUALITY profiles.
+- `App_AcousticSrp_RunSyntheticBenchmark(...)`: returns requested/processed
+  frames, average and maximum DWT cycles for preprocess, FFT, GCC, coarse,
+  fine, output, total, effective FPS Q8, final visualization frame, and status.
+
+The benchmark path is intended to be called from a board-local diagnostic task
+or command hook once the parallel PCMD/CubeIDE baseline is stable. It does not
+start or require microphones.
 
 ## Hardware Gate
 

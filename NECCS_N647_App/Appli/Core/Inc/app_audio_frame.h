@@ -58,6 +58,9 @@ typedef struct
   uint64_t timestamp_us;
   uint32_t drop_count;
   uint32_t error_count;
+  uint32_t channel_valid_mask;
+  uint32_t channel_suspect_mask;
+  float temperature_c;
   const int16_t *planar_i16;
   const float *planar_f32;
 } AppAudioFrame_t;

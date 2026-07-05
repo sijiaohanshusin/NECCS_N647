@@ -44,13 +44,14 @@ can copy received TDM samples into logical microphone order. It intentionally
 does not start SAI, DMA, I2C, PCMD3180 initialization, or debug tasks.
 
 The SRP runtime currently consumes only `AppAudioFrame_t` planar F32 frames.
-`Wide32 @ 48 kHz / BALANCED` is the first implemented N6 validation path:
-`NFFT=256`, bins `3..42`, `160` pairs, 9x9 coarse search, and top3 x 4x4 fine
-search. Synthetic frames can exercise the full algorithm core before hardware
-capture is ready.
+`Wide32 @ 48 kHz / Wide32-General-SRP` is the default N6 validation path:
+`NFFT=256`, bins `3..42`, `160` weighted pairs, 9x9 coarse search, and top3 x
+4x4 fine search. Fast, Quality, and HF-Hint profiles share the same no-MIC
+synthetic benchmark path; Core16/HF near-field remains phase 2.
 
 Offline acoustic-imaging tools:
 
 - `tools/acoustic_imaging/generate_srp_assets.py`
+- `tools/acoustic_imaging/evaluate_srp_profiles.py`
 - `tools/acoustic_imaging/srp_sanity_check.py`
 - `tools/acoustic_imaging/test_acoustic_imaging_model.py`

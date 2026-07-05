@@ -26,6 +26,54 @@ static uint8_t App_AcousticImaging_IsValidProfile(AppAcousticImagingProfile_t pr
           (profile == APP_ACOUSTIC_IMAGING_PROFILE_QUALITY)) ? 1U : 0U;
 }
 
+static uint8_t App_AcousticImaging_IsValidAlgorithm(AppAcousticImagingAlgorithm_t algorithm)
+{
+  return ((algorithm == APP_ACOUSTIC_IMAGING_ALGO_WIDE32_FAST_SRP) ||
+          (algorithm == APP_ACOUSTIC_IMAGING_ALGO_WIDE32_GENERAL_SRP) ||
+          (algorithm == APP_ACOUSTIC_IMAGING_ALGO_WIDE32_QUALITY_SRP) ||
+          (algorithm == APP_ACOUSTIC_IMAGING_ALGO_WIDE32_HF_HINT) ||
+          (algorithm == APP_ACOUSTIC_IMAGING_ALGO_CORE16_HF_NEARFIELD)) ? 1U : 0U;
+}
+
+static uint8_t App_AcousticImaging_IsValidPairSelect(AppAcousticImagingPairSelect_t pair_select)
+{
+  return ((pair_select == APP_ACOUSTIC_IMAGING_PAIR_SELECT_LONG_BASELINE) ||
+          (pair_select == APP_ACOUSTIC_IMAGING_PAIR_SELECT_SHORT_BASELINE)) ? 1U : 0U;
+}
+
+static uint32_t App_AcousticImaging_ChannelMaskForCount(uint32_t channel_count)
+{
+  if (channel_count >= 32U)
+  {
+    return APP_ACOUSTIC_IMAGING_ALL_CHANNELS_MASK;
+  }
+
+  if (channel_count == 0U)
+  {
+    return 0U;
+  }
+
+  return (1UL << channel_count) - 1UL;
+}
+
+static float App_AcousticImaging_SqrtF32(float value)
+{
+  float x;
+
+  if (value <= 0.0f)
+  {
+    return 0.0f;
+  }
+
+  x = (value > 1.0f) ? value : 1.0f;
+  for (uint32_t i = 0U; i < 6U; i++)
+  {
+    x = 0.5f * (x + (value / x));
+  }
+
+  return x;
+}
+
 static uint16_t App_AcousticImaging_GetDefaultPairCount(AppMicArrayMode_t mode,
                                                        AppAcousticImagingProfile_t profile)
 {
@@ -92,7 +140,7 @@ static void App_AcousticImaging_InsertCandidate(AppAcousticImagingPair_t *pairs,
 
   for (uint32_t i = 0U; i < *pair_count; i++)
   {
-    if (candidate->baseline_sq_m2 > pairs[i].baseline_sq_m2)
+    if (candidate->selection_score > pairs[i].selection_score)
     {
       insert_at = i;
       break;
@@ -155,6 +203,7 @@ static uint8_t App_AcousticImaging_FindReplacementIndex(const AppAcousticImaging
 
 static AppAcousticImagingPair_t App_AcousticImaging_MakePair(const AppMicArrayMic_t *mic_a,
                                                              const AppMicArrayMic_t *mic_b,
+                                                             const AppAcousticImagingConfig_t *config,
                                                              uint8_t index_a,
                                                              uint8_t index_b)
 {
@@ -165,6 +214,17 @@ static AppAcousticImagingPair_t App_AcousticImaging_MakePair(const AppMicArrayMi
   pair.dx_m = ((float)mic_a->x_0p1mm - (float)mic_b->x_0p1mm) * 0.0001f;
   pair.dy_m = ((float)mic_a->y_0p1mm - (float)mic_b->y_0p1mm) * 0.0001f;
   pair.baseline_sq_m2 = (pair.dx_m * pair.dx_m) + (pair.dy_m * pair.dy_m);
+  pair.baseline_m = App_AcousticImaging_SqrtF32(pair.baseline_sq_m2);
+  pair.weight = 1.0f;
+  if ((config != NULL) &&
+      (config->pair_select == APP_ACOUSTIC_IMAGING_PAIR_SELECT_SHORT_BASELINE))
+  {
+    pair.selection_score = -pair.baseline_sq_m2;
+  }
+  else
+  {
+    pair.selection_score = pair.baseline_sq_m2;
+  }
 
   return pair;
 }
@@ -218,8 +278,8 @@ static void App_AcousticImaging_RepairCoverage(const AppAcousticImagingConfig_t 
         continue;
       }
 
-      candidate = App_AcousticImaging_MakePair(mic_a, mic_b, a, b);
-      if ((found == 0U) || (candidate.baseline_sq_m2 > best_pair.baseline_sq_m2))
+      candidate = App_AcousticImaging_MakePair(mic_a, mic_b, config, a, b);
+      if ((found == 0U) || (candidate.selection_score > best_pair.selection_score))
       {
         best_pair = candidate;
         found = 1U;
@@ -249,7 +309,7 @@ static void App_AcousticImaging_SortPairs(AppAcousticImagingPair_t *pairs,
     AppAcousticImagingPair_t value = pairs[i];
     uint32_t j = i;
 
-    while ((j > 0U) && (value.baseline_sq_m2 > pairs[j - 1U].baseline_sq_m2))
+    while ((j > 0U) && (value.selection_score > pairs[j - 1U].selection_score))
     {
       pairs[j] = pairs[j - 1U];
       j--;
@@ -280,6 +340,23 @@ AppAcousticImagingStatus_t App_AcousticImaging_GetDefaultConfig(AppMicArrayMode_
 
   config->mic_mode = mode;
   config->profile = profile;
+  config->algorithm = APP_ACOUSTIC_IMAGING_ALGO_WIDE32_GENERAL_SRP;
+  if (mode == APP_MIC_ARRAY_MODE_WIDE32_48K)
+  {
+    if (profile == APP_ACOUSTIC_IMAGING_PROFILE_FAST)
+    {
+      config->algorithm = APP_ACOUSTIC_IMAGING_ALGO_WIDE32_FAST_SRP;
+    }
+    else if (profile == APP_ACOUSTIC_IMAGING_PROFILE_QUALITY)
+    {
+      config->algorithm = APP_ACOUSTIC_IMAGING_ALGO_WIDE32_QUALITY_SRP;
+    }
+  }
+  else
+  {
+    config->algorithm = APP_ACOUSTIC_IMAGING_ALGO_CORE16_HF_NEARFIELD;
+  }
+  config->pair_select = APP_ACOUSTIC_IMAGING_PAIR_SELECT_LONG_BASELINE;
   config->sample_rate_hz = App_MicArray_GetModeSampleRateHz(mode);
   config->channel_count = App_MicArray_GetModeMicCount(mode);
   config->pair_count = pair_count;
@@ -291,6 +368,14 @@ AppAcousticImagingStatus_t App_AcousticImaging_GetDefaultConfig(AppMicArrayMode_
   config->fine_span_deg = 10.0f;
   config->ui_target_fps = 20U;
   config->ui_min_fps = 10U;
+  config->channel_mask = App_AcousticImaging_ChannelMaskForCount(config->channel_count);
+  config->bad_channel_mask = 0U;
+  config->temperature_c = APP_ACOUSTIC_IMAGING_DEFAULT_TEMP_C;
+  config->speed_of_sound_mps = APP_ACOUSTIC_IMAGING_SPEED_OF_SOUND_MPS;
+  config->smoothing_alpha = APP_ACOUSTIC_IMAGING_DEFAULT_SMOOTHING_ALPHA;
+  config->quality_min = 0.03f;
+  config->energy_min = 0.02f;
+  config->adaptive_profile_enable = 1U;
 
   if (mode == APP_MIC_ARRAY_MODE_WIDE32_48K)
   {
@@ -310,24 +395,110 @@ AppAcousticImagingStatus_t App_AcousticImaging_GetDefaultConfig(AppMicArrayMode_
   return App_AcousticImaging_ValidateConfig(config);
 }
 
+AppAcousticImagingStatus_t App_AcousticImaging_GetDefaultAlgorithmConfig(AppAcousticImagingAlgorithm_t algorithm,
+                                                                         AppAcousticImagingConfig_t *config)
+{
+  AppAcousticImagingStatus_t status;
+
+  if ((config == NULL) ||
+      (App_AcousticImaging_IsValidAlgorithm(algorithm) == 0U))
+  {
+    return APP_ACOUSTIC_IMAGING_INVALID_ARGUMENT;
+  }
+
+  switch (algorithm)
+  {
+  case APP_ACOUSTIC_IMAGING_ALGO_WIDE32_FAST_SRP:
+    status = App_AcousticImaging_GetDefaultConfig(APP_MIC_ARRAY_MODE_WIDE32_48K,
+                                                  APP_ACOUSTIC_IMAGING_PROFILE_FAST,
+                                                  config);
+    break;
+
+  case APP_ACOUSTIC_IMAGING_ALGO_WIDE32_GENERAL_SRP:
+    status = App_AcousticImaging_GetDefaultConfig(APP_MIC_ARRAY_MODE_WIDE32_48K,
+                                                  APP_ACOUSTIC_IMAGING_PROFILE_BALANCED,
+                                                  config);
+    break;
+
+  case APP_ACOUSTIC_IMAGING_ALGO_WIDE32_QUALITY_SRP:
+    status = App_AcousticImaging_GetDefaultConfig(APP_MIC_ARRAY_MODE_WIDE32_48K,
+                                                  APP_ACOUSTIC_IMAGING_PROFILE_QUALITY,
+                                                  config);
+    break;
+
+  case APP_ACOUSTIC_IMAGING_ALGO_WIDE32_HF_HINT:
+    status = App_AcousticImaging_GetDefaultConfig(APP_MIC_ARRAY_MODE_WIDE32_48K,
+                                                  APP_ACOUSTIC_IMAGING_PROFILE_FAST,
+                                                  config);
+    if (status == APP_ACOUSTIC_IMAGING_OK)
+    {
+      config->algorithm = APP_ACOUSTIC_IMAGING_ALGO_WIDE32_HF_HINT;
+      config->pair_select = APP_ACOUSTIC_IMAGING_PAIR_SELECT_SHORT_BASELINE;
+      config->active_bin_start = APP_ACOUSTIC_IMAGING_HF_HINT_BIN_START;
+      config->active_bin_end = APP_ACOUSTIC_IMAGING_HF_HINT_BIN_END;
+      config->smoothing_alpha = 0.20f;
+      config->quality_min = 0.05f;
+      status = App_AcousticImaging_ValidateConfig(config);
+    }
+    break;
+
+  case APP_ACOUSTIC_IMAGING_ALGO_CORE16_HF_NEARFIELD:
+    status = App_AcousticImaging_GetDefaultConfig(APP_MIC_ARRAY_MODE_CORE16_192K,
+                                                  APP_ACOUSTIC_IMAGING_PROFILE_BALANCED,
+                                                  config);
+    break;
+
+  default:
+    status = APP_ACOUSTIC_IMAGING_INVALID_ARGUMENT;
+    break;
+  }
+
+  if (status == APP_ACOUSTIC_IMAGING_OK)
+  {
+    config->algorithm = algorithm;
+  }
+
+  return status;
+}
+
 AppAcousticImagingStatus_t App_AcousticImaging_ValidateConfig(const AppAcousticImagingConfig_t *config)
 {
   uint32_t max_pairs;
+  uint32_t valid_channel_mask;
 
   if ((config == NULL) ||
       (App_MicArray_ValidateMode(config->mic_mode) == 0U) ||
+      (App_AcousticImaging_IsValidAlgorithm(config->algorithm) == 0U) ||
       (App_AcousticImaging_IsValidProfile(config->profile) == 0U) ||
+      (App_AcousticImaging_IsValidPairSelect(config->pair_select) == 0U) ||
       (config->sample_rate_hz != App_MicArray_GetModeSampleRateHz(config->mic_mode)) ||
       (config->channel_count != App_MicArray_GetModeMicCount(config->mic_mode)) ||
       (config->channel_count == 0U) ||
       (config->frame_len == 0U) ||
       (config->nfft < config->frame_len) ||
+      (config->active_bin_end >= (config->nfft / 2U)) ||
       (config->active_bin_end < config->active_bin_start) ||
       (config->coarse_grid_size != APP_ACOUSTIC_IMAGING_COARSE_GRID_SIZE) ||
       (config->coarse_angle_min_deg != -60) ||
       (config->coarse_angle_max_deg != 60) ||
       (config->fine_top_k != APP_ACOUSTIC_IMAGING_FINE_TOP_K) ||
-      (config->fine_grid_size != APP_ACOUSTIC_IMAGING_FINE_GRID_SIZE))
+      (config->fine_grid_size != APP_ACOUSTIC_IMAGING_FINE_GRID_SIZE) ||
+      (config->speed_of_sound_mps < 300.0f) ||
+      (config->speed_of_sound_mps > 380.0f) ||
+      (config->smoothing_alpha < 0.0f) ||
+      (config->smoothing_alpha > 0.95f) ||
+      (config->quality_min < 0.0f) ||
+      (config->quality_min > 1.0f) ||
+      (config->energy_min < 0.0f) ||
+      (config->energy_min > 1.0f))
+  {
+    return APP_ACOUSTIC_IMAGING_INVALID_ARGUMENT;
+  }
+
+  if (((config->algorithm == APP_ACOUSTIC_IMAGING_ALGO_CORE16_HF_NEARFIELD) &&
+       (config->mic_mode != APP_MIC_ARRAY_MODE_CORE16_192K)) ||
+      ((config->algorithm != APP_ACOUSTIC_IMAGING_ALGO_CORE16_HF_NEARFIELD) &&
+       (config->mic_mode != APP_MIC_ARRAY_MODE_WIDE32_48K)))
   {
     return APP_ACOUSTIC_IMAGING_INVALID_ARGUMENT;
   }
@@ -336,6 +507,14 @@ AppAcousticImagingStatus_t App_AcousticImaging_ValidateConfig(const AppAcousticI
   if ((config->pair_count == 0U) ||
       (config->pair_count > max_pairs) ||
       (config->pair_count > APP_ACOUSTIC_IMAGING_PAIR_COUNT_MAX))
+  {
+    return APP_ACOUSTIC_IMAGING_INVALID_ARGUMENT;
+  }
+
+  valid_channel_mask = App_AcousticImaging_ChannelMaskForCount(config->channel_count);
+  if (((config->channel_mask & valid_channel_mask) == 0U) ||
+      ((config->channel_mask & ~valid_channel_mask) != 0U) ||
+      ((config->bad_channel_mask & ~valid_channel_mask) != 0U))
   {
     return APP_ACOUSTIC_IMAGING_INVALID_ARGUMENT;
   }
@@ -356,6 +535,38 @@ const char *App_AcousticImaging_ProfileName(AppAcousticImagingProfile_t profile)
   default:
     return "UNKNOWN";
   }
+}
+
+const char *App_AcousticImaging_AlgorithmName(AppAcousticImagingAlgorithm_t algorithm)
+{
+  switch (algorithm)
+  {
+  case APP_ACOUSTIC_IMAGING_ALGO_WIDE32_FAST_SRP:
+    return "Wide32-Fast-SRP";
+  case APP_ACOUSTIC_IMAGING_ALGO_WIDE32_GENERAL_SRP:
+    return "Wide32-General-SRP";
+  case APP_ACOUSTIC_IMAGING_ALGO_WIDE32_QUALITY_SRP:
+    return "Wide32-Quality-SRP";
+  case APP_ACOUSTIC_IMAGING_ALGO_WIDE32_HF_HINT:
+    return "Wide32-HF-Hint";
+  case APP_ACOUSTIC_IMAGING_ALGO_CORE16_HF_NEARFIELD:
+    return "Core16-HF-Nearfield";
+  default:
+    return "UNKNOWN";
+  }
+}
+
+AppAcousticImagingStatus_t App_AcousticImaging_SetTemperature(AppAcousticImagingConfig_t *config,
+                                                              float temperature_c)
+{
+  if (config == NULL)
+  {
+    return APP_ACOUSTIC_IMAGING_INVALID_ARGUMENT;
+  }
+
+  config->temperature_c = temperature_c;
+  config->speed_of_sound_mps = 331.3f + (0.606f * temperature_c);
+  return App_AcousticImaging_ValidateConfig(config);
 }
 
 AppAcousticImagingStatus_t App_AcousticImaging_BuildPairSet(const AppAcousticImagingConfig_t *config,
@@ -396,7 +607,7 @@ AppAcousticImagingStatus_t App_AcousticImaging_BuildPairSet(const AppAcousticIma
         return APP_ACOUSTIC_IMAGING_UNSUPPORTED_MODE;
       }
 
-      candidate = App_AcousticImaging_MakePair(mic_a, mic_b, (uint8_t)a, (uint8_t)b);
+      candidate = App_AcousticImaging_MakePair(mic_a, mic_b, config, (uint8_t)a, (uint8_t)b);
       App_AcousticImaging_InsertCandidate(pairs,
                                           config->pair_count,
                                           &selected_count,
@@ -498,7 +709,7 @@ AppAcousticImagingStatus_t App_AcousticImaging_FillCoarseTdoaLut(const AppAcoust
         tdoa_seconds[out_index] =
             ((pairs[pair].dx_m * sin_theta * cos_phi) +
              (pairs[pair].dy_m * sin_phi)) /
-            APP_ACOUSTIC_IMAGING_SPEED_OF_SOUND_MPS;
+            config->speed_of_sound_mps;
         out_index++;
       }
     }
@@ -565,6 +776,7 @@ void App_AcousticImaging_ClearVisFrame(AppAcousticImagingVisFrame_t *frame)
   frame->peak_value = 0.0f;
   frame->quality = 0.0f;
   frame->contrast = 0.0f;
+  frame->algorithm = APP_ACOUSTIC_IMAGING_ALGO_WIDE32_GENERAL_SRP;
   frame->active_profile = APP_ACOUSTIC_IMAGING_PROFILE_BALANCED;
   frame->mic_mode = APP_MIC_ARRAY_MODE_WIDE32_48K;
   frame->frame_seq = 0U;

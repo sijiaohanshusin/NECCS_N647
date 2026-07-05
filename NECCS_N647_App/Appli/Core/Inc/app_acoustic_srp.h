@@ -19,7 +19,7 @@ extern "C" {
 #define APP_ACOUSTIC_SRP_MAX_CHANNELS          APP_MIC_ARRAY_PHYSICAL_MIC_COUNT
 #define APP_ACOUSTIC_SRP_MAX_FRAME_LEN         APP_AUDIO_FRAME_DEFAULT_WIDE32_FRAME_LEN
 #define APP_ACOUSTIC_SRP_MAX_NFFT              256U
-#define APP_ACOUSTIC_SRP_MAX_PAIRS             APP_ACOUSTIC_IMAGING_WIDE32_BALANCED_PAIRS
+#define APP_ACOUSTIC_SRP_MAX_PAIRS             APP_ACOUSTIC_IMAGING_WIDE32_QUALITY_PAIRS
 #define APP_ACOUSTIC_SRP_MAX_ACTIVE_BINS       40U
 #define APP_ACOUSTIC_SRP_QUALITY_MIN           0.03f
 #define APP_ACOUSTIC_SRP_ENERGY_MIN            0.02f
@@ -48,6 +48,18 @@ typedef struct
 
 typedef struct
 {
+  AppAcousticSrpPerf_t avg_perf;
+  AppAcousticSrpPerf_t max_perf;
+  AppAcousticImagingVisFrame_t last_vis_frame;
+  uint32_t requested_frames;
+  uint32_t processed_frames;
+  uint32_t failed_frames;
+  uint32_t effective_fps_q8;
+  AppAcousticImagingStatus_t last_status;
+} AppAcousticSrpBenchmarkResult_t;
+
+typedef struct
+{
   AppAcousticImagingConfig_t config;
   AppAcousticSrpBackend_t backend;
   AppAcousticSrpPerf_t perf;
@@ -55,6 +67,9 @@ typedef struct
   uint32_t active_bin_count;
   uint32_t grid_count;
   uint32_t processed_frames;
+  uint32_t active_channel_mask;
+  float weight_sum;
+  uint8_t smoothing_valid;
   uint8_t initialized;
 } AppAcousticSrpContext_t;
 
@@ -71,6 +86,12 @@ void App_AcousticSrp_GetPerf(const AppAcousticSrpContext_t *ctx,
 
 AppAcousticImagingStatus_t App_AcousticSrp_RunSelfTest(AppAcousticSrpContext_t *ctx,
                                                        AppAcousticImagingVisFrame_t *vis_frame);
+
+AppAcousticImagingStatus_t App_AcousticSrp_RunSyntheticBenchmark(AppAcousticSrpContext_t *ctx,
+                                                                 const AppAcousticImagingConfig_t *config,
+                                                                 uint32_t frame_count,
+                                                                 uint32_t cpu_hz,
+                                                                 AppAcousticSrpBenchmarkResult_t *result);
 
 #ifdef __cplusplus
 }

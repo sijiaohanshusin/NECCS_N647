@@ -27,7 +27,9 @@ typedef struct
   float time[APP_ACOUSTIC_SRP_MAX_CHANNELS * APP_ACOUSTIC_SRP_MAX_NFFT];
   float freq[APP_ACOUSTIC_SRP_MAX_CHANNELS * APP_ACOUSTIC_SRP_MAX_NFFT];
   float gcc[APP_ACOUSTIC_SRP_MAX_PAIRS * APP_ACOUSTIC_SRP_MAX_ACTIVE_BINS * 2U];
+  float srp_weight[APP_ACOUSTIC_SRP_MAX_PAIRS * APP_ACOUSTIC_SRP_MAX_ACTIVE_BINS];
   float srp_power[APP_ACOUSTIC_SRP_RUNTIME_GRID_TOTAL];
+  float smoothed_power[APP_ACOUSTIC_SRP_RUNTIME_GRID_TOTAL];
   float fine_theta[APP_ACOUSTIC_IMAGING_FINE_TOTAL];
   float fine_phi[APP_ACOUSTIC_IMAGING_FINE_TOTAL];
   float tau[APP_ACOUSTIC_SRP_MAX_PAIRS];
@@ -63,6 +65,22 @@ static float App_AcousticSrp_Clamp01(float value)
   }
 
   return value;
+}
+
+static float App_AcousticSrp_MaxF32(float a, float b)
+{
+  return (a > b) ? a : b;
+}
+
+static uint32_t App_AcousticSrp_ChannelBit(uint32_t channel)
+{
+  return (channel < 32U) ? (1UL << channel) : 0U;
+}
+
+static uint8_t App_AcousticSrp_ChannelIsActive(const AppAcousticSrpContext_t *ctx,
+                                               uint32_t channel)
+{
+  return ((ctx->active_channel_mask & App_AcousticSrp_ChannelBit(channel)) != 0U) ? 1U : 0U;
 }
 
 static uint32_t App_AcousticSrp_CycleNow(void)
@@ -109,7 +127,6 @@ static AppAcousticImagingStatus_t App_AcousticSrp_ValidateRuntimeConfig(const Ap
 
   active_bins = ((uint32_t)config->active_bin_end - (uint32_t)config->active_bin_start) + 1U;
   if ((config->mic_mode != APP_MIC_ARRAY_MODE_WIDE32_48K) ||
-      (config->profile == APP_ACOUSTIC_IMAGING_PROFILE_QUALITY) ||
       (config->channel_count > APP_ACOUSTIC_SRP_MAX_CHANNELS) ||
       (config->frame_len != APP_ACOUSTIC_SRP_MAX_FRAME_LEN) ||
       (config->nfft != APP_ACOUSTIC_SRP_MAX_NFFT) ||
@@ -137,6 +154,92 @@ static void App_AcousticSrp_FillWindow(AppAcousticSrpWorkspace_t *workspace, uin
     arm_sin_cos_f32(phase_deg, &sin_v, &cos_v);
     (void)sin_v;
     workspace->window[i] = 0.5f - (0.5f * cos_v);
+  }
+}
+
+static float App_AcousticSrp_FrequencyPairWeight(const AppAcousticImagingPair_t *pair,
+                                                 float frequency_hz,
+                                                 float speed_of_sound_mps,
+                                                 AppAcousticImagingAlgorithm_t algorithm)
+{
+  float half_wavelength;
+  float alias_ratio;
+
+  if ((pair == NULL) || (frequency_hz <= 0.0f))
+  {
+    return 0.0f;
+  }
+
+  half_wavelength = speed_of_sound_mps / (2.0f * frequency_hz);
+  alias_ratio = pair->baseline_m / App_AcousticSrp_MaxF32(half_wavelength, 1.0e-6f);
+
+  if (algorithm == APP_ACOUSTIC_IMAGING_ALGO_WIDE32_HF_HINT)
+  {
+    float aperture_weight = (pair->baseline_m < 0.012f) ? (pair->baseline_m / 0.012f) : 1.0f;
+    if (alias_ratio <= 1.0f)
+    {
+      return App_AcousticSrp_MaxF32(0.15f, aperture_weight);
+    }
+    return App_AcousticSrp_MaxF32(0.05f, aperture_weight / (alias_ratio * alias_ratio));
+  }
+
+  if (alias_ratio <= 1.0f)
+  {
+    return 1.0f;
+  }
+  if (alias_ratio <= 2.0f)
+  {
+    return 0.65f;
+  }
+  return 0.35f;
+}
+
+static void App_AcousticSrp_RebuildWeights(AppAcousticSrpContext_t *ctx)
+{
+  AppAcousticSrpWorkspace_t *workspace = &s_srp_workspace;
+  const float delta_f_hz = (float)ctx->config.sample_rate_hz / (float)ctx->config.nfft;
+
+  ctx->weight_sum = 0.0f;
+  for (uint32_t pair = 0U; pair < ctx->pair_count; pair++)
+  {
+    uint8_t pair_active =
+        ((App_AcousticSrp_ChannelIsActive(ctx, workspace->pairs[pair].mic_a) != 0U) &&
+         (App_AcousticSrp_ChannelIsActive(ctx, workspace->pairs[pair].mic_b) != 0U)) ? 1U : 0U;
+
+    for (uint32_t bin = 0U; bin < ctx->active_bin_count; bin++)
+    {
+      float weight = 0.0f;
+
+      if (pair_active != 0U)
+      {
+        float frequency_hz = delta_f_hz * (float)(ctx->config.active_bin_start + bin);
+        weight = App_AcousticSrp_FrequencyPairWeight(&workspace->pairs[pair],
+                                                     frequency_hz,
+                                                     ctx->config.speed_of_sound_mps,
+                                                     ctx->config.algorithm);
+      }
+
+      workspace->srp_weight[(pair * ctx->active_bin_count) + bin] = weight;
+      ctx->weight_sum += weight;
+    }
+  }
+}
+
+static void App_AcousticSrp_UpdateActiveMask(AppAcousticSrpContext_t *ctx,
+                                             const AppAudioFrame_t *frame)
+{
+  uint32_t new_mask = ctx->config.channel_mask & ~ctx->config.bad_channel_mask;
+
+  if (frame != NULL)
+  {
+    new_mask &= frame->channel_valid_mask;
+    new_mask &= ~frame->channel_suspect_mask;
+  }
+
+  if (new_mask != ctx->active_channel_mask)
+  {
+    ctx->active_channel_mask = new_mask;
+    App_AcousticSrp_RebuildWeights(ctx);
   }
 }
 
@@ -322,8 +425,9 @@ static float App_AcousticSrp_AccumulatePoint(const AppAcousticSrpContext_t *ctx,
     {
       float c_new;
       float s_new;
+      float weight = workspace->srp_weight[(pair * ctx->active_bin_count) + bin];
 
-      pair_sum += (gcc[2U * bin] * cos_phi) + (gcc[(2U * bin) + 1U] * sin_phi);
+      pair_sum += weight * ((gcc[2U * bin] * cos_phi) + (gcc[(2U * bin) + 1U] * sin_phi));
 
       c_new = (cos_phi * cos_d) - (sin_phi * sin_d);
       s_new = (sin_phi * cos_d) + (cos_phi * sin_d);
@@ -354,6 +458,13 @@ static AppAcousticImagingStatus_t App_AcousticSrp_Preprocess(AppAcousticSrpConte
       return APP_ACOUSTIC_IMAGING_INVALID_ARGUMENT;
     }
 
+    if (App_AcousticSrp_ChannelIsActive(ctx, channel) == 0U)
+    {
+      memset(time, 0, ctx->config.nfft * sizeof(float));
+      memset(freq, 0, ctx->config.nfft * sizeof(float));
+      continue;
+    }
+
     memcpy(time, src, ctx->config.frame_len * sizeof(float));
 
     arm_mean_f32(time, ctx->config.frame_len, &mean);
@@ -374,8 +485,31 @@ static void App_AcousticSrp_RunFft(const AppAcousticSrpContext_t *ctx)
     float *time = &workspace->time[channel * ctx->config.nfft];
     float *freq = &workspace->freq[channel * ctx->config.nfft];
 
-    arm_rfft_fast_f32(&workspace->rfft, time, freq, 0U);
+    if (App_AcousticSrp_ChannelIsActive(ctx, channel) != 0U)
+    {
+      arm_rfft_fast_f32(&workspace->rfft, time, freq, 0U);
+    }
+    else
+    {
+      memset(freq, 0, ctx->config.nfft * sizeof(float));
+    }
   }
+}
+
+static uint8_t App_AcousticSrp_PairHasWeight(const AppAcousticSrpContext_t *ctx,
+                                             uint32_t pair_index)
+{
+  const AppAcousticSrpWorkspace_t *workspace = &s_srp_workspace;
+
+  for (uint32_t bin = 0U; bin < ctx->active_bin_count; bin++)
+  {
+    if (workspace->srp_weight[(pair_index * ctx->active_bin_count) + bin] > 0.0f)
+    {
+      return 1U;
+    }
+  }
+
+  return 0U;
 }
 
 static void App_AcousticSrp_ComputeGccPhat(const AppAcousticSrpContext_t *ctx)
@@ -389,6 +523,12 @@ static void App_AcousticSrp_ComputeGccPhat(const AppAcousticSrpContext_t *ctx)
     const float *xi = &workspace->freq[(mic_a * ctx->config.nfft) + (2U * ctx->config.active_bin_start)];
     const float *xj = &workspace->freq[(mic_b * ctx->config.nfft) + (2U * ctx->config.active_bin_start)];
     float *out = &workspace->gcc[pair * ctx->active_bin_count * 2U];
+
+    if (App_AcousticSrp_PairHasWeight(ctx, pair) == 0U)
+    {
+      memset(out, 0, ctx->active_bin_count * 2U * sizeof(float));
+      continue;
+    }
 
     arm_cmplx_conj_f32(xj, workspace->scratch_conj, ctx->active_bin_count);
     arm_cmplx_mult_cmplx_f32(xi, workspace->scratch_conj, workspace->scratch_cross, ctx->active_bin_count);
@@ -420,7 +560,7 @@ static void App_AcousticSrp_RunFineSearch(const AppAcousticSrpContext_t *ctx,
 {
   AppAcousticSrpWorkspace_t *workspace = &s_srp_workspace;
   float fine_step = (2.0f * ctx->config.fine_span_deg) / (float)ctx->config.fine_grid_size;
-  float inv_c = 1.0f / APP_ACOUSTIC_IMAGING_SPEED_OF_SOUND_MPS;
+  float inv_c = 1.0f / ctx->config.speed_of_sound_mps;
 
   for (uint32_t top = 0U; top < ctx->config.fine_top_k; top++)
   {
@@ -463,6 +603,35 @@ static void App_AcousticSrp_RunFineSearch(const AppAcousticSrpContext_t *ctx,
             App_AcousticSrp_AccumulatePoint(ctx, workspace->tau);
       }
     }
+  }
+}
+
+static void App_AcousticSrp_SmoothPower(AppAcousticSrpContext_t *ctx)
+{
+  AppAcousticSrpWorkspace_t *workspace = &s_srp_workspace;
+  float alpha = ctx->config.smoothing_alpha;
+
+  if (alpha <= 0.0f)
+  {
+    ctx->smoothing_valid = 0U;
+    return;
+  }
+
+  if (ctx->smoothing_valid == 0U)
+  {
+    for (uint32_t idx = 0U; idx < ctx->grid_count; idx++)
+    {
+      workspace->smoothed_power[idx] = workspace->srp_power[idx];
+    }
+    ctx->smoothing_valid = 1U;
+    return;
+  }
+
+  for (uint32_t idx = 0U; idx < ctx->grid_count; idx++)
+  {
+    workspace->smoothed_power[idx] =
+        (alpha * workspace->smoothed_power[idx]) + ((1.0f - alpha) * workspace->srp_power[idx]);
+    workspace->srp_power[idx] = workspace->smoothed_power[idx];
   }
 }
 
@@ -534,7 +703,7 @@ static void App_AcousticSrp_FillCandidates(const AppAcousticSrpContext_t *ctx,
     vis_frame->candidate[count].phi_deg = best_phi;
     vis_frame->candidate[count].power = best_value;
     vis_frame->candidate[count].quality =
-        App_AcousticSrp_Clamp01(best_value / (float)(ctx->pair_count * ctx->active_bin_count));
+        App_AcousticSrp_Clamp01(best_value / App_AcousticSrp_MaxF32(ctx->weight_sum, 1.0e-6f));
     vis_frame->candidate[count].contrast = 0.0f;
     count++;
   }
@@ -552,6 +721,7 @@ static void App_AcousticSrp_FillVisFrame(AppAcousticSrpContext_t *ctx,
   uint32_t max_idx;
 
   App_AcousticImaging_ClearVisFrame(vis_frame);
+  vis_frame->algorithm = ctx->config.algorithm;
   vis_frame->active_profile = ctx->config.profile;
   vis_frame->mic_mode = ctx->config.mic_mode;
   vis_frame->frame_seq = ctx->processed_frames;
@@ -590,9 +760,9 @@ static void App_AcousticSrp_FillVisFrame(AppAcousticSrpContext_t *ctx,
   }
 
   vis_frame->valid =
-      ((vis_frame->quality >= APP_ACOUSTIC_SRP_QUALITY_MIN) &&
-       (App_AcousticSrp_Clamp01(max_value / (float)(ctx->pair_count * ctx->active_bin_count)) >=
-        APP_ACOUSTIC_SRP_ENERGY_MIN)) ? 1U : 0U;
+      ((vis_frame->quality >= ctx->config.quality_min) &&
+       (App_AcousticSrp_Clamp01(max_value / App_AcousticSrp_MaxF32(ctx->weight_sum, 1.0e-6f)) >=
+        ctx->config.energy_min)) ? 1U : 0U;
 }
 
 AppAcousticImagingStatus_t App_AcousticSrp_Init(AppAcousticSrpContext_t *ctx,
@@ -672,6 +842,13 @@ AppAcousticImagingStatus_t App_AcousticSrp_Init(AppAcousticSrpContext_t *ctx,
   ctx->pair_count = pair_count;
   ctx->active_bin_count = ((uint32_t)config->active_bin_end - (uint32_t)config->active_bin_start) + 1U;
   ctx->grid_count = APP_ACOUSTIC_SRP_RUNTIME_GRID_TOTAL;
+  ctx->active_channel_mask = config->channel_mask & ~config->bad_channel_mask;
+  ctx->smoothing_valid = 0U;
+  App_AcousticSrp_RebuildWeights(ctx);
+  if (ctx->weight_sum <= 0.0f)
+  {
+    return APP_ACOUSTIC_IMAGING_INVALID_ARGUMENT;
+  }
   ctx->initialized = 1U;
 
   return APP_ACOUSTIC_IMAGING_OK;
@@ -701,6 +878,12 @@ AppAcousticImagingStatus_t App_AcousticSrp_ProcessFrame(AppAcousticSrpContext_t 
   if (status != APP_ACOUSTIC_IMAGING_OK)
   {
     return status;
+  }
+
+  App_AcousticSrp_UpdateActiveMask(ctx, frame);
+  if (ctx->weight_sum <= 0.0f)
+  {
+    return APP_ACOUSTIC_IMAGING_PROCESSING_FAILED;
   }
 
   memset(&ctx->perf, 0, sizeof(ctx->perf));
@@ -763,6 +946,7 @@ AppAcousticImagingStatus_t App_AcousticSrp_ProcessFrame(AppAcousticSrpContext_t 
   ctx->perf.fine_cycles = App_AcousticSrp_CycleDelta(t0, t1);
 
   t0 = t1;
+  App_AcousticSrp_SmoothPower(ctx);
   ctx->processed_frames++;
   App_AcousticSrp_FillVisFrame(ctx, vis_frame);
   vis_frame->frame_seq = frame->seq;
@@ -784,8 +968,58 @@ void App_AcousticSrp_GetPerf(const AppAcousticSrpContext_t *ctx,
   *perf_out = ctx->perf;
 }
 
-AppAcousticImagingStatus_t App_AcousticSrp_RunSelfTest(AppAcousticSrpContext_t *ctx,
-                                                       AppAcousticImagingVisFrame_t *vis_frame)
+static void App_AcousticSrp_UpdateMaxPerf(AppAcousticSrpPerf_t *max_perf,
+                                          const AppAcousticSrpPerf_t *perf)
+{
+  if (perf->preprocess_cycles > max_perf->preprocess_cycles)
+  {
+    max_perf->preprocess_cycles = perf->preprocess_cycles;
+  }
+  if (perf->fft_cycles > max_perf->fft_cycles)
+  {
+    max_perf->fft_cycles = perf->fft_cycles;
+  }
+  if (perf->gcc_cycles > max_perf->gcc_cycles)
+  {
+    max_perf->gcc_cycles = perf->gcc_cycles;
+  }
+  if (perf->coarse_cycles > max_perf->coarse_cycles)
+  {
+    max_perf->coarse_cycles = perf->coarse_cycles;
+  }
+  if (perf->npu_quantize_cycles > max_perf->npu_quantize_cycles)
+  {
+    max_perf->npu_quantize_cycles = perf->npu_quantize_cycles;
+  }
+  if (perf->npu_cache_cycles > max_perf->npu_cache_cycles)
+  {
+    max_perf->npu_cache_cycles = perf->npu_cache_cycles;
+  }
+  if (perf->npu_inference_cycles > max_perf->npu_inference_cycles)
+  {
+    max_perf->npu_inference_cycles = perf->npu_inference_cycles;
+  }
+  if (perf->npu_output_cycles > max_perf->npu_output_cycles)
+  {
+    max_perf->npu_output_cycles = perf->npu_output_cycles;
+  }
+  if (perf->fine_cycles > max_perf->fine_cycles)
+  {
+    max_perf->fine_cycles = perf->fine_cycles;
+  }
+  if (perf->output_cycles > max_perf->output_cycles)
+  {
+    max_perf->output_cycles = perf->output_cycles;
+  }
+  if (perf->total_cycles > max_perf->total_cycles)
+  {
+    max_perf->total_cycles = perf->total_cycles;
+  }
+}
+
+static AppAcousticImagingStatus_t App_AcousticSrp_RunOneSyntheticCheck(AppAcousticSrpContext_t *ctx,
+                                                                       AppAcousticImagingProfile_t profile,
+                                                                       AppAcousticImagingVisFrame_t *vis_frame)
 {
   AppAcousticSrpWorkspace_t *workspace = &s_srp_workspace;
   AppAcousticImagingConfig_t config;
@@ -802,7 +1036,7 @@ AppAcousticImagingStatus_t App_AcousticSrp_RunSelfTest(AppAcousticSrpContext_t *
   }
 
   status = App_AcousticImaging_GetDefaultConfig(APP_MIC_ARRAY_MODE_WIDE32_48K,
-                                                APP_ACOUSTIC_IMAGING_PROFILE_BALANCED,
+                                                profile,
                                                 &config);
   if (status != APP_ACOUSTIC_IMAGING_OK)
   {
@@ -846,6 +1080,127 @@ AppAcousticImagingStatus_t App_AcousticSrp_RunSelfTest(AppAcousticSrpContext_t *
   if (((dtheta * dtheta) + (dphi * dphi)) > (15.0f * 15.0f))
   {
     return APP_ACOUSTIC_IMAGING_SELF_TEST_FAILED;
+  }
+
+  return APP_ACOUSTIC_IMAGING_OK;
+}
+
+AppAcousticImagingStatus_t App_AcousticSrp_RunSelfTest(AppAcousticSrpContext_t *ctx,
+                                                       AppAcousticImagingVisFrame_t *vis_frame)
+{
+  static const AppAcousticImagingProfile_t profiles[] =
+  {
+    APP_ACOUSTIC_IMAGING_PROFILE_FAST,
+    APP_ACOUSTIC_IMAGING_PROFILE_BALANCED,
+    APP_ACOUSTIC_IMAGING_PROFILE_QUALITY
+  };
+
+  if ((ctx == NULL) || (vis_frame == NULL))
+  {
+    return APP_ACOUSTIC_IMAGING_INVALID_ARGUMENT;
+  }
+
+  for (uint32_t i = 0U; i < (sizeof(profiles) / sizeof(profiles[0])); i++)
+  {
+    AppAcousticImagingStatus_t status = App_AcousticSrp_RunOneSyntheticCheck(ctx,
+                                                                             profiles[i],
+                                                                             vis_frame);
+    if (status != APP_ACOUSTIC_IMAGING_OK)
+    {
+      return status;
+    }
+  }
+
+  return APP_ACOUSTIC_IMAGING_OK;
+}
+
+AppAcousticImagingStatus_t App_AcousticSrp_RunSyntheticBenchmark(AppAcousticSrpContext_t *ctx,
+                                                                 const AppAcousticImagingConfig_t *config,
+                                                                 uint32_t frame_count,
+                                                                 uint32_t cpu_hz,
+                                                                 AppAcousticSrpBenchmarkResult_t *result)
+{
+  AppAcousticSrpWorkspace_t *workspace = &s_srp_workspace;
+  AppAudioFrame_t frame;
+  AppAcousticImagingVisFrame_t vis_frame;
+  AppAcousticImagingStatus_t status;
+  uint64_t sum_preprocess = 0ULL;
+  uint64_t sum_fft = 0ULL;
+  uint64_t sum_gcc = 0ULL;
+  uint64_t sum_coarse = 0ULL;
+  uint64_t sum_fine = 0ULL;
+  uint64_t sum_output = 0ULL;
+  uint64_t sum_total = 0ULL;
+
+  if ((ctx == NULL) || (config == NULL) || (result == NULL) || (frame_count == 0U))
+  {
+    return APP_ACOUSTIC_IMAGING_INVALID_ARGUMENT;
+  }
+
+  memset(result, 0, sizeof(*result));
+  result->requested_frames = frame_count;
+  result->last_status = APP_ACOUSTIC_IMAGING_OK;
+
+  status = App_AcousticSrp_Init(ctx, config, APP_ACOUSTIC_BACKEND_F32_CMSIS);
+  if (status != APP_ACOUSTIC_IMAGING_OK)
+  {
+    result->last_status = status;
+    return status;
+  }
+
+  for (uint32_t seq = 0U; seq < frame_count; seq++)
+  {
+    status = App_AcousticSynthetic_FillPlaneWave(config,
+                                                 15.0f,
+                                                 -15.0f,
+                                                 2000.0f,
+                                                 0.5f,
+                                                 0.04f,
+                                                 seq,
+                                                 workspace->selftest_planar,
+                                                 APP_ACOUSTIC_SRP_MAX_FRAME_LEN,
+                                                 &frame);
+    if (status == APP_ACOUSTIC_IMAGING_OK)
+    {
+      status = App_AcousticSrp_ProcessFrame(ctx, &frame, &vis_frame);
+    }
+
+    result->last_status = status;
+    if (status != APP_ACOUSTIC_IMAGING_OK)
+    {
+      result->failed_frames++;
+      continue;
+    }
+
+    result->processed_frames++;
+    result->last_vis_frame = vis_frame;
+    sum_preprocess += ctx->perf.preprocess_cycles;
+    sum_fft += ctx->perf.fft_cycles;
+    sum_gcc += ctx->perf.gcc_cycles;
+    sum_coarse += ctx->perf.coarse_cycles;
+    sum_fine += ctx->perf.fine_cycles;
+    sum_output += ctx->perf.output_cycles;
+    sum_total += ctx->perf.total_cycles;
+    App_AcousticSrp_UpdateMaxPerf(&result->max_perf, &ctx->perf);
+  }
+
+  if (result->processed_frames == 0U)
+  {
+    return result->last_status;
+  }
+
+  result->avg_perf.preprocess_cycles = (uint32_t)(sum_preprocess / result->processed_frames);
+  result->avg_perf.fft_cycles = (uint32_t)(sum_fft / result->processed_frames);
+  result->avg_perf.gcc_cycles = (uint32_t)(sum_gcc / result->processed_frames);
+  result->avg_perf.coarse_cycles = (uint32_t)(sum_coarse / result->processed_frames);
+  result->avg_perf.fine_cycles = (uint32_t)(sum_fine / result->processed_frames);
+  result->avg_perf.output_cycles = (uint32_t)(sum_output / result->processed_frames);
+  result->avg_perf.total_cycles = (uint32_t)(sum_total / result->processed_frames);
+
+  if ((cpu_hz != 0U) && (result->avg_perf.total_cycles != 0U))
+  {
+    result->effective_fps_q8 =
+        (uint32_t)(((uint64_t)cpu_hz * 256ULL) / (uint64_t)result->avg_perf.total_cycles);
   }
 
   return APP_ACOUSTIC_IMAGING_OK;

@@ -1,18 +1,27 @@
 import math
+import random
 import unittest
 from pathlib import Path
 
 from acoustic_imaging_model import (
+    ALGORITHM_WIDE32_GENERAL_SRP,
+    ALGORITHM_WIDE32_HF_HINT,
+    AcousticScenario,
+    AcousticSource,
     MODE_CORE16,
     MODE_WIDE32,
     PROFILE_BALANCED,
     PROFILE_FAST,
     PROFILE_QUALITY,
+    angular_error_deg,
     active_frequencies_hz,
+    build_algorithm_config,
     build_config,
     build_tdoa_lut,
     coarse_grid,
+    estimate_direction,
     load_mics,
+    select_algorithm_pairs,
     select_longest_pairs,
     select_mode_mics,
     summarize_pair_set,
@@ -85,6 +94,36 @@ class AcousticImagingModelTest(unittest.TestCase):
 
             error_deg = ((best_theta - true_theta) ** 2 + (best_phi - true_phi) ** 2) ** 0.5
             self.assertLessEqual(error_deg, 15.0)
+
+    def test_hf_hint_selects_shorter_pairs_than_general(self):
+        mics = select_mode_mics(self.all_mics, MODE_WIDE32)
+        general_config = build_algorithm_config(ALGORITHM_WIDE32_GENERAL_SRP)
+        hf_config = build_algorithm_config(ALGORITHM_WIDE32_HF_HINT)
+        general_pairs = select_algorithm_pairs(mics, general_config, ALGORITHM_WIDE32_GENERAL_SRP)
+        hf_pairs = select_algorithm_pairs(mics, hf_config, ALGORITHM_WIDE32_HF_HINT)
+
+        general_mean = sum(pair.baseline_m for pair in general_pairs) / len(general_pairs)
+        hf_mean = sum(pair.baseline_m for pair in hf_pairs) / len(hf_pairs)
+        self.assertLess(hf_mean, general_mean * 0.55)
+
+    def test_wide32_general_robust_direction_estimate(self):
+        rng = random.Random(647)
+        mics = select_mode_mics(self.all_mics, MODE_WIDE32)
+        config = build_algorithm_config(ALGORITHM_WIDE32_GENERAL_SRP)
+        pairs = select_algorithm_pairs(mics, config, ALGORITHM_WIDE32_GENERAL_SRP)
+        scenario = AcousticScenario(
+            name="unit_robust",
+            sources=(AcousticSource(30.0, -15.0),),
+            snr_db=10.0,
+            bad_channels=(0, 7),
+            gain_error_db=tuple(1.5 if idx % 3 == 0 else -1.0 for idx in range(32)),
+            delay_error_s=tuple((idx % 5) * 0.2e-6 for idx in range(32)),
+            reflection_gain=0.12,
+        )
+
+        estimate = estimate_direction(config, mics, pairs, scenario, ALGORITHM_WIDE32_GENERAL_SRP, rng)
+        self.assertGreater(estimate.active_feature_count, 0)
+        self.assertLessEqual(angular_error_deg(estimate, scenario.sources[0]), 15.0)
 
 
 if __name__ == "__main__":
