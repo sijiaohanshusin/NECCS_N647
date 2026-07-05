@@ -1,5 +1,7 @@
 #include "pcmd3180_hal.h"
 
+#include "app_i2c2_bus.h"
+
 static uint32_t PCMD3180_HAL_GetTimeout(const PCMD3180_HAL_BusContextTypeDef *context)
 {
     if ((context == NULL) || (context->timeout_ms == 0U))
@@ -8,6 +10,24 @@ static uint32_t PCMD3180_HAL_GetTimeout(const PCMD3180_HAL_BusContextTypeDef *co
     }
 
     return context->timeout_ms;
+}
+
+static uint8_t PCMD3180_HAL_LockI2C(PCMD3180_HAL_BusContextTypeDef *context)
+{
+    if ((context->hi2c != NULL) && (context->hi2c->Instance == I2C2))
+    {
+        return AppI2C2_Lock(PCMD3180_HAL_GetTimeout(context));
+    }
+
+    return 1U;
+}
+
+static void PCMD3180_HAL_UnlockI2C(PCMD3180_HAL_BusContextTypeDef *context)
+{
+    if ((context->hi2c != NULL) && (context->hi2c->Instance == I2C2))
+    {
+        AppI2C2_Unlock();
+    }
 }
 
 void PCMD3180_HAL_BusInit(PCMD3180_BusTypeDef *bus,
@@ -38,6 +58,11 @@ PCMD3180_StatusTypeDef PCMD3180_HAL_WriteReg(void *context,
         return PCMD3180_INVALID_ARGUMENT;
     }
 
+    if (PCMD3180_HAL_LockI2C(hal_context) == 0U)
+    {
+        return PCMD3180_TIMEOUT;
+    }
+
     hal_status = HAL_I2C_Mem_Write(hal_context->hi2c,
                                    (uint16_t)(address7 << 1),
                                    reg,
@@ -45,6 +70,8 @@ PCMD3180_StatusTypeDef PCMD3180_HAL_WriteReg(void *context,
                                    &value,
                                    1U,
                                    PCMD3180_HAL_GetTimeout(hal_context));
+
+    PCMD3180_HAL_UnlockI2C(hal_context);
 
     return (hal_status == HAL_OK) ? PCMD3180_OK : PCMD3180_IO_ERROR;
 }
@@ -62,6 +89,11 @@ PCMD3180_StatusTypeDef PCMD3180_HAL_ReadReg(void *context,
         return PCMD3180_INVALID_ARGUMENT;
     }
 
+    if (PCMD3180_HAL_LockI2C(hal_context) == 0U)
+    {
+        return PCMD3180_TIMEOUT;
+    }
+
     hal_status = HAL_I2C_Mem_Read(hal_context->hi2c,
                                   (uint16_t)(address7 << 1),
                                   reg,
@@ -69,6 +101,8 @@ PCMD3180_StatusTypeDef PCMD3180_HAL_ReadReg(void *context,
                                   value,
                                   1U,
                                   PCMD3180_HAL_GetTimeout(hal_context));
+
+    PCMD3180_HAL_UnlockI2C(hal_context);
 
     return (hal_status == HAL_OK) ? PCMD3180_OK : PCMD3180_IO_ERROR;
 }

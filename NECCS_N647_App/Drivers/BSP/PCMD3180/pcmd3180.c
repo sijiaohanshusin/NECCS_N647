@@ -57,12 +57,7 @@ static PCMD3180_StatusTypeDef PCMD3180_WriteChecked(PCMD3180_HandleTypeDef *hand
         return status;
     }
 
-    if (readback != value)
-    {
-        return PCMD3180_VERIFY_ERROR;
-    }
-
-    return PCMD3180_OK;
+    return (readback == value) ? PCMD3180_OK : PCMD3180_VERIFY_ERROR;
 }
 
 static PCMD3180_StatusTypeDef PCMD3180_WriteChannelSlots(PCMD3180_HandleTypeDef *handle,
@@ -91,6 +86,57 @@ static PCMD3180_StatusTypeDef PCMD3180_WriteChannelSlots(PCMD3180_HandleTypeDef 
     }
 
     return PCMD3180_OK;
+}
+
+static uint8_t PCMD3180_BuildAsiCfg0(const PCMD3180_ConfigTypeDef *config)
+{
+    return (uint8_t)(PCMD3180_ASI_CFG0_TDM_MODE |
+                    (uint8_t)(((uint8_t)config->slot_width & 0x03U) << 4) |
+                    (uint8_t)((config->invert_fsync == 0U) ? 0U : 0x08U) |
+                    (uint8_t)((config->invert_bclk == 0U) ? 0U : 0x04U) |
+                    PCMD3180_ASI_CFG0_TX_HIGH_Z);
+}
+
+static PCMD3180_StatusTypeDef PCMD3180_WriteAsiRouting(PCMD3180_HandleTypeDef *handle,
+                                                       const PCMD3180_ConfigTypeDef *config,
+                                                       uint8_t verify)
+{
+    PCMD3180_StatusTypeDef status;
+
+    status = PCMD3180_WriteChecked(handle, PCMD3180_REG_ASI_CFG0, PCMD3180_BuildAsiCfg0(config), verify);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    status = PCMD3180_WriteChecked(handle, PCMD3180_REG_ASI_CFG1, config->tdm_tx_offset, verify);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    status = PCMD3180_WriteChecked(handle, PCMD3180_REG_ASI_CFG2, 0U, verify);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    return PCMD3180_WriteChannelSlots(handle, config->start_slot, verify);
+}
+
+static PCMD3180_StatusTypeDef PCMD3180_ApplyAsiRouting(PCMD3180_HandleTypeDef *handle,
+                                                       const PCMD3180_ConfigTypeDef *config,
+                                                       uint8_t verify)
+{
+    PCMD3180_StatusTypeDef status;
+
+    status = PCMD3180_SelectPage(handle, 0U);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    return PCMD3180_WriteAsiRouting(handle, config, verify);
 }
 
 static PCMD3180_StatusTypeDef PCMD3180_WritePdmInputConfig(PCMD3180_HandleTypeDef *handle,
@@ -266,9 +312,11 @@ void PCMD3180_GetDefaultConfig(PCMD3180_ConfigTypeDef *config)
     config->invert_fsync = 0U;
     config->pdmclk_divider = PCMD3180_PDMCLK_DIV_64FS;
     config->pdmin_edge_mask = 0U;
-    config->hpf_select = PCMD3180_HPF_12HZ_AT_48K;
+    config->hpf_select = PCMD3180_HPF_96HZ_AT_48K;
     config->enable_micbias = 0U;
-    config->verify_writes = 1U;
+    /* Optional readback verification is left off for the normal ordered-write path. */
+    config->verify_writes = 0U;
+    config->defer_power_up = 0U;
 }
 
 PCMD3180_StatusTypeDef PCMD3180_GetArrayModeConfig(PCMD3180_ArrayModeTypeDef mode,
@@ -476,9 +524,9 @@ PCMD3180_StatusTypeDef PCMD3180_Probe(PCMD3180_HandleTypeDef *handle)
 PCMD3180_StatusTypeDef PCMD3180_Configure(PCMD3180_HandleTypeDef *handle,
                                           const PCMD3180_ConfigTypeDef *config)
 {
-    uint8_t asi_cfg0;
     uint8_t pwr_cfg;
     uint8_t verify;
+    uint8_t defer_power_up;
     PCMD3180_StatusTypeDef status;
 
     status = PCMD3180_CheckHandle(handle);
@@ -498,6 +546,7 @@ PCMD3180_StatusTypeDef PCMD3180_Configure(PCMD3180_HandleTypeDef *handle,
     }
 
     verify = (config->verify_writes == 0U) ? 0U : 1U;
+    defer_power_up = (config->defer_power_up == 0U) ? 0U : 1U;
 
     status = PCMD3180_SelectPage(handle, 0U);
     if (status != PCMD3180_OK)
@@ -505,58 +554,31 @@ PCMD3180_StatusTypeDef PCMD3180_Configure(PCMD3180_HandleTypeDef *handle,
         return status;
     }
 
-    status = PCMD3180_WriteChecked(handle, PCMD3180_REG_SLEEP_CFG, PCMD3180_SLEEP_CFG_WAKE, verify);
+    /* Reset before programming so stale partial transactions cannot leak across configurations. */
+    status = PCMD3180_SoftwareReset(handle);
     if (status != PCMD3180_OK)
     {
         return status;
     }
 
-    PCMD3180_Delay(handle, 1U);
-
-    asi_cfg0 = PCMD3180_ASI_CFG0_TDM_MODE |
-               (uint8_t)(((uint8_t)config->slot_width & 0x03U) << 4) |
-               (uint8_t)((config->invert_fsync == 0U) ? 0U : 0x08U) |
-               (uint8_t)((config->invert_bclk == 0U) ? 0U : 0x04U) |
-               PCMD3180_ASI_CFG0_TX_HIGH_Z;
-
-    status = PCMD3180_WriteChecked(handle, PCMD3180_REG_ASI_CFG0, asi_cfg0, verify);
+    status = PCMD3180_SelectPage(handle, 0U);
     if (status != PCMD3180_OK)
     {
         return status;
     }
 
-    status = PCMD3180_WriteChecked(handle, PCMD3180_REG_ASI_CFG1, config->tdm_tx_offset, verify);
+    /* Program the register table after the device exits sleep mode. */
+    status = PCMD3180_WriteChecked(handle,
+                                   PCMD3180_REG_SLEEP_CFG,
+                                   PCMD3180_SLEEP_CFG_WAKE,
+                                   verify);
     if (status != PCMD3180_OK)
     {
         return status;
     }
+    PCMD3180_Delay(handle, 10U);
 
-    status = PCMD3180_WriteChecked(handle, PCMD3180_REG_ASI_CFG2, 0U, verify);
-    if (status != PCMD3180_OK)
-    {
-        return status;
-    }
-
-    status = PCMD3180_WriteChannelSlots(handle, config->start_slot, verify);
-    if (status != PCMD3180_OK)
-    {
-        return status;
-    }
-
-    /* Default slave-clock setup: BCLK/FSYNC must be provided by the host or another master. */
-    status = PCMD3180_WriteChecked(handle, PCMD3180_REG_MST_CFG0, 0U, verify);
-    if (status != PCMD3180_OK)
-    {
-        return status;
-    }
-
-    status = PCMD3180_WriteChecked(handle, PCMD3180_REG_MST_CFG1, 0U, verify);
-    if (status != PCMD3180_OK)
-    {
-        return status;
-    }
-
-    status = PCMD3180_WriteChecked(handle, PCMD3180_REG_CLK_SRC, 0U, verify);
+    status = PCMD3180_ApplyAsiRouting(handle, config, verify);
     if (status != PCMD3180_OK)
     {
         return status;
@@ -638,6 +660,25 @@ PCMD3180_StatusTypeDef PCMD3180_Configure(PCMD3180_HandleTypeDef *handle,
         return status;
     }
 
+    /* Default slave-clock setup: BCLK/FSYNC must be provided by the host or another master. */
+    status = PCMD3180_WriteChecked(handle, PCMD3180_REG_MST_CFG0, 0U, verify);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    status = PCMD3180_WriteChecked(handle, PCMD3180_REG_MST_CFG1, 0U, verify);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    status = PCMD3180_WriteChecked(handle, PCMD3180_REG_CLK_SRC, 0U, verify);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
     status = PCMD3180_WriteChecked(handle, PCMD3180_REG_IN_CH_EN, config->input_channel_mask, verify);
     if (status != PCMD3180_OK)
     {
@@ -650,8 +691,10 @@ PCMD3180_StatusTypeDef PCMD3180_Configure(PCMD3180_HandleTypeDef *handle,
         return status;
     }
 
-    pwr_cfg = PCMD3180_PWR_PDM_AND_PLL |
-              (uint8_t)((config->enable_micbias == 0U) ? 0U : PCMD3180_PWR_MICBIAS);
+    pwr_cfg = (defer_power_up == 0U) ?
+              (PCMD3180_PWR_PDM_AND_PLL |
+               (uint8_t)((config->enable_micbias == 0U) ? 0U : PCMD3180_PWR_MICBIAS)) :
+              0U;
 
     status = PCMD3180_WriteChecked(handle, PCMD3180_REG_PWR_CFG, pwr_cfg, verify);
     if (status != PCMD3180_OK)
@@ -659,8 +702,76 @@ PCMD3180_StatusTypeDef PCMD3180_Configure(PCMD3180_HandleTypeDef *handle,
         return status;
     }
 
+    if ((defer_power_up == 0U) && (pwr_cfg != 0U))
+    {
+        /* Re-apply ASI routing after power-up so slot registers stay aligned with the mode. */
+        PCMD3180_Delay(handle, 10U);
+        status = PCMD3180_SelectPage(handle, 0U);
+        if (status != PCMD3180_OK)
+        {
+            return status;
+        }
+
+        status = PCMD3180_ApplyAsiRouting(handle, config, verify);
+        if (status != PCMD3180_OK)
+        {
+            return status;
+        }
+    }
+
     handle->configured = 1U;
 
+    return PCMD3180_OK;
+}
+
+PCMD3180_StatusTypeDef PCMD3180_Activate(PCMD3180_HandleTypeDef *handle,
+                                         const PCMD3180_ConfigTypeDef *config)
+{
+    uint8_t pwr_cfg;
+    uint8_t verify;
+    PCMD3180_StatusTypeDef status;
+
+    status = PCMD3180_CheckHandle(handle);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+    if (config == NULL)
+    {
+        return PCMD3180_INVALID_ARGUMENT;
+    }
+
+    verify = (config->verify_writes == 0U) ? 0U : 1U;
+
+    status = PCMD3180_SelectPage(handle, 0U);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    /* Power up a previously configured device once its audio clocks are available. */
+    pwr_cfg = PCMD3180_PWR_PDM_AND_PLL |
+              (uint8_t)((config->enable_micbias == 0U) ? 0U : PCMD3180_PWR_MICBIAS);
+    status = PCMD3180_WriteChecked(handle, PCMD3180_REG_PWR_CFG, pwr_cfg, verify);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+    PCMD3180_Delay(handle, 10U);
+
+    status = PCMD3180_SelectPage(handle, 0U);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    status = PCMD3180_ApplyAsiRouting(handle, config, verify);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    handle->configured = 1U;
     return PCMD3180_OK;
 }
 
@@ -858,11 +969,8 @@ PCMD3180_StatusTypeDef PCMD3180_ReadStatus(PCMD3180_HandleTypeDef *handle,
         return status;
     }
 
-    status = PCMD3180_ReadRegister(handle, PCMD3180_REG_INT_LTCH1, &status_snapshot->int_latch1);
-    if (status != PCMD3180_OK)
-    {
-        return status;
-    }
+    status_snapshot->int_latch1 = 0U;
+    (void)PCMD3180_ReadRegister(handle, PCMD3180_REG_INT_LTCH1, &status_snapshot->int_latch1);
 
     status = PCMD3180_ReadRegister(handle, PCMD3180_REG_PWR_CFG, &status_snapshot->pwr_cfg);
     if (status != PCMD3180_OK)
