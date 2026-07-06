@@ -4,11 +4,11 @@
 #include "tx_api.h"
 
 #ifndef PCMD3180_HAL_I2C_RETRY_COUNT
-#define PCMD3180_HAL_I2C_RETRY_COUNT       2U
+#define PCMD3180_HAL_I2C_RETRY_COUNT       5U
 #endif
 
 #ifndef PCMD3180_HAL_I2C_RETRY_DELAY_MS
-#define PCMD3180_HAL_I2C_RETRY_DELAY_MS    2U
+#define PCMD3180_HAL_I2C_RETRY_DELAY_MS    5U
 #endif
 
 static uint32_t PCMD3180_HAL_GetTimeout(const PCMD3180_HAL_BusContextTypeDef *context)
@@ -218,7 +218,7 @@ PCMD3180_StatusTypeDef PCMD3180_HAL_ProbeAddress(void *context,
                                                  uint8_t address7)
 {
     PCMD3180_HAL_BusContextTypeDef *hal_context = (PCMD3180_HAL_BusContextTypeDef *)context;
-    HAL_StatusTypeDef hal_status;
+    HAL_StatusTypeDef hal_status = HAL_ERROR;
 
     if ((hal_context == NULL) || (hal_context->hi2c == NULL))
     {
@@ -230,20 +230,31 @@ PCMD3180_StatusTypeDef PCMD3180_HAL_ProbeAddress(void *context,
     hal_context->last_value = 0U;
     hal_context->last_is_read = 1U;
 
-    if (PCMD3180_HAL_LockI2C(hal_context) == 0U)
+    for (uint32_t attempt = 0U; attempt < PCMD3180_HAL_I2C_RETRY_COUNT; attempt++)
     {
-        hal_context->last_hal_status = (uint32_t)HAL_TIMEOUT;
-        hal_context->last_hal_error = 0U;
-        return PCMD3180_TIMEOUT;
+        if (PCMD3180_HAL_LockI2C(hal_context) == 0U)
+        {
+            hal_context->last_hal_status = (uint32_t)HAL_TIMEOUT;
+            hal_context->last_hal_error = 0U;
+            return PCMD3180_TIMEOUT;
+        }
+
+        hal_status = HAL_I2C_IsDeviceReady(hal_context->hi2c,
+                                           (uint16_t)(address7 << 1),
+                                           1U,
+                                           PCMD3180_HAL_GetTimeout(hal_context));
+        PCMD3180_HAL_RecordResult(hal_context, hal_status);
+        PCMD3180_HAL_UnlockI2C(hal_context);
+        if (hal_status == HAL_OK)
+        {
+            return PCMD3180_OK;
+        }
+
+        hal_context->recover_count++;
+        PCMD3180_HAL_Delay(PCMD3180_HAL_I2C_RETRY_DELAY_MS);
     }
 
-    hal_status = HAL_I2C_IsDeviceReady(hal_context->hi2c,
-                                       (uint16_t)(address7 << 1),
-                                       1U,
-                                       PCMD3180_HAL_GetTimeout(hal_context));
-    PCMD3180_HAL_RecordResult(hal_context, hal_status);
-    PCMD3180_HAL_UnlockI2C(hal_context);
-    return (hal_status == HAL_OK) ? PCMD3180_OK : PCMD3180_IO_ERROR;
+    return PCMD3180_IO_ERROR;
 }
 
 void PCMD3180_HAL_DelayMs(void *context, uint32_t delay_ms)

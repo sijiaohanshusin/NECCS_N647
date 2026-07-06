@@ -5,6 +5,7 @@
 
 #include "main.h"
 #include "app_bringup_thread.h"
+#include "app_i2c2_bus.h"
 #include "PCMD3180/pcmd3180_hal.h"
 
 #define APP_PCMD_CAPTURE_SLOTS_PER_BUS       APP_MIC_ARRAY_WIDE32_SLOTS_PER_BUS
@@ -13,10 +14,11 @@
 #define APP_PCMD_CAPTURE_DMA_WORDS_PER_HALF  (APP_PCMD_CAPTURE_SLOTS_PER_BUS * APP_PCMD_CAPTURE_FRAME_LEN)
 #define APP_PCMD_CAPTURE_DMA_WORDS           (APP_PCMD_CAPTURE_DMA_WORDS_PER_HALF * APP_PCMD_CAPTURE_DMA_HALVES)
 #define APP_PCMD_CAPTURE_AUDIO_SCALE         APP_MIC_ARRAY_Q15_TO_FLOAT_SCALE
-#define APP_PCMD_CAPTURE_I2C_TIMEOUT_MS      20U
+#define APP_PCMD_CAPTURE_I2C_TIMEOUT_MS      100U
 #define APP_PCMD_CAPTURE_RESET_LOW_MS        100U
 #define APP_PCMD_CAPTURE_RESET_SETTLE_MS     10U
 #define APP_PCMD_CAPTURE_CLOCK_SETTLE_MS     1000U
+#define APP_PCMD_CAPTURE_CONFIG_LOCK_MS      3000U
 #define APP_PCMD_CAPTURE_RETRY_DELAY_MS      500U
 #define APP_PCMD_CAPTURE_EVENT_HALF0         0x00000001UL
 #define APP_PCMD_CAPTURE_EVENT_HALF1         0x00000002UL
@@ -24,6 +26,10 @@
 #define APP_PCMD_CAPTURE_RAIL_ABS_LEVEL      32760
 #define APP_PCMD_CAPTURE_RAIL_FAULT_X10      20U
 #define APP_PCMD_CAPTURE_HIGH_FLOOR_DBFS     (-30)
+
+#ifndef APP_PCMD_SDOUT_BCLK_MARGIN_FIX
+#define APP_PCMD_SDOUT_BCLK_MARGIN_FIX       1U
+#endif
 
 extern SAI_HandleTypeDef hsai_BlockA1;
 extern SAI_HandleTypeDef hsai_BlockB1;
@@ -332,7 +338,9 @@ static void AppPcmdCapture_UpdateSlotLevels(uint8_t bus,
   {
     for (uint32_t slot = 0U; slot < APP_PCMD_CAPTURE_SLOTS_PER_BUS; slot++)
     {
-      const int16_t sample = interleaved[(frame * APP_PCMD_CAPTURE_SLOTS_PER_BUS) + slot];
+      const int16_t sample =
+          App_MicArray_DecodePcmdTdmSample(
+              interleaved[(frame * APP_PCMD_CAPTURE_SLOTS_PER_BUS) + slot]);
       const int32_t sample_abs = (sample < 0) ? -(int32_t)sample : (int32_t)sample;
       dc_sum[slot] += sample;
       s_snapshot.slot_last_sample[bus][slot] = sample;
@@ -353,7 +361,9 @@ static void AppPcmdCapture_UpdateSlotLevels(uint8_t bus,
   {
     for (uint32_t slot = 0U; slot < APP_PCMD_CAPTURE_SLOTS_PER_BUS; slot++)
     {
-      const int32_t sample = (int32_t)interleaved[(frame * APP_PCMD_CAPTURE_SLOTS_PER_BUS) + slot];
+      const int32_t sample =
+          (int32_t)App_MicArray_DecodePcmdTdmSample(
+              interleaved[(frame * APP_PCMD_CAPTURE_SLOTS_PER_BUS) + slot]);
       const int32_t ac_sample = sample - (int32_t)dc_level[slot];
       ac_sum[slot] += (uint32_t)((ac_sample < 0) ? -ac_sample : ac_sample);
     }
@@ -444,11 +454,9 @@ static void AppPcmdCapture_UpdateMicLevels(void)
   }
   s_snapshot.raw_audio_valid =
       (((s_snapshot.raw_quality_flags & (APP_PCMD_CAPTURE_RAW_FLAG_CONFIG_OK |
-                                         APP_PCMD_CAPTURE_RAW_FLAG_DMA_SYNC |
-                                         APP_PCMD_CAPTURE_RAW_FLAG_NONZERO)) ==
+                                         APP_PCMD_CAPTURE_RAW_FLAG_DMA_SYNC)) ==
         (APP_PCMD_CAPTURE_RAW_FLAG_CONFIG_OK |
-         APP_PCMD_CAPTURE_RAW_FLAG_DMA_SYNC |
-         APP_PCMD_CAPTURE_RAW_FLAG_NONZERO)) &&
+         APP_PCMD_CAPTURE_RAW_FLAG_DMA_SYNC)) &&
        ((s_snapshot.raw_quality_flags & APP_PCMD_CAPTURE_RAW_FLAG_RAIL_FAULT) == 0U)) ? 1U : 0U;
 }
 
@@ -668,6 +676,9 @@ AppPcmdCaptureStatus_t AppPcmdCapture_Init(AppMicArrayMode_t mode)
       s_snapshot.init_status = (int32_t)pcmd_status;
       return APP_PCMD_CAPTURE_PCMD_ERROR;
     }
+#if (APP_PCMD_SDOUT_BCLK_MARGIN_FIX != 0U)
+    s_pcmd_configs[index].invert_bclk = 1U;
+#endif
   }
 
   s_snapshot.initialized = 1U;
@@ -695,6 +706,9 @@ AppPcmdCaptureStatus_t AppPcmdCapture_Start(void)
     return APP_PCMD_CAPTURE_OK;
   }
 
+  AppPcmdCapture_StopDma();
+  AppPcmdCapture_ClearPendingDmaEvents();
+
   hal_status = HAL_SAI_Receive_DMA(&hsai_BlockA1, (uint8_t *)s_bus_a_rx, APP_PCMD_CAPTURE_DMA_WORDS);
   s_snapshot.dma_a_status = (int32_t)hal_status;
   if (hal_status != HAL_OK)
@@ -721,17 +735,26 @@ AppPcmdCaptureStatus_t AppPcmdCapture_Start(void)
   __HAL_SAI_DISABLE_IT(&hsai_BlockB1, SAI_IT_AFSDET | SAI_IT_LFSDET);
   AppPcmdCapture_DelayMs(APP_PCMD_CAPTURE_CLOCK_SETTLE_MS);
 
+  if (AppI2C2_Lock(APP_PCMD_CAPTURE_CONFIG_LOCK_MS) == 0U)
+  {
+    s_snapshot.start_status = APP_PCMD_CAPTURE_BUSY;
+    AppPcmdCapture_StopDma();
+    return APP_PCMD_CAPTURE_BUSY;
+  }
+
   pcmd_status = PCMD3180_HardwareReset(&s_pcmd_handles[0],
                                        APP_PCMD_CAPTURE_RESET_LOW_MS,
                                        APP_PCMD_CAPTURE_RESET_SETTLE_MS);
   if (pcmd_status != PCMD3180_OK)
   {
     s_snapshot.start_status = (int32_t)pcmd_status;
+    AppI2C2_Unlock();
     AppPcmdCapture_StopDma();
     return APP_PCMD_CAPTURE_PCMD_ERROR;
   }
 
   config_status = AppPcmdCapture_ConfigPcmdDevices();
+  AppI2C2_Unlock();
   if (config_status != APP_PCMD_CAPTURE_OK)
   {
     s_snapshot.start_status = config_status;

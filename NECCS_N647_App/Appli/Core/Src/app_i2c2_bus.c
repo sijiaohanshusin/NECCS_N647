@@ -7,6 +7,8 @@
 static TX_MUTEX g_app_i2c2_mutex;
 static uint8_t g_app_i2c2_mutex_ready;
 static volatile uint32_t g_app_i2c2_hal_recover_pending = 0U;
+static uint32_t g_app_i2c2_owner_thread;
+static uint32_t g_app_i2c2_lock_depth;
 
 volatile uint32_t g_app_i2c2_hal_restore_count = 0U;
 volatile uint32_t g_app_i2c2_hal_restore_status = HAL_OK;
@@ -117,6 +119,7 @@ UINT AppI2C2_BusInit(void)
 uint8_t AppI2C2_Lock(uint32_t timeout_ms)
 {
   UINT status;
+  const uint32_t current_thread = AppI2C2_CurrentThreadToken();
 
   if (g_app_i2c2_mutex_ready == 0U)
   {
@@ -126,20 +129,41 @@ uint8_t AppI2C2_Lock(uint32_t timeout_ms)
     }
   }
 
+  if ((current_thread != 0U) &&
+      (g_app_i2c2_lock_depth != 0U) &&
+      (g_app_i2c2_owner_thread == current_thread))
+  {
+    g_app_i2c2_lock_depth++;
+    g_app_i2c2_snapshot.lock_count++;
+    g_app_i2c2_snapshot.locked = 1U;
+    g_app_i2c2_snapshot.active_thread = current_thread;
+    g_app_i2c2_snapshot.last_owner_thread = current_thread;
+    if (AppI2C2_RestoreHalIfNeeded() != HAL_OK)
+    {
+      g_app_i2c2_lock_depth--;
+      return 0U;
+    }
+    return 1U;
+  }
+
   status = tx_mutex_get(&g_app_i2c2_mutex, timeout_ms_to_ticks(timeout_ms));
   if (status == TX_SUCCESS)
   {
+    g_app_i2c2_owner_thread = current_thread;
+    g_app_i2c2_lock_depth = 1U;
     g_app_i2c2_snapshot.lock_count++;
     g_app_i2c2_snapshot.locked = 1U;
     g_app_i2c2_snapshot.active_since_ms = HAL_GetTick();
     g_app_i2c2_snapshot.active_timeout_ms = timeout_ms;
-    g_app_i2c2_snapshot.active_thread = AppI2C2_CurrentThreadToken();
+    g_app_i2c2_snapshot.active_thread = current_thread;
     g_app_i2c2_snapshot.last_owner_thread = g_app_i2c2_snapshot.active_thread;
     if (AppI2C2_RestoreHalIfNeeded() != HAL_OK)
     {
       g_app_i2c2_snapshot.last_lock_ms = 0U;
       g_app_i2c2_snapshot.locked = 0U;
       g_app_i2c2_snapshot.active_thread = 0U;
+      g_app_i2c2_owner_thread = 0U;
+      g_app_i2c2_lock_depth = 0U;
       (void)tx_mutex_put(&g_app_i2c2_mutex);
       return 0U;
     }
@@ -157,6 +181,16 @@ void AppI2C2_Unlock(void)
   if (g_app_i2c2_mutex_ready != 0U)
   {
     uint32_t hold_ms = 0U;
+    const uint32_t current_thread = AppI2C2_CurrentThreadToken();
+
+    if ((current_thread != 0U) &&
+        (g_app_i2c2_lock_depth > 1U) &&
+        (g_app_i2c2_owner_thread == current_thread))
+    {
+      g_app_i2c2_lock_depth--;
+      g_app_i2c2_snapshot.unlock_count++;
+      return;
+    }
 
     if (g_app_i2c2_snapshot.locked != 0U)
     {
@@ -170,6 +204,8 @@ void AppI2C2_Unlock(void)
     }
     g_app_i2c2_snapshot.locked = 0U;
     g_app_i2c2_snapshot.active_thread = 0U;
+    g_app_i2c2_owner_thread = 0U;
+    g_app_i2c2_lock_depth = 0U;
     (void)tx_mutex_put(&g_app_i2c2_mutex);
   }
 }

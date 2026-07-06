@@ -92,6 +92,8 @@ AppMicArrayStatus_t App_MicArray_GetSource(AppMicArrayMode_t mode,
                                            uint32_t logical_index,
                                            AppMicArraySource_t *source);
 
+int16_t App_MicArray_DecodePcmdTdmSample(int16_t raw_sample);
+
 AppMicArrayStatus_t App_MicArray_CopyInterleavedI16(AppMicArrayMode_t mode,
                                                     const int16_t *bus_a_interleaved,
                                                     const int16_t *bus_b_interleaved,

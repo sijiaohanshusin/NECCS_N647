@@ -78,6 +78,11 @@ static const int16_t *App_MicArray_SelectBus(const int16_t *bus_a_interleaved,
   return (bus == APP_MIC_ARRAY_BUS_A) ? bus_a_interleaved : bus_b_interleaved;
 }
 
+int16_t App_MicArray_DecodePcmdTdmSample(int16_t raw_sample)
+{
+  return raw_sample;
+}
+
 static AppMicArrayStatus_t App_MicArray_PrepareSources(AppMicArrayMode_t mode,
                                                        AppMicArraySource_t *sources,
                                                        uint32_t source_capacity,
@@ -299,7 +304,8 @@ AppMicArrayStatus_t App_MicArray_CopyInterleavedI16(AppMicArrayMode_t mode,
                                        bus_b_interleaved,
                                        sources[channel].bus);
       dst_interleaved[(frame * dst_channel_count) + channel] =
-          src_bus[(frame * slots_per_bus) + sources[channel].slot];
+          App_MicArray_DecodePcmdTdmSample(
+              src_bus[(frame * slots_per_bus) + sources[channel].slot]);
     }
   }
 
@@ -341,7 +347,8 @@ AppMicArrayStatus_t App_MicArray_DeinterleavePlanarI16(AppMicArrayMode_t mode,
     for (uint32_t frame = 0U; frame < frame_count; frame++)
     {
       dst_planar[(channel * dst_samples_per_channel) + frame] =
-          src_bus[(frame * slots_per_bus) + sources[channel].slot];
+          App_MicArray_DecodePcmdTdmSample(
+              src_bus[(frame * slots_per_bus) + sources[channel].slot]);
     }
   }
 
@@ -384,7 +391,8 @@ AppMicArrayStatus_t App_MicArray_DeinterleavePlanarF32(AppMicArrayMode_t mode,
     for (uint32_t frame = 0U; frame < frame_count; frame++)
     {
       dst_planar[(channel * dst_samples_per_channel) + frame] =
-          (float)src_bus[(frame * slots_per_bus) + sources[channel].slot] * scale;
+          (float)App_MicArray_DecodePcmdTdmSample(
+              src_bus[(frame * slots_per_bus) + sources[channel].slot]) * scale;
     }
   }
 

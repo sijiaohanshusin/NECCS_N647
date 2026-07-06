@@ -15,10 +15,34 @@
   `.noncacheable` region before DCache is enabled. If `HAL_DMA_ERROR_USE`
   appears on the first SAI callback, check MPU/cache coherency before changing
   PCMD registers.
-- PCMD online does not mean MIC audio is valid. As of the latest RAM debug run,
-  PCMD I2C config and SAI DMA are alive, but raw samples show near-rail PDM
-  fault patterns. Do not debug SRP/heatmap until MICS silence is mostly
-  `<= -50 dBFS` and tap tests follow the expected bus/slot.
+- PCMD online does not mean MIC audio is valid. As of the latest PCMD-focused
+  RAM debug run, main now matches the known-good `7e12d5d` branch: quiet raw DMA
+  samples are low-amplitude two's-complement PCM, `raw_audio_valid=1`,
+  `latest_frame_valid=1`, and published frames advance. Keep this as the PCMD
+  baseline before changing SRP/heatmap code.
+- 2026-07-06 after a real target 5V power cycle, the PCMD-to-SRP path reached
+  `App_AcousticSrp_ProcessFrame()` and returned `APP_ACOUSTIC_IMAGING_OK` on a
+  real `TDM_CAPTURE` frame (`48 kHz`, `32ch`, `256` samples). In quiet bench
+  conditions the SRP snapshot is expected to remain low confidence/invalid, not
+  show a strong fake heat spot. Multi-frame checks can leave stale GDB/OpenOCD
+  sessions and dirty target state; clean them and power-cycle before drawing
+  firmware conclusions.
+- Follow-up multi-frame RAM Debug confirmed the same path remains healthy after
+  several SRP frames: PCMD masks stay `0xf`, raw audio is valid, MIC dBFS is
+  quiet (`-78..-90 dBFS` in the remote bench), and SAI/DMA errors remain zero.
+  The current blocker has moved to performance: Debug/O0 auto-degrades to Fast
+  (`96 pairs`) and still takes about `280 ms/frame`, so Release/optimized
+  profiling is required before enabling a 20 FPS product overlay.
+- Full product-path RAM Debug now shows camera, PCMD, and SRP running together:
+  camera reaches hundreds of LTDC swaps with zero LTDC errors, UI color-key
+  holes are correct, PCMD stays valid, and SRP processes real frames. The
+  previous IMAGE black symptom was traced to conservative IMX219 exposure/gain
+  defaults; firmware now uses exposure `0x0d00`, analog gain `0xff`, and digital
+  gain `0x0200`, which RAM Debug verified produces non-black live frames.
+- Acoustic overlay drawing is gated by confidence: the UI still reports valid
+  SRP diagnostics, but the camera overlay is not enabled until
+  `quality_pct >= 10`, so quiet-bench low-confidence frames do not paint a
+  fake heat spot.
 - Layered debug can disable heavy modules at the `main()` GDB breakpoint by
   writing `g_app_bringup_control_mask`: `0x00` UI only, `0x02` UI+camera,
   `0x06` UI+camera+PCMD, `0x22` UI+camera test pattern, default `0x1f`
