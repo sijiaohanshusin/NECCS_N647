@@ -19,6 +19,10 @@
   PCMD I2C config and SAI DMA are alive, but raw samples show near-rail PDM
   fault patterns. Do not debug SRP/heatmap until MICS silence is mostly
   `<= -50 dBFS` and tap tests follow the expected bus/slot.
+- Layered debug can disable heavy modules at the `main()` GDB breakpoint by
+  writing `g_app_bringup_control_mask`: `0x00` UI only, `0x02` UI+camera,
+  `0x06` UI+camera+PCMD, `0x22` UI+camera test pattern, default `0x1f`
+  full product path.
 - Hardware debug uses the scripted N647 loop first:
 
 ```powershell

@@ -68,6 +68,16 @@ powershell -ExecutionPolicy Bypass -File .\tools\debug\n647_debug_env.ps1 -Check
 powershell -ExecutionPolicy Bypass -File .\tools\debug\debug_n647_ram.ps1 -Batch
 ```
 
+At the `main()` breakpoint in RAM Debug, use `g_app_bringup_control_mask` to
+isolate modules without rebuilding:
+
+- `0x00`: UI/display/touch only. Camera, PCMD, acoustic, power poll, and media
+  are skipped.
+- `0x02`: UI + camera preview only.
+- `0x06`: UI + camera + PCMD raw capture, with acoustic and media skipped.
+- `0x22`: UI + camera preview with the IMX219 test pattern enabled.
+- `0x1f`: default full product path.
+
 If the target cannot halt normally:
 
 ```powershell
@@ -151,3 +161,21 @@ powershell -ExecutionPolicy Bypass -File .\tools\debug\flash_n647_release.ps1 -B
   `avg=-9 dBFS`, `published=0`, `latest=0`. This is the intended safe state:
   PCMD/SAI is online, while invalid raw MIC data is visible on MICS diagnostics
   but not allowed into `AppAudioFrame_t` or SRP.
+- 2026-07-06 added `g_app_bringup_control_mask` and snapshot
+  `control/skipped/active` masks. Default remains full path, but GDB can now run
+  UI-only, UI+camera, and UI+camera+PCMD scenarios without editing source. Use
+  this before chasing touch freeze, IMAGE black screen, or PCMD raw issues.
+- 2026-07-06 UI+camera (`0x02`) RAM Debug: IMX219 probe/start succeeded
+  (`chip=0x219`, camera init/start `0`, `flags=0x33f`), DCMIPP frame callback
+  fired, `AppCameraDisplay_RequestSwap()` reached `swaps=1`, LTDC layer1/layer2
+  were enabled with layer1 CFBAR `0x90400000` and layer2 CFBAR `0x90072000`.
+  The captured preview buffer was almost constant dark RGB565 (`0x1082`), so
+  the next display/camera split check is `0x22` IMX219 test pattern.
+- 2026-07-06 UI+camera test pattern (`0x22`) RAM Debug: `test=1`,
+  `flags=0x73f`, swap reached layer1 `0x90400000`, and framebuffer samples
+  contained visible pattern colors (`0xffff`, `0xffe0`, `0x07e0`). UI layer2
+  color-key hole was also correct: preview pixels at `0x90090180` and
+  `0x90108400` were `0xf81f`, while an outside UI pixel was `0x18e4`. This
+  means LTDC layer order and color-key hole are working in the test-pattern
+  path; normal live camera black should be chased in sensor exposure/output
+  configuration before changing the UI overlay path again.

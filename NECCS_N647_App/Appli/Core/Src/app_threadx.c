@@ -92,7 +92,6 @@ UINT App_ThreadX_Init(VOID *memory_ptr)
   }
   if (ret == TX_SUCCESS)
   {
-    App_BringUpStatus_Start(APP_BRINGUP_MODULE_CAMERA, 0);
     ret = tx_thread_create(&app_bringup_thread,
                            "app_bringup",
                            App_BringUpThreadEntry,
@@ -110,58 +109,80 @@ UINT App_ThreadX_Init(VOID *memory_ptr)
   }
   if (ret == TX_SUCCESS)
   {
-    App_BringUpStatus_Start(APP_BRINGUP_MODULE_PCMD_RAW, 0);
-    ret = tx_thread_create(&app_pcmd_thread,
-                           "app_pcmd_capture",
-                           AppPcmdCapture_ThreadEntry,
-                           0U,
-                           app_pcmd_thread_stack,
-                           APP_PCMD_THREAD_STACK_SIZE,
-                           APP_PCMD_THREAD_PRIORITY,
-                           APP_PCMD_THREAD_PRIORITY,
-                           TX_NO_TIME_SLICE,
-                           TX_AUTO_START);
-    if (ret != TX_SUCCESS)
+    if (App_BringUpControl_IsEnabled(APP_BRINGUP_CONTROL_PCMD_RAW) != 0U)
     {
-      App_BringUpStatus_Fail(APP_BRINGUP_MODULE_PCMD_RAW, (int32_t)ret);
+      App_BringUpStatus_Start(APP_BRINGUP_MODULE_PCMD_RAW, 0);
+      ret = tx_thread_create(&app_pcmd_thread,
+                             "app_pcmd_capture",
+                             AppPcmdCapture_ThreadEntry,
+                             0U,
+                             app_pcmd_thread_stack,
+                             APP_PCMD_THREAD_STACK_SIZE,
+                             APP_PCMD_THREAD_PRIORITY,
+                             APP_PCMD_THREAD_PRIORITY,
+                             TX_NO_TIME_SLICE,
+                             TX_AUTO_START);
+      if (ret != TX_SUCCESS)
+      {
+        App_BringUpStatus_Fail(APP_BRINGUP_MODULE_PCMD_RAW, (int32_t)ret);
+      }
+    }
+    else
+    {
+      App_BringUpStatus_Skip(APP_BRINGUP_MODULE_PCMD_RAW, 0);
+      App_BringUpStatus_Skip(APP_BRINGUP_MODULE_AUDIO_FRAME, 0);
     }
   }
   if (ret == TX_SUCCESS)
   {
-    AppAcousticImagingStatus_t acoustic_status = AppAcousticService_Init();
-    if (acoustic_status == APP_ACOUSTIC_IMAGING_OK)
+    if (App_BringUpControl_IsEnabled(APP_BRINGUP_CONTROL_ACOUSTIC) != 0U)
     {
-      App_BringUpStatus_Ready(APP_BRINGUP_MODULE_ACOUSTIC, (int32_t)acoustic_status);
+      AppAcousticImagingStatus_t acoustic_status = AppAcousticService_Init();
+      if (acoustic_status == APP_ACOUSTIC_IMAGING_OK)
+      {
+        App_BringUpStatus_Ready(APP_BRINGUP_MODULE_ACOUSTIC, (int32_t)acoustic_status);
+      }
+      else
+      {
+        App_BringUpStatus_Fail(APP_BRINGUP_MODULE_ACOUSTIC, (int32_t)acoustic_status);
+      }
+      ret = tx_thread_create(&app_acoustic_thread,
+                             "app_acoustic",
+                             AppAcousticService_ThreadEntry,
+                             0U,
+                             app_acoustic_thread_stack,
+                             APP_ACOUSTIC_THREAD_STACK_SIZE,
+                             APP_ACOUSTIC_THREAD_PRIORITY,
+                             APP_ACOUSTIC_THREAD_PRIORITY,
+                             TX_NO_TIME_SLICE,
+                             TX_AUTO_START);
+      if (ret != TX_SUCCESS)
+      {
+        App_BringUpStatus_Fail(APP_BRINGUP_MODULE_ACOUSTIC, (int32_t)ret);
+      }
     }
     else
     {
-      App_BringUpStatus_Fail(APP_BRINGUP_MODULE_ACOUSTIC, (int32_t)acoustic_status);
-    }
-    ret = tx_thread_create(&app_acoustic_thread,
-                           "app_acoustic",
-                           AppAcousticService_ThreadEntry,
-                           0U,
-                           app_acoustic_thread_stack,
-                           APP_ACOUSTIC_THREAD_STACK_SIZE,
-                           APP_ACOUSTIC_THREAD_PRIORITY,
-                           APP_ACOUSTIC_THREAD_PRIORITY,
-                           TX_NO_TIME_SLICE,
-                           TX_AUTO_START);
-    if (ret != TX_SUCCESS)
-    {
-      App_BringUpStatus_Fail(APP_BRINGUP_MODULE_ACOUSTIC, (int32_t)ret);
+      App_BringUpStatus_Skip(APP_BRINGUP_MODULE_ACOUSTIC, 0);
     }
   }
   if (ret == TX_SUCCESS)
   {
-    ret = AppMedia_Init(memory_ptr);
-    if (ret == TX_SUCCESS)
+    if (App_BringUpControl_IsEnabled(APP_BRINGUP_CONTROL_MEDIA) != 0U)
     {
-      App_BringUpStatus_Ready(APP_BRINGUP_MODULE_MEDIA, (int32_t)ret);
+      ret = AppMedia_Init(memory_ptr);
+      if (ret == TX_SUCCESS)
+      {
+        App_BringUpStatus_Ready(APP_BRINGUP_MODULE_MEDIA, (int32_t)ret);
+      }
+      else
+      {
+        App_BringUpStatus_Fail(APP_BRINGUP_MODULE_MEDIA, (int32_t)ret);
+      }
     }
     else
     {
-      App_BringUpStatus_Fail(APP_BRINGUP_MODULE_MEDIA, (int32_t)ret);
+      App_BringUpStatus_Skip(APP_BRINGUP_MODULE_MEDIA, 0);
     }
   }
   /* USER CODE END App_ThreadX_Init */
