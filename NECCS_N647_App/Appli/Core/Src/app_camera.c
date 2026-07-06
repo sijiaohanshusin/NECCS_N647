@@ -19,6 +19,8 @@
 #define APP_CAMERA_PREVIEW_OUTPUT_FORMAT DCMIPP_PIXEL_PACKER_FORMAT_RGB565_1
 #define APP_CAMERA_RAW_BAYER_TYPE       DCMIPP_RAWBAYER_RGGB
 #define APP_CAMERA_RAW_BAYER_STRENGTH   DCMIPP_RAWBAYER_ALGO_NONE
+#define APP_CAMERA_FRAME_SAMPLE_GRID    8U
+#define APP_CAMERA_FRAME_DARK_LUMA      14U
 
 DCMIPP_HandleTypeDef hdcmipp;
 
@@ -106,6 +108,14 @@ volatile uint32_t g_app_camera_dcmipp_pipe_fctcr = 0U;
 volatile uint32_t g_app_camera_dcmipp_pipe_ppcr = 0U;
 volatile uint32_t g_app_camera_dcmipp_pipe_m0ar1 = 0U;
 volatile uint32_t g_app_camera_dcmipp_pipe_m1ar1 = 0U;
+volatile uint32_t g_app_camera_frame_sample_addr = 0U;
+volatile uint32_t g_app_camera_frame_sample_min = 0U;
+volatile uint32_t g_app_camera_frame_sample_max = 0U;
+volatile uint32_t g_app_camera_frame_sample_avg = 0U;
+volatile uint32_t g_app_camera_frame_sample_non_dark_count = 0U;
+volatile uint32_t g_app_camera_frame_sample_change_count = 0U;
+volatile uint32_t g_app_camera_frame_sample_center = 0U;
+volatile uint32_t g_app_camera_frame_sample_seq = 0U;
 
 static void AppCamera_SnapshotRegisters(void)
 {
@@ -210,6 +220,117 @@ static void AppCamera_CacheCleanInvalidate(uint32_t address, uint32_t size)
                       ~(APP_CAMERA_DCACHE_LINE_BYTES - 1U);
 
   SCB_CleanInvalidateDCache_by_Addr((void *)aligned_addr, (int32_t)(end_addr - aligned_addr));
+}
+
+static void AppCamera_CacheInvalidate(uint32_t address, uint32_t size)
+{
+  uint32_t aligned_addr = address & ~(APP_CAMERA_DCACHE_LINE_BYTES - 1U);
+  uint32_t end_addr = (address + size + APP_CAMERA_DCACHE_LINE_BYTES - 1U) &
+                      ~(APP_CAMERA_DCACHE_LINE_BYTES - 1U);
+
+  if ((size == 0U) || ((SCB->CCR & SCB_CCR_DC_Msk) == 0U))
+  {
+    return;
+  }
+
+  SCB_InvalidateDCache_by_Addr((void *)aligned_addr, (int32_t)(end_addr - aligned_addr));
+  __DSB();
+  __ISB();
+}
+
+static uint32_t AppCamera_Rgb565Luma(uint32_t pixel)
+{
+  uint32_t r = (pixel >> 11) & 0x1FU;
+  uint32_t g = (pixel >> 5) & 0x3FU;
+  uint32_t b = pixel & 0x1FU;
+
+  return (r * 2U) + g + (b * 2U);
+}
+
+static void AppCamera_SampleFrame(uint32_t frame_addr)
+{
+  uint32_t min_pixel = 0xffffU;
+  uint32_t max_pixel = 0U;
+  uint32_t sum_pixel = 0U;
+  uint32_t non_dark_count = 0U;
+  uint32_t change_count = 0U;
+  uint32_t previous_pixel = 0xffffffffU;
+  uint32_t center_pixel = 0U;
+  uint32_t sample_count = 0U;
+  uint32_t line_pitch = g_app_camera_status.line_pitch;
+  uint32_t output_bpp = g_app_camera_status.output_bpp;
+
+  if ((frame_addr == 0U) || (line_pitch == 0U) || (output_bpp == 0U))
+  {
+    return;
+  }
+
+  for (uint32_t row = 0U; row < APP_CAMERA_FRAME_SAMPLE_GRID; row++)
+  {
+    uint32_t y = (row * (APP_CAMERA_HEIGHT - 1U)) / (APP_CAMERA_FRAME_SAMPLE_GRID - 1U);
+    uint32_t row_addr = frame_addr + (y * line_pitch);
+
+    AppCamera_CacheInvalidate(row_addr, line_pitch);
+
+    for (uint32_t col = 0U; col < APP_CAMERA_FRAME_SAMPLE_GRID; col++)
+    {
+      uint32_t x = (col * (APP_CAMERA_WIDTH - 1U)) / (APP_CAMERA_FRAME_SAMPLE_GRID - 1U);
+      uint32_t pixel;
+
+      if (output_bpp == 2U)
+      {
+        pixel = ((const uint16_t *)(uintptr_t)row_addr)[x];
+        if (AppCamera_Rgb565Luma(pixel) > APP_CAMERA_FRAME_DARK_LUMA)
+        {
+          non_dark_count++;
+        }
+      }
+      else
+      {
+        pixel = ((const uint8_t *)(uintptr_t)row_addr)[x];
+        if (pixel > APP_CAMERA_FRAME_DARK_LUMA)
+        {
+          non_dark_count++;
+        }
+      }
+
+      if (pixel < min_pixel)
+      {
+        min_pixel = pixel;
+      }
+      if (pixel > max_pixel)
+      {
+        max_pixel = pixel;
+      }
+      if ((previous_pixel != 0xffffffffU) && (pixel != previous_pixel))
+      {
+        change_count++;
+      }
+      previous_pixel = pixel;
+      sum_pixel += pixel;
+      sample_count++;
+
+      if ((row == (APP_CAMERA_FRAME_SAMPLE_GRID / 2U)) &&
+          (col == (APP_CAMERA_FRAME_SAMPLE_GRID / 2U)))
+      {
+        center_pixel = pixel;
+      }
+    }
+  }
+
+  if (sample_count == 0U)
+  {
+    return;
+  }
+
+  g_app_camera_frame_sample_addr = frame_addr;
+  g_app_camera_frame_sample_min = min_pixel;
+  g_app_camera_frame_sample_max = max_pixel;
+  g_app_camera_frame_sample_avg = sum_pixel / sample_count;
+  g_app_camera_frame_sample_non_dark_count = non_dark_count;
+  g_app_camera_frame_sample_change_count = change_count;
+  g_app_camera_frame_sample_center = center_pixel;
+  g_app_camera_frame_sample_seq++;
 }
 
 static void AppCamera_CacheCleanInvalidatePreviewRows(void)
@@ -722,6 +843,7 @@ void HAL_DCMIPP_PIPE_FrameEventCallback(DCMIPP_HandleTypeDef *hdcmipp_cb, uint32
 
     g_app_camera_status.completed_frame_addr = completed_addr;
     g_app_camera_completed_addr = completed_addr;
+    AppCamera_SampleFrame(completed_addr);
     if ((g_app_camera_status.flags & APP_CAMERA_FLAG_PREVIEW) != 0U)
     {
       AppCameraDisplay_RequestSwap(completed_addr);

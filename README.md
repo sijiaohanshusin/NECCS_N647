@@ -23,6 +23,9 @@
   writing `g_app_bringup_control_mask`: `0x00` UI only, `0x02` UI+camera,
   `0x06` UI+camera+PCMD, `0x22` UI+camera test pattern, default `0x1f`
   full product path.
+- Camera black-screen diagnosis now has GDB-readable IMX219 register readbacks
+  and sampled framebuffer stats. Compare normal `0x02` against test-pattern
+  `0x22` before changing LTDC or TouchGFX overlay code again.
 - Hardware debug uses the scripted N647 loop first:
 
 ```powershell

@@ -75,6 +75,22 @@ volatile uint32_t g_app_camera_imx219_reset_retry_count = 0U;
 volatile uint32_t g_app_camera_imx219_scan_count = 0U;
 volatile uint32_t g_app_camera_imx219_scan_first_ack = 0xffffffffU;
 volatile uint32_t g_app_camera_imx219_scan_ack_mask[4] = {0U, 0U, 0U, 0U};
+volatile uint32_t g_app_camera_imx219_readback_exck_freq = 0xffffffffU;
+volatile uint32_t g_app_camera_imx219_readback_line_length = 0xffffffffU;
+volatile uint32_t g_app_camera_imx219_readback_frame_length = 0xffffffffU;
+volatile uint32_t g_app_camera_imx219_readback_exposure = 0xffffffffU;
+volatile uint32_t g_app_camera_imx219_readback_analog_gain = 0xffffffffU;
+volatile uint32_t g_app_camera_imx219_readback_digital_gain = 0xffffffffU;
+volatile uint32_t g_app_camera_imx219_readback_x_start = 0xffffffffU;
+volatile uint32_t g_app_camera_imx219_readback_x_end = 0xffffffffU;
+volatile uint32_t g_app_camera_imx219_readback_y_start = 0xffffffffU;
+volatile uint32_t g_app_camera_imx219_readback_y_end = 0xffffffffU;
+volatile uint32_t g_app_camera_imx219_readback_x_output = 0xffffffffU;
+volatile uint32_t g_app_camera_imx219_readback_y_output = 0xffffffffU;
+volatile uint32_t g_app_camera_imx219_readback_binning_h = 0xffffffffU;
+volatile uint32_t g_app_camera_imx219_readback_binning_v = 0xffffffffU;
+volatile uint32_t g_app_camera_imx219_readback_pll_vt_mpy = 0xffffffffU;
+volatile uint32_t g_app_camera_imx219_readback_pll_op_mpy = 0xffffffffU;
 
 static const AppCameraIMX219Reg_t g_imx219_vendor_regs[] =
 {
@@ -287,40 +303,94 @@ static int32_t IMX219_RecordReadback(uint16_t reg, uint8_t width, volatile uint3
   return status;
 }
 
+static void IMX219_RecordReadbackKeep(uint16_t reg,
+                                      uint8_t width,
+                                      volatile uint32_t *destination,
+                                      int32_t *first_status)
+{
+  int32_t status = IMX219_RecordReadback(reg, width, destination);
+
+  if ((status != APP_CAMERA_IMX219_OK) &&
+      (first_status != 0) &&
+      (*first_status == APP_CAMERA_IMX219_OK))
+  {
+    *first_status = status;
+  }
+}
+
 static int32_t IMX219_ReadbackSmokeConfig(void)
 {
-  int32_t status;
+  int32_t critical_status = APP_CAMERA_IMX219_OK;
+  int32_t diagnostic_status = APP_CAMERA_IMX219_OK;
 
-  status = IMX219_RecordReadback(IMX219_REG_CSI_LANE_MODE, 1U,
-                                 &g_app_camera_imx219_readback_lane_mode);
-  if (status != APP_CAMERA_IMX219_OK)
-  {
-    return status;
-  }
+  IMX219_RecordReadbackKeep(IMX219_REG_CSI_LANE_MODE, 1U,
+                            &g_app_camera_imx219_readback_lane_mode,
+                            &critical_status);
+  IMX219_RecordReadbackKeep(IMX219_REG_CSI_DATA_FORMAT_A0, 1U,
+                            &g_app_camera_imx219_readback_data_format0,
+                            &critical_status);
+  IMX219_RecordReadbackKeep(IMX219_REG_CSI_DATA_FORMAT_A1, 1U,
+                            &g_app_camera_imx219_readback_data_format1,
+                            &critical_status);
+  IMX219_RecordReadbackKeep(IMX219_REG_TEST_PATTERN, 2U,
+                            &g_app_camera_imx219_readback_test_pattern,
+                            &critical_status);
+  IMX219_RecordReadbackKeep(IMX219_REG_MODE_SELECT, 1U,
+                            &g_app_camera_imx219_readback_stream,
+                            &critical_status);
+  IMX219_RecordReadbackKeep(IMX219_REG_EXCK_FREQ, 2U,
+                            &g_app_camera_imx219_readback_exck_freq,
+                            &diagnostic_status);
+  IMX219_RecordReadbackKeep(IMX219_REG_LINE_LENGTH_A, 2U,
+                            &g_app_camera_imx219_readback_line_length,
+                            &diagnostic_status);
+  IMX219_RecordReadbackKeep(IMX219_REG_FRM_LENGTH_A, 2U,
+                            &g_app_camera_imx219_readback_frame_length,
+                            &diagnostic_status);
+  IMX219_RecordReadbackKeep(IMX219_REG_INTEGRATION_TIME, 2U,
+                            &g_app_camera_imx219_readback_exposure,
+                            &diagnostic_status);
+  IMX219_RecordReadbackKeep(IMX219_REG_ANALOG_GAIN, 1U,
+                            &g_app_camera_imx219_readback_analog_gain,
+                            &diagnostic_status);
+  IMX219_RecordReadbackKeep(IMX219_REG_DIGITAL_GAIN, 2U,
+                            &g_app_camera_imx219_readback_digital_gain,
+                            &diagnostic_status);
+  IMX219_RecordReadbackKeep(IMX219_REG_X_ADD_STA_A, 2U,
+                            &g_app_camera_imx219_readback_x_start,
+                            &diagnostic_status);
+  IMX219_RecordReadbackKeep(IMX219_REG_X_ADD_END_A, 2U,
+                            &g_app_camera_imx219_readback_x_end,
+                            &diagnostic_status);
+  IMX219_RecordReadbackKeep(IMX219_REG_Y_ADD_STA_A, 2U,
+                            &g_app_camera_imx219_readback_y_start,
+                            &diagnostic_status);
+  IMX219_RecordReadbackKeep(IMX219_REG_Y_ADD_END_A, 2U,
+                            &g_app_camera_imx219_readback_y_end,
+                            &diagnostic_status);
+  IMX219_RecordReadbackKeep(IMX219_REG_X_OUTPUT_SIZE, 2U,
+                            &g_app_camera_imx219_readback_x_output,
+                            &diagnostic_status);
+  IMX219_RecordReadbackKeep(IMX219_REG_Y_OUTPUT_SIZE, 2U,
+                            &g_app_camera_imx219_readback_y_output,
+                            &diagnostic_status);
+  IMX219_RecordReadbackKeep(IMX219_REG_BINNING_MODE_H, 1U,
+                            &g_app_camera_imx219_readback_binning_h,
+                            &diagnostic_status);
+  IMX219_RecordReadbackKeep(IMX219_REG_BINNING_MODE_V, 1U,
+                            &g_app_camera_imx219_readback_binning_v,
+                            &diagnostic_status);
+  IMX219_RecordReadbackKeep(IMX219_REG_PLL_VT_MPY, 2U,
+                            &g_app_camera_imx219_readback_pll_vt_mpy,
+                            &diagnostic_status);
+  IMX219_RecordReadbackKeep(IMX219_REG_PLL_OP_MPY, 2U,
+                            &g_app_camera_imx219_readback_pll_op_mpy,
+                            &diagnostic_status);
 
-  status = IMX219_RecordReadback(IMX219_REG_CSI_DATA_FORMAT_A0, 1U,
-                                 &g_app_camera_imx219_readback_data_format0);
-  if (status != APP_CAMERA_IMX219_OK)
-  {
-    return status;
-  }
-
-  status = IMX219_RecordReadback(IMX219_REG_CSI_DATA_FORMAT_A1, 1U,
-                                 &g_app_camera_imx219_readback_data_format1);
-  if (status != APP_CAMERA_IMX219_OK)
-  {
-    return status;
-  }
-
-  status = IMX219_RecordReadback(IMX219_REG_TEST_PATTERN, 2U,
-                                 &g_app_camera_imx219_readback_test_pattern);
-  if (status != APP_CAMERA_IMX219_OK)
-  {
-    return status;
-  }
-
-  return IMX219_RecordReadback(IMX219_REG_MODE_SELECT, 1U,
-                               &g_app_camera_imx219_readback_stream);
+  g_app_camera_imx219_readback_status =
+      (uint32_t)((critical_status != APP_CAMERA_IMX219_OK) ?
+                 critical_status : diagnostic_status);
+  return critical_status;
 }
 
 static void IMX219_PowerCycle(uint32_t off_delay_ms, uint32_t on_delay_ms)
@@ -482,8 +552,7 @@ int32_t AppCameraIMX219_SetStream(uint8_t enable)
   status = IMX219_WriteReg(IMX219_REG_MODE_SELECT, (enable != 0U) ? 0x0001U : 0x0000U, 1U);
   if (status == APP_CAMERA_IMX219_OK)
   {
-    status = IMX219_RecordReadback(IMX219_REG_MODE_SELECT, 1U,
-                                   &g_app_camera_imx219_readback_stream);
+    status = IMX219_ReadbackSmokeConfig();
   }
 
   return status;
@@ -497,9 +566,13 @@ int32_t AppCameraIMX219_SetTestPattern(uint8_t enable)
   status = IMX219_WriteReg(IMX219_REG_TEST_PATTERN, value, 2U);
   if (status == APP_CAMERA_IMX219_OK)
   {
-    status = IMX219_RecordReadback(IMX219_REG_TEST_PATTERN, 2U,
-                                   &g_app_camera_imx219_readback_test_pattern);
+    status = IMX219_ReadbackSmokeConfig();
   }
 
   return status;
+}
+
+int32_t AppCameraIMX219_UpdateDiagnostics(void)
+{
+  return IMX219_ReadbackSmokeConfig();
 }

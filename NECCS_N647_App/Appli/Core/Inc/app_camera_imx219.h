@@ -28,6 +28,22 @@ extern volatile uint32_t g_app_camera_imx219_reset_retry_count;
 extern volatile uint32_t g_app_camera_imx219_scan_count;
 extern volatile uint32_t g_app_camera_imx219_scan_first_ack;
 extern volatile uint32_t g_app_camera_imx219_scan_ack_mask[4];
+extern volatile uint32_t g_app_camera_imx219_readback_exck_freq;
+extern volatile uint32_t g_app_camera_imx219_readback_line_length;
+extern volatile uint32_t g_app_camera_imx219_readback_frame_length;
+extern volatile uint32_t g_app_camera_imx219_readback_exposure;
+extern volatile uint32_t g_app_camera_imx219_readback_analog_gain;
+extern volatile uint32_t g_app_camera_imx219_readback_digital_gain;
+extern volatile uint32_t g_app_camera_imx219_readback_x_start;
+extern volatile uint32_t g_app_camera_imx219_readback_x_end;
+extern volatile uint32_t g_app_camera_imx219_readback_y_start;
+extern volatile uint32_t g_app_camera_imx219_readback_y_end;
+extern volatile uint32_t g_app_camera_imx219_readback_x_output;
+extern volatile uint32_t g_app_camera_imx219_readback_y_output;
+extern volatile uint32_t g_app_camera_imx219_readback_binning_h;
+extern volatile uint32_t g_app_camera_imx219_readback_binning_v;
+extern volatile uint32_t g_app_camera_imx219_readback_pll_vt_mpy;
+extern volatile uint32_t g_app_camera_imx219_readback_pll_op_mpy;
 
 typedef struct
 {
@@ -40,6 +56,7 @@ typedef struct
 int32_t AppCameraIMX219_Init(const AppCameraIMX219Config_t *config, uint16_t *chip_id);
 int32_t AppCameraIMX219_SetStream(uint8_t enable);
 int32_t AppCameraIMX219_SetTestPattern(uint8_t enable);
+int32_t AppCameraIMX219_UpdateDiagnostics(void);
 
 #ifdef __cplusplus
 }

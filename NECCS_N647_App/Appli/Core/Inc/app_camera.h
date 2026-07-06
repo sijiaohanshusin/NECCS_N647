@@ -148,6 +148,14 @@ extern volatile uint32_t g_app_camera_dcmipp_p0fctcr;
 extern volatile uint32_t g_app_camera_dcmipp_p0dccntr;
 extern volatile uint32_t g_app_camera_dcmipp_p0dclmtr;
 extern volatile uint32_t g_app_camera_dcmipp_p0ppcr;
+extern volatile uint32_t g_app_camera_frame_sample_addr;
+extern volatile uint32_t g_app_camera_frame_sample_min;
+extern volatile uint32_t g_app_camera_frame_sample_max;
+extern volatile uint32_t g_app_camera_frame_sample_avg;
+extern volatile uint32_t g_app_camera_frame_sample_non_dark_count;
+extern volatile uint32_t g_app_camera_frame_sample_change_count;
+extern volatile uint32_t g_app_camera_frame_sample_center;
+extern volatile uint32_t g_app_camera_frame_sample_seq;
 
 int32_t AppCamera_Init(void);
 int32_t AppCamera_StartSmoke(void);

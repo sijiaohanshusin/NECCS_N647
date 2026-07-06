@@ -103,6 +103,24 @@ powershell -ExecutionPolicy Bypass -File .\tools\debug\flash_n647_release.ps1 -B
   `LTDC_Layer2->CFBAR`.
 - Camera: `g_app_camera_frame_count`, `g_app_camera_ltdc_swap_count`,
   `g_app_camera_display_flags`, `g_app_camera_ltdc_error_count`.
+- Camera frame stats: `g_app_camera_frame_sample_addr`,
+  `g_app_camera_frame_sample_seq`, `g_app_camera_frame_sample_min`,
+  `g_app_camera_frame_sample_max`, `g_app_camera_frame_sample_avg`,
+  `g_app_camera_frame_sample_non_dark_count`,
+  `g_app_camera_frame_sample_change_count`,
+  `g_app_camera_frame_sample_center`.
+- IMX219 readback: `g_app_camera_imx219_readback_status`,
+  `g_app_camera_imx219_readback_lane_mode`,
+  `g_app_camera_imx219_readback_data_format0/1`,
+  `g_app_camera_imx219_readback_test_pattern`,
+  `g_app_camera_imx219_readback_stream`,
+  `g_app_camera_imx219_readback_exck_freq`,
+  `g_app_camera_imx219_readback_line_length`,
+  `g_app_camera_imx219_readback_frame_length`,
+  `g_app_camera_imx219_readback_exposure`,
+  `g_app_camera_imx219_readback_analog_gain`,
+  `g_app_camera_imx219_readback_digital_gain`,
+  crop/output/binning readbacks, and PLL multiplier readbacks.
 - Touch/I2C: `g_touch`, `g_app_i2c2_snapshot`,
   `g_app_i2c2_hal_restore_count`, `g_app_i2c2_hal_recover_request_count`.
 - PCMD: `s_snapshot` in `app_pcmd_capture.c`, `s_bus_a_rx`, `s_bus_b_rx`,
@@ -179,3 +197,13 @@ powershell -ExecutionPolicy Bypass -File .\tools\debug\flash_n647_release.ps1 -B
   means LTDC layer order and color-key hole are working in the test-pattern
   path; normal live camera black should be chased in sensor exposure/output
   configuration before changing the UI overlay path again.
+- 2026-07-06 added permanent camera diagnostics: IMX219 readbacks after
+  init/stream/test-pattern and 8x8 sampled framebuffer stats on each DCMIPP
+  frame callback. Debug build passed with `0 errors / 0 warnings`.
+- 2026-07-06 RAM Debug after adding camera diagnostics was blocked by target
+  connection, not by a firmware assertion: normal OpenOCD reported
+  `unable to connect to the target`; connect-under-reset/probe then reported
+  `STLINK V0J8S0 (API v0) VID:PID 0000:0000` and still timed out waiting for
+  GDB port `3333`. Before the next RAM-debug attempt, power-cycle or replug the
+  ST-LINK/target and re-run `n647_debug_env.ps1 -CheckOnly` followed by
+  `debug_n647_ram.ps1 -ConnectUnderReset -SkipBuild -Batch`.
