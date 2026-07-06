@@ -33,6 +33,27 @@ powershell -ExecutionPolicy Bypass -File .\tools\debug\n647_debug_env.ps1 -Check
 powershell -ExecutionPolicy Bypass -File .\tools\debug\debug_n647_ram.ps1 -Batch
 ```
 
+- If AP0 is visible but AP1/core access is stuck, use the H7 relay helper in
+  `tools/usb_power_relay/h7_relay_controller/` before changing firmware. The
+  verified COM5 path is:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\usb_power_relay\h7_relay_controller\usb_power_cycle_h7.ps1 -Port COM5 -Action Status
+powershell -ExecutionPolicy Bypass -File .\tools\usb_power_relay\h7_relay_controller\usb_power_cycle_h7.ps1 -Port COM5 -Action Cycle -OffMs 5000
+```
+
+- 2026-07-06 relay observation: `OFF` made PB1 high and the relay actuated, but
+  Windows still listed the ST-LINK; CubeProgrammer showed the target AP count
+  drop to `0`. Treat this wiring as target/target-side power recovery, not a
+  guaranteed ST-LINK USB re-enumeration.
+- For N647 RAM Debug recovery, connect-under-reset uses a local OpenOCD RAM cfg
+  override so GDB attach performs a plain `halt` instead of the stock
+  `reset init`, which times out on this board. The verified command is:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\tools\debug\debug_n647_ram.ps1 -ConnectUnderReset -SkipBuild -Batch
+```
+
 - Release flashing is allowed only after RAM Debug passes:
 
 ```powershell

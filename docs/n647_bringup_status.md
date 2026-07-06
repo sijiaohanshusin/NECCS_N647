@@ -27,6 +27,13 @@ the same failures.
   before blaming application code.
 - AP0 connect with AP1/core-ID failure means SWD is physically present but the
   core debug AP is inaccessible; power-cycle/reset/debug-auth state first.
+- A software ST-LINK restart may not cut USB VBUS or target power. For remote
+  recovery, use the H7 relay helper in
+  `tools/usb_power_relay/h7_relay_controller/`. In the current lab wiring,
+  relay `OFF` keeps the ST-LINK enumerated in Windows but drops CubeProgrammer
+  target access-port count to `0`, so it is not a guaranteed ST-LINK USB VBUS
+  cut. Add or rewire a second relay if full ST-LINK USB re-enumeration is
+  required.
 
 ## Bring-Up Order
 
@@ -83,6 +90,11 @@ If the target cannot halt normally:
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\tools\debug\debug_n647_ram.ps1 -ConnectUnderReset -Batch
 ```
+
+The local RAM OpenOCD cfg overrides the stock STM32N6 GDB attach hook in
+connect-under-reset mode. The stock hook runs `reset init`, which times out on
+this board even though a subsequent `halt` works; the override keeps attach to a
+plain `halt`, then GDB performs the normal RAM load/reset sequence.
 
 Classify target state when boot behavior is ambiguous:
 
@@ -209,3 +221,21 @@ powershell -ExecutionPolicy Bypass -File .\tools\debug\flash_n647_release.ps1 -B
   GDB port `3333`. Before the next RAM-debug attempt, power-cycle or replug the
   ST-LINK/target and re-run `n647_debug_env.ps1 -CheckOnly` followed by
   `debug_n647_ram.ps1 -ConnectUnderReset -SkipBuild -Batch`.
+- 2026-07-06 H7 relay controller on COM5 verified after flashing standalone H7
+  relay firmware: `status`, `off`, `on`, `test`, and `cycle 5000` all returned
+  CLI responses. `off` reports `relay state=USB_OFF ... pb1=1`, `on` reports
+  `relay state=USB_ON ... pb1=0`. The Windows helper script now leaves DTR/RTS
+  deasserted by default.
+- 2026-07-06 relay OFF test: ST-LINK stayed visible in Windows and
+  CubeProgrammer still listed the probe, but access-port count dropped from `3`
+  to `0`. After ON, access-port count returned to `3`; AP0 and AP1 both
+  connected under reset at 100 kHz.
+- 2026-07-06 direct OpenOCD telnet probe showed the root of the RAM Debug
+  failure: `reset init` timed out, but a following `halt` succeeded and stopped
+  the core in BootROM at `pc=0x18003514`, `msp=0x341037a8`.
+- 2026-07-06 patched `tools/debug/n647_openocd_ram.cfg` so
+  connect-under-reset GDB attach uses `halt` instead of the stock STM32N6
+  `reset init` hook. Validation passed:
+  `debug_n647_ram.ps1 -ConnectUnderReset -SkipBuild -Batch -SwdKHz 100` loaded
+  the Debug ELF to `0x3400...` and stopped at `main()`, then the same command at
+  default 4 MHz also passed with PC `0x3400ebde` and SP `0x341fffe8`.
