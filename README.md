@@ -11,6 +11,14 @@
   and validation results live in `docs/n647_bringup_status.md`.
 - Current firmware exposes `g_app_bringup_snapshot` and `g_app_i2c2_snapshot`
   for GDB-first diagnosis before changing UI or algorithm code.
+- DMA nodes and RX buffers for SAI/GPDMA must be inside the MPU-configured
+  `.noncacheable` region before DCache is enabled. If `HAL_DMA_ERROR_USE`
+  appears on the first SAI callback, check MPU/cache coherency before changing
+  PCMD registers.
+- PCMD online does not mean MIC audio is valid. As of the latest RAM debug run,
+  PCMD I2C config and SAI DMA are alive, but raw samples show near-rail PDM
+  fault patterns. Do not debug SRP/heatmap until MICS silence is mostly
+  `<= -50 dBFS` and tap tests follow the expected bus/slot.
 - Hardware debug uses the scripted N647 loop first:
 
 ```powershell

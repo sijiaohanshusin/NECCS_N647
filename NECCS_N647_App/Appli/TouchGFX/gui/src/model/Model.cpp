@@ -171,7 +171,10 @@ typedef struct
     uint32_t dropped_halves;
     uint32_t sync_miss_count;
     uint32_t raw_quality_flags;
+    uint32_t raw_rail_sample_count;
+    uint32_t raw_total_sample_count;
     uint16_t published_fps_x10;
+    uint16_t raw_rail_percent_x10;
     int8_t raw_peak_dbfs;
     int8_t raw_avg_dbfs;
 } AppPcmdCaptureSnapshot_t;
@@ -381,6 +384,12 @@ void Model::tick()
     if (pcmd.latest_frame_valid != 0U)
     {
         snapshot.pcmdFlags |= APP_UI_PCMD_FLAG_FRAME_VALID;
+    }
+    if ((pcmd.latest_frame_valid != 0U) ||
+        (pcmd.started != 0U) ||
+        (pcmd.raw_active_slot_count != 0U) ||
+        (pcmd.raw_quality_flags != 0U))
+    {
         for (uint32_t i = 0U; i < 32U; ++i)
         {
             snapshot.micLevel[i] = clampPercent(pcmd.mic_level[i]);
@@ -395,6 +404,10 @@ void Model::tick()
     {
         snapshot.pcmdFlags |= APP_UI_PCMD_FLAG_RAW_VALID;
     }
+    if ((pcmd.raw_quality_flags & APP_UI_PCMD_RAW_FLAG_RAIL_FAULT) != 0U)
+    {
+        snapshot.pcmdFlags |= APP_UI_PCMD_FLAG_RAW_FAULT;
+    }
     snapshot.pcmdDebugEnabled = pcmd.debug_ui_enabled;
     snapshot.pcmdDevicePresentMask = pcmd.device_present_mask;
     snapshot.pcmdDeviceConfigOkMask = pcmd.device_config_ok_mask;
@@ -403,7 +416,10 @@ void Model::tick()
     snapshot.pcmdDroppedHalves = pcmd.dropped_halves;
     snapshot.pcmdSyncMissCount = pcmd.sync_miss_count;
     snapshot.pcmdRawQualityFlags = pcmd.raw_quality_flags;
+    snapshot.pcmdRawRailSampleCount = pcmd.raw_rail_sample_count;
+    snapshot.pcmdRawTotalSampleCount = pcmd.raw_total_sample_count;
     snapshot.pcmdFpsX10 = pcmd.published_fps_x10;
+    snapshot.pcmdRawRailPercentX10 = pcmd.raw_rail_percent_x10;
     snapshot.pcmdRawActiveSlotCount = pcmd.raw_active_slot_count;
     snapshot.pcmdRawPeakDbfs = pcmd.raw_peak_dbfs;
     snapshot.pcmdRawAvgDbfs = pcmd.raw_avg_dbfs;

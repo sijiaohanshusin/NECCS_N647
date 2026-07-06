@@ -48,6 +48,10 @@ the same failures.
 - PCMD/SAI timing keeps the `7e12d5d` facts: SAI audio clock before SAI init,
   SAI RX on rising edge, circular linked-list GPDMA, SAI A master before SAI B,
   and PCMD config only after BCLK/FSYNC are stable.
+- All SAI/GPDMA linked-list nodes and RX buffers must be in a real MPU
+  non-cacheable region before DCache is enabled. A section name alone is not
+  enough; without the MPU region GPDMA can read stale linked-list nodes and
+  raise `HAL_DMA_ERROR_USE`.
 - UI must remain responsive: TouchGFX priority stays above bringup, PCMD, and
   acoustic threads. Background threads must sleep/yield between retries.
 - MICS page must show real dBFS derived from DC-removed raw slot samples, not a
@@ -102,6 +106,10 @@ powershell -ExecutionPolicy Bypass -File .\tools\debug\flash_n647_release.ps1 -B
 - Tap test: tapping one physical MIC must produce a clear rise in one expected
   raw bus/slot and logical MIC. If all slots move together or random unrelated
   slots move, do not debug SRP yet.
+- If raw buffers contain many near-rail samples (`0x7fff`, `0x8000`) and the
+  average floor is around `-10 dBFS`, treat the PCMD/SAI bus as alive but the
+  PDM input side as not yet valid. Check digital MIC supply, PDMCLK reach,
+  PDMDIN wiring/pull state, and MIC L/R edge selection before touching SRP.
 - Camera: IMAGE page must show live camera before acoustic overlay is enabled.
 - Touch: navigation must remain responsive while PCMD retries and acoustic
   service are running.
@@ -116,13 +124,30 @@ powershell -ExecutionPolicy Bypass -File .\tools\debug\flash_n647_release.ps1 -B
   passed, `0 errors / 0 warnings`.
 - 2026-07-06 `debug_n647_ram.ps1 -SkipBuild -Batch`: passed. ELF downloaded to
   `0x3400...` RAM and stopped at `main()` with PC in AXI SRAM.
-- Runtime breakpoint at `AppPcmdCapture_ProcessHalf()` did not hit before the
-  manual stop. GDB interruption showed the target in
-  `I2C_IsErrorOccurred()` on `hi2c2`, waiting for I2C STOP/error handling.
-  Treat shared I2C2 contention/long PCMD transactions as the current first
-  runtime suspect before deeper SAI/audio debugging.
-- Follow-up code now exposes `g_app_i2c2_snapshot` and shortens PCMD3180 I2C
-  retries/timeouts so failed PCMD config should no longer hold I2C2 long enough
-  to freeze touch/UI. The next board run should check `max_hold_ms`,
-  `lock_fail_count`, `recover_request_count`, PCMD present/config masks, and
-  SAI half/full counters.
+- 2026-07-06 first SAI callback before MPU fix was
+  `HAL_SAI_ErrorCallback`: SAI error `0x80`, GPDMA error `0x04`
+  (`HAL_DMA_ERROR_USE`), no half/full callbacks. GDB showed the CPU-visible DMA
+  linked-list node was populated, so the likely root cause was DCache coherency.
+- 2026-07-06 restored `App_MPU_ConfigNonCacheable()` before I/D cache enable and
+  kept `.noncacheable` covering `s_bus_a_rx`, `s_bus_b_rx`, and
+  `Node_GPDMA1_Channel0/1`. Also removed the duplicate runtime DMA channel
+  attribute call from the SAI MSP path.
+- 2026-07-06 after the MPU fix, first SAI callback was
+  `HAL_SAI_RxHalfCpltCallback`; GPDMA error was `0`.
+- 2026-07-06 PCMD/SAI long run: `present=0xf`, `cfg=0xf`, `status=0xf`,
+  `start_status=0`, SAI A/B half/full counters increased and SAI/DMA errors
+  stayed `0`. PCMD registers read back as expected: U1/U3 slots `0..7`,
+  U2/U4 slots `8..15`, `PWR=0x60`, `PDMCLK=0x40`, `GPO=0x41`, `IN/OUT=0xff`,
+  `ASI_STS=0x48` (48 kHz, 256 BCLK/FSYNC ratio).
+- 2026-07-06 current blocker moved to PDM/raw validity: raw buffers contain many
+  near-rail samples (`0x7fff/0x8000`) and silence-like bench conditions measured
+  roughly `peak=-6 dBFS`, `avg=-9 dBFS`. This is not believable microphone
+  audio. Firmware now flags this as `RAW_FLAG_RAIL_FAULT`, keeps MICS diagnostic
+  levels visible, and blocks publication of `AppAudioFrame_t` to SRP until raw
+  rail fault clears.
+- 2026-07-06 RAM Debug `RAW_GATE` breakpoint after the rail gate patch:
+  `present=0xf`, `cfg=0xf`, `status=0xf`, `start_status=0`, SAI/DMA errors `0`,
+  but `flags=0x37`, `rail=3171/8192`, `rail_x10=387` (38.7%), `peak=-6 dBFS`,
+  `avg=-9 dBFS`, `published=0`, `latest=0`. This is the intended safe state:
+  PCMD/SAI is online, while invalid raw MIC data is visible on MICS diagnostics
+  but not allowed into `AppAudioFrame_t` or SRP.

@@ -119,6 +119,7 @@ static void SystemIsolation_Config(void);
 HAL_StatusTypeDef MX_SDMMC2_SD_Init(void);
 /* USER CODE BEGIN PFP */
 static uint32_t App_HyperRAM_SelfTest(void);
+static void App_MPU_ConfigNonCacheable(void);
 static void App_RecoverHalTick(void);
 static void App_EnableBringUpModules(void);
 
@@ -127,6 +128,36 @@ static void App_EnableBringUpModules(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 extern const uint32_t g_pfnVectors[];
+extern uint32_t __snoncacheable;
+extern uint32_t __enoncacheable;
+
+static void App_MPU_ConfigNonCacheable(void)
+{
+  const uint32_t primask = __get_PRIMASK();
+  MPU_Attributes_InitTypeDef attributes = {0};
+  MPU_Region_InitTypeDef region = {0};
+
+  __disable_irq();
+  HAL_MPU_Disable();
+
+  attributes.Number = MPU_ATTRIBUTES_NUMBER7;
+  attributes.Attributes = INNER_OUTER(MPU_NOT_CACHEABLE);
+  HAL_MPU_ConfigMemoryAttributes(&attributes);
+
+  region.Enable = MPU_REGION_ENABLE;
+  region.Number = MPU_REGION_NUMBER7;
+  region.AttributesIndex = MPU_ATTRIBUTES_NUMBER7;
+  region.BaseAddress = (uint32_t)&__snoncacheable;
+  region.LimitAddress = (uint32_t)&__enoncacheable - 1U;
+  region.AccessPermission = MPU_REGION_ALL_RW;
+  region.DisableExec = MPU_INSTRUCTION_ACCESS_DISABLE;
+  region.DisablePrivExec = MPU_PRIV_INSTRUCTION_ACCESS_DISABLE;
+  region.IsShareable = MPU_ACCESS_INNER_SHAREABLE | MPU_ACCESS_OUTER_SHAREABLE;
+  HAL_MPU_ConfigRegion(&region);
+
+  HAL_MPU_Enable(MPU_PRIVILEGED_DEFAULT);
+  __set_PRIMASK(primask);
+}
 
 static void App_RecoverHalTick(void)
 {
@@ -207,6 +238,7 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
+  App_MPU_ConfigNonCacheable();
   App_BootDiag_SetStage(APP_BOOT_STAGE_MAIN_ENTER);
 
   /* USER CODE END 1 */
@@ -764,6 +796,8 @@ HAL_StatusTypeDef MX_SDMMC2_SD_Init(void)
   HAL_RIF_RISC_SetSlaveSecureAttributes(RIF_RISC_PERIPH_INDEX_JPEG, RIF_ATTRIBUTE_SEC | RIF_ATTRIBUTE_PRIV);
   HAL_RIF_RISC_SetSlaveSecureAttributes(RIF_RISC_PERIPH_INDEX_SAI1, RIF_ATTRIBUTE_SEC | RIF_ATTRIBUTE_PRIV);
   HAL_RIF_RISC_SetSlaveSecureAttributes(RIF_RCC_PERIPH_INDEX_GPDMA1, RIF_ATTRIBUTE_SEC | RIF_ATTRIBUTE_PRIV);
+  HAL_RIF_RISC_SetSlaveSecureAttributes(RIF_RCC_PERIPH_INDEX_AXISRAM1, RIF_ATTRIBUTE_SEC | RIF_ATTRIBUTE_PRIV);
+  HAL_RIF_RISC_SetSlaveSecureAttributes(RIF_RCC_PERIPH_INDEX_AXISRAM2, RIF_ATTRIBUTE_SEC | RIF_ATTRIBUTE_PRIV);
 
   /* USER CODE END RIF_Init 1 */
   /* USER CODE BEGIN RIF_Init 2 */

@@ -21,6 +21,9 @@
 #define APP_PCMD_CAPTURE_EVENT_HALF0         0x00000001UL
 #define APP_PCMD_CAPTURE_EVENT_HALF1         0x00000002UL
 #define APP_PCMD_CAPTURE_EVENT_MASK          (APP_PCMD_CAPTURE_EVENT_HALF0 | APP_PCMD_CAPTURE_EVENT_HALF1)
+#define APP_PCMD_CAPTURE_RAIL_ABS_LEVEL      32760
+#define APP_PCMD_CAPTURE_RAIL_FAULT_X10      20U
+#define APP_PCMD_CAPTURE_HIGH_FLOOR_DBFS     (-30)
 
 extern SAI_HandleTypeDef hsai_BlockA1;
 extern SAI_HandleTypeDef hsai_BlockB1;
@@ -246,6 +249,19 @@ static void AppPcmdCapture_ClearPendingDmaEvents(void)
       s_snapshot.stale_event_flush_count++;
     }
   }
+
+  s_snapshot.sai_a_half_count = 0U;
+  s_snapshot.sai_a_full_count = 0U;
+  s_snapshot.sai_b_half_count = 0U;
+  s_snapshot.sai_b_full_count = 0U;
+  s_snapshot.dropped_halves = 0U;
+  s_snapshot.sync_miss_count = 0U;
+  s_snapshot.published_frames = 0U;
+  s_snapshot.published_fps_x10 = 0U;
+  s_snapshot.latest_seq = 0U;
+  s_snapshot.latest_frame_valid = 0U;
+  s_frame_seq = 0U;
+  s_latest_frame_index = 0U;
 }
 
 static void AppPcmdCapture_MarkHalfReady(uint8_t bus, uint8_t half)
@@ -317,8 +333,14 @@ static void AppPcmdCapture_UpdateSlotLevels(uint8_t bus,
     for (uint32_t slot = 0U; slot < APP_PCMD_CAPTURE_SLOTS_PER_BUS; slot++)
     {
       const int16_t sample = interleaved[(frame * APP_PCMD_CAPTURE_SLOTS_PER_BUS) + slot];
+      const int32_t sample_abs = (sample < 0) ? -(int32_t)sample : (int32_t)sample;
       dc_sum[slot] += sample;
       s_snapshot.slot_last_sample[bus][slot] = sample;
+      s_snapshot.raw_total_sample_count++;
+      if (sample_abs >= APP_PCMD_CAPTURE_RAIL_ABS_LEVEL)
+      {
+        s_snapshot.raw_rail_sample_count++;
+      }
     }
   }
 
@@ -390,6 +412,10 @@ static void AppPcmdCapture_UpdateMicLevels(void)
   s_snapshot.raw_avg_dbfs =
       (int8_t)(dbfs_sum / (int32_t)APP_MIC_ARRAY_PHYSICAL_MIC_COUNT);
   s_snapshot.raw_active_slot_count = (active_slots > 255U) ? 255U : (uint8_t)active_slots;
+  s_snapshot.raw_rail_percent_x10 =
+      (s_snapshot.raw_total_sample_count == 0U) ? 0U :
+      (uint16_t)(((uint64_t)s_snapshot.raw_rail_sample_count * 1000ULL) /
+                 (uint64_t)s_snapshot.raw_total_sample_count);
   s_snapshot.raw_quality_flags = 0U;
   if (s_snapshot.device_config_ok_mask == 0x0FU)
   {
@@ -408,13 +434,22 @@ static void AppPcmdCapture_UpdateMicLevels(void)
   {
     s_snapshot.raw_quality_flags |= APP_PCMD_CAPTURE_RAW_FLAG_LOW_NOISE;
   }
+  if (s_snapshot.raw_rail_percent_x10 >= APP_PCMD_CAPTURE_RAIL_FAULT_X10)
+  {
+    s_snapshot.raw_quality_flags |= APP_PCMD_CAPTURE_RAW_FLAG_RAIL_FAULT;
+  }
+  if (s_snapshot.raw_avg_dbfs > APP_PCMD_CAPTURE_HIGH_FLOOR_DBFS)
+  {
+    s_snapshot.raw_quality_flags |= APP_PCMD_CAPTURE_RAW_FLAG_HIGH_FLOOR;
+  }
   s_snapshot.raw_audio_valid =
-      ((s_snapshot.raw_quality_flags & (APP_PCMD_CAPTURE_RAW_FLAG_CONFIG_OK |
-                                        APP_PCMD_CAPTURE_RAW_FLAG_DMA_SYNC |
-                                        APP_PCMD_CAPTURE_RAW_FLAG_NONZERO)) ==
-       (APP_PCMD_CAPTURE_RAW_FLAG_CONFIG_OK |
-        APP_PCMD_CAPTURE_RAW_FLAG_DMA_SYNC |
-        APP_PCMD_CAPTURE_RAW_FLAG_NONZERO)) ? 1U : 0U;
+      (((s_snapshot.raw_quality_flags & (APP_PCMD_CAPTURE_RAW_FLAG_CONFIG_OK |
+                                         APP_PCMD_CAPTURE_RAW_FLAG_DMA_SYNC |
+                                         APP_PCMD_CAPTURE_RAW_FLAG_NONZERO)) ==
+        (APP_PCMD_CAPTURE_RAW_FLAG_CONFIG_OK |
+         APP_PCMD_CAPTURE_RAW_FLAG_DMA_SYNC |
+         APP_PCMD_CAPTURE_RAW_FLAG_NONZERO)) &&
+       ((s_snapshot.raw_quality_flags & APP_PCMD_CAPTURE_RAW_FLAG_RAIL_FAULT) == 0U)) ? 1U : 0U;
 }
 
 static void AppPcmdCapture_UpdateFrameRate(uint32_t now_ms)
@@ -449,6 +484,9 @@ static void AppPcmdCapture_ProcessHalf(uint8_t half)
   AppAudioFrame_t *frame = &s_frame_ring[frame_index];
   float *samples = s_frame_samples[frame_index];
 
+  s_snapshot.raw_rail_sample_count = 0U;
+  s_snapshot.raw_total_sample_count = 0U;
+  s_snapshot.raw_rail_percent_x10 = 0U;
   AppPcmdCapture_UpdateSlotLevels(APP_MIC_ARRAY_BUS_A, bus_a, APP_PCMD_CAPTURE_FRAME_LEN);
   AppPcmdCapture_UpdateSlotLevels(APP_MIC_ARRAY_BUS_B, bus_b, APP_PCMD_CAPTURE_FRAME_LEN);
 

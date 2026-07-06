@@ -110,14 +110,6 @@ static void App_SAI_ConfigCircularRxDma(DMA_HandleTypeDef *dma,
   {
     Error_Handler();
   }
-  if (HAL_DMA_ConfigChannelAttributes(dma,
-                                      DMA_CHANNEL_SEC |
-                                      DMA_CHANNEL_PRIV |
-                                      DMA_CHANNEL_SRC_SEC |
-                                      DMA_CHANNEL_DEST_SEC) != HAL_OK)
-  {
-    Error_Handler();
-  }
   if (HAL_DMAEx_List_LinkQ(dma, list) != HAL_OK)
   {
     Error_Handler();

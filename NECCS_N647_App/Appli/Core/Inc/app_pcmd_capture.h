@@ -28,6 +28,8 @@ extern "C" {
 #define APP_PCMD_CAPTURE_RAW_FLAG_DMA_SYNC   (1UL << 1)
 #define APP_PCMD_CAPTURE_RAW_FLAG_NONZERO    (1UL << 2)
 #define APP_PCMD_CAPTURE_RAW_FLAG_LOW_NOISE  (1UL << 3)
+#define APP_PCMD_CAPTURE_RAW_FLAG_RAIL_FAULT (1UL << 4)
+#define APP_PCMD_CAPTURE_RAW_FLAG_HIGH_FLOOR (1UL << 5)
 
 typedef enum
 {
@@ -79,7 +81,10 @@ typedef struct
   uint32_t latest_seq;
   uint32_t stale_event_flush_count;
   uint32_t raw_quality_flags;
+  uint32_t raw_rail_sample_count;
+  uint32_t raw_total_sample_count;
   uint16_t published_fps_x10;
+  uint16_t raw_rail_percent_x10;
   int8_t raw_peak_dbfs;
   int8_t raw_avg_dbfs;
   uint16_t slot_level[APP_PCMD_CAPTURE_BUS_COUNT][APP_MIC_ARRAY_WIDE32_SLOTS_PER_BUS];

@@ -70,7 +70,18 @@ enum AppUiPcmdFlag
     APP_UI_PCMD_FLAG_STARTED = 0x00000002UL,
     APP_UI_PCMD_FLAG_FRAME_VALID = 0x00000004UL,
     APP_UI_PCMD_FLAG_DEBUG_ENABLED = 0x00000008UL,
-    APP_UI_PCMD_FLAG_RAW_VALID = 0x00000010UL
+    APP_UI_PCMD_FLAG_RAW_VALID = 0x00000010UL,
+    APP_UI_PCMD_FLAG_RAW_FAULT = 0x00000020UL
+};
+
+enum AppUiPcmdRawQualityFlag
+{
+    APP_UI_PCMD_RAW_FLAG_CONFIG_OK = 0x00000001UL,
+    APP_UI_PCMD_RAW_FLAG_DMA_SYNC = 0x00000002UL,
+    APP_UI_PCMD_RAW_FLAG_NONZERO = 0x00000004UL,
+    APP_UI_PCMD_RAW_FLAG_LOW_NOISE = 0x00000008UL,
+    APP_UI_PCMD_RAW_FLAG_RAIL_FAULT = 0x00000010UL,
+    APP_UI_PCMD_RAW_FLAG_HIGH_FLOOR = 0x00000020UL
 };
 
 enum AppUiAcousticFlag
@@ -105,6 +116,8 @@ struct AppUiSnapshot
     uint32_t pcmdDroppedHalves;
     uint32_t pcmdSyncMissCount;
     uint32_t pcmdRawQualityFlags;
+    uint32_t pcmdRawRailSampleCount;
+    uint32_t pcmdRawTotalSampleCount;
     uint32_t acousticFlags;
     uint32_t acousticInputSeq;
     uint32_t acousticOutputSeq;
@@ -127,6 +140,7 @@ struct AppUiSnapshot
     uint16_t mediaPreviewWidth;
     uint16_t mediaPreviewHeight;
     uint16_t pcmdFpsX10;
+    uint16_t pcmdRawRailPercentX10;
     int16_t thetaDeg;
     int16_t phiDeg;
     uint8_t activeScreen;

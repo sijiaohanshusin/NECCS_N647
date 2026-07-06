@@ -674,6 +674,9 @@ void TemplateView::refreshMicPage(const AppUiSnapshot& snapshot)
     const bool pcmdStarted = ((snapshot.pcmdFlags & APP_UI_PCMD_FLAG_STARTED) != 0U);
     const bool pcmdDebug = ((snapshot.pcmdFlags & APP_UI_PCMD_FLAG_DEBUG_ENABLED) != 0U);
     const bool pcmdRawValid = ((snapshot.pcmdFlags & APP_UI_PCMD_FLAG_RAW_VALID) != 0U);
+    const bool pcmdRawFault = ((snapshot.pcmdFlags & APP_UI_PCMD_FLAG_RAW_FAULT) != 0U);
+    const bool pcmdHighFloor =
+        ((snapshot.pcmdRawQualityFlags & APP_UI_PCMD_RAW_FLAG_HIGH_FLOOR) != 0U);
 
     for (uint32_t i = 0U; i < MicCount; ++i)
     {
@@ -700,7 +703,8 @@ void TemplateView::refreshMicPage(const AppUiSnapshot& snapshot)
     (void)snprintf(text, sizeof(text), "PEAK %ddB", static_cast<int>(peakDbfs));
     micSummaryLabel[2].setText(text);
 
-    micSummaryLabel[0].setText(pcmdRawValid ? "32 MIC PCMD RAW" : "32 MIC RAW WAIT");
+    micSummaryLabel[0].setText(pcmdRawValid ? "32 MIC PCMD RAW" :
+                               (pcmdRawFault ? "32 MIC RAW FAULT" : "32 MIC RAW WAIT"));
     if (pcmdDebug)
     {
         (void)snprintf(text, sizeof(text), "P%X C%X R%lX",
@@ -708,6 +712,17 @@ void TemplateView::refreshMicPage(const AppUiSnapshot& snapshot)
                        snapshot.pcmdDeviceConfigOkMask,
                        static_cast<unsigned long>(snapshot.pcmdRawQualityFlags & 0xFFU));
         micSummaryLabel[3].setText(text);
+    }
+    else if (pcmdRawFault)
+    {
+        (void)snprintf(text, sizeof(text), "PCMD RAIL %u.%u%%",
+                       static_cast<unsigned int>(snapshot.pcmdRawRailPercentX10 / 10U),
+                       static_cast<unsigned int>(snapshot.pcmdRawRailPercentX10 % 10U));
+        micSummaryLabel[3].setText(text);
+    }
+    else if (pcmdHighFloor && !pcmdRawValid)
+    {
+        micSummaryLabel[3].setText("PCMD FLOOR HIGH");
     }
     else if (pcmdLive)
     {
