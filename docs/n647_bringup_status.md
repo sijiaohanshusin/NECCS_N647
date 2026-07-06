@@ -200,6 +200,8 @@ powershell -ExecutionPolicy Bypass -File .\tools\debug\flash_n647_release.ps1 -B
 - 2026-07-06 added permanent camera diagnostics: IMX219 readbacks after
   init/stream/test-pattern and 8x8 sampled framebuffer stats on each DCMIPP
   frame callback. Debug build passed with `0 errors / 0 warnings`.
+- 2026-07-06 Release build after camera diagnostics also passed with
+  `0 errors / 0 warnings`; postbuild regenerated `Binary/appli.hex`.
 - 2026-07-06 RAM Debug after adding camera diagnostics was blocked by target
   connection, not by a firmware assertion: normal OpenOCD reported
   `unable to connect to the target`; connect-under-reset/probe then reported
