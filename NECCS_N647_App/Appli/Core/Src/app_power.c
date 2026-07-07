@@ -491,32 +491,3 @@ void AppPower_GetSnapshot(AppPowerSnapshot_t *snapshot)
     *snapshot = g_app_power_snapshot;
   }
 }
-
-int32_t AppPower_SetCharging(uint8_t enabled, uint32_t current_ma)
-{
-  BQ25730_StatusTypeDef status;
-
-  if (g_app_power_snapshot.probe_status != BQ25730_OK)
-  {
-    return BQ25730_ERROR;
-  }
-
-  status = BQ25730_SetChargeVoltageMv(&g_app_bq25730, APP_POWER_3S_CHARGE_VOLTAGE_MV);
-  g_app_power_snapshot.last_i2c_status = (int32_t)status;
-  if (status != BQ25730_OK)
-  {
-    AppPower_UpdateDebugGlobals();
-    return (int32_t)status;
-  }
-
-  if (enabled == 0U)
-  {
-    current_ma = 0U;
-  }
-
-  status = BQ25730_SetChargeCurrentMa(&g_app_bq25730, current_ma);
-  g_app_power_snapshot.last_i2c_status = (int32_t)status;
-  AppPower_UpdateDebugGlobals();
-
-  return (int32_t)status;
-}

@@ -83,7 +83,6 @@ extern volatile int32_t g_app_power_remaining_mah_x1000;
 void AppPower_Init(void);
 void AppPower_Poll(uint32_t elapsed_ms);
 void AppPower_GetSnapshot(AppPowerSnapshot_t *snapshot);
-int32_t AppPower_SetCharging(uint8_t enabled, uint32_t current_ma);
 
 #ifdef __cplusplus
 }
