@@ -191,7 +191,7 @@ uint16_t AppTextLabel::typedTextId() const
 {
     if (style == STYLE_TITLE)
     {
-        return T_WC_TITLE_LEFT;
+        return (alignment == ALIGN_CENTER) ? T_WC_TITLE_CENTER : T_WC_TITLE_LEFT;
     }
 
     if (style == STYLE_BODY)
@@ -422,3 +422,169 @@ touchgfx::Rect AppRgb565Preview::getSolidRect() const
 {
     return touchgfx::Rect(0, 0, getWidth(), getHeight());
 }
+
+namespace
+{
+uint16_t toRgb565(touchgfx::colortype color)
+{
+    const uint8_t r = touchgfx::Color::getRed(color);
+    const uint8_t g = touchgfx::Color::getGreen(color);
+    const uint8_t b = touchgfx::Color::getBlue(color);
+    return static_cast<uint16_t>(((r & 0xF8U) << 8) | ((g & 0xFCU) << 3) | (b >> 3));
+}
+
+uint16_t blendRgb565(uint16_t background, uint16_t foreground, uint8_t alpha)
+{
+    const uint32_t inverse = 255U - alpha;
+    const uint32_t bgR = (background >> 11) & 0x1FU;
+    const uint32_t bgG = (background >> 5) & 0x3FU;
+    const uint32_t bgB = background & 0x1FU;
+    const uint32_t fgR = (foreground >> 11) & 0x1FU;
+    const uint32_t fgG = (foreground >> 5) & 0x3FU;
+    const uint32_t fgB = foreground & 0x1FU;
+    const uint32_t r = ((bgR * inverse) + (fgR * alpha)) / 255U;
+    const uint32_t g = ((bgG * inverse) + (fgG * alpha)) / 255U;
+    const uint32_t b = ((bgB * inverse) + (fgB * alpha)) / 255U;
+    return static_cast<uint16_t>((r << 11) | (g << 5) | b);
+}
+
+int32_t isqrt32(int32_t value)
+{
+    if (value <= 0)
+    {
+        return 0;
+    }
+
+    int32_t result = 0;
+    int32_t bit = 1 << 30;
+    while (bit > value)
+    {
+        bit >>= 2;
+    }
+    while (bit != 0)
+    {
+        if (value >= result + bit)
+        {
+            value -= result + bit;
+            result = (result >> 1) + bit;
+        }
+        else
+        {
+            result >>= 1;
+        }
+        bit >>= 2;
+    }
+    return result;
+}
+}
+
+AppRoundedPanel::AppRoundedPanel()
+    : fillColor(touchgfx::Color::getColorFromRGB(15, 23, 35)),
+      borderColor(touchgfx::Color::getColorFromRGB(36, 53, 74)),
+      radius(10U),
+      borderEnabled(false)
+{
+}
+
+void AppRoundedPanel::setStyle(touchgfx::colortype fill, uint8_t cornerRadius)
+{
+    fillColor = fill;
+    radius = (cornerRadius > MaxRadius) ? MaxRadius : cornerRadius;
+    invalidate();
+}
+
+void AppRoundedPanel::setBorder(touchgfx::colortype border, bool enabled)
+{
+    borderColor = border;
+    borderEnabled = enabled;
+    invalidate();
+}
+
+void AppRoundedPanel::setFillColor(touchgfx::colortype fill)
+{
+    if (fillColor != fill)
+    {
+        fillColor = fill;
+        invalidate();
+    }
+}
+
+void AppRoundedPanel::draw(const touchgfx::Rect& area) const
+{
+    const int16_t w = getWidth();
+    const int16_t h = getHeight();
+    int16_t r = static_cast<int16_t>(radius);
+
+    if ((r * 2) > w)
+    {
+        r = w / 2;
+    }
+    if ((r * 2) > h)
+    {
+        r = h / 2;
+    }
+
+    for (int16_t y = area.y; y < area.bottom(); ++y)
+    {
+        if ((y < 0) || (y >= h))
+        {
+            continue;
+        }
+
+        int16_t inset = 0;
+        bool cornerRow = false;
+        if (y < r)
+        {
+            const int32_t k = r - 1 - y;
+            inset = static_cast<int16_t>(r - isqrt32(((int32_t)r * r) - (k * k)));
+            cornerRow = true;
+        }
+        else if (y >= (h - r))
+        {
+            const int32_t k = y - (h - r);
+            inset = static_cast<int16_t>(r - isqrt32(((int32_t)r * r) - (k * k)));
+            cornerRow = true;
+        }
+
+        const int16_t spanX = inset;
+        const int16_t spanW = static_cast<int16_t>(w - (2 * inset));
+        if (spanW <= 0)
+        {
+            continue;
+        }
+
+        fillLocalRect(*this, area, touchgfx::Rect(spanX, y, spanW, 1), fillColor);
+
+        if (borderEnabled)
+        {
+            if (cornerRow || (y == 0) || (y == (h - 1)))
+            {
+                if ((y == 0) || (y == (h - 1)))
+                {
+                    fillLocalRect(*this, area, touchgfx::Rect(spanX, y, spanW, 1), borderColor);
+                }
+                else
+                {
+                    fillLocalRect(*this, area, touchgfx::Rect(spanX, y, 2, 1), borderColor);
+                    fillLocalRect(*this, area, touchgfx::Rect(static_cast<int16_t>(spanX + spanW - 2), y, 2, 1), borderColor);
+                }
+            }
+            else
+            {
+                fillLocalRect(*this, area, touchgfx::Rect(0, y, 1, 1), borderColor);
+                fillLocalRect(*this, area, touchgfx::Rect(static_cast<int16_t>(w - 1), y, 1, 1), borderColor);
+            }
+        }
+    }
+}
+
+touchgfx::Rect AppRoundedPanel::getSolidRect() const
+{
+    const int16_t r = static_cast<int16_t>(radius);
+    if (getHeight() <= (2 * r))
+    {
+        return touchgfx::Rect();
+    }
+    return touchgfx::Rect(0, r, getWidth(), static_cast<int16_t>(getHeight() - (2 * r)));
+}
+

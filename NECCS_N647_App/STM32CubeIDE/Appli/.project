@@ -1602,29 +1602,9 @@
 			<locationURI>PARENT-2-PROJECT_LOC/Appli/TouchGFX/generated/texts/src/TypedTextDatabase.cpp</locationURI>
 		</link>
 		<link>
-			<name>Application/User/generated/image_ui_battery.cpp</name>
-			<type>1</type>
-			<locationURI>PARENT-2-PROJECT_LOC/Appli/TouchGFX/generated/images/src/image_ui_battery.cpp</locationURI>
-		</link>
-		<link>
-			<name>Application/User/generated/image_ui_camera.cpp</name>
-			<type>1</type>
-			<locationURI>PARENT-2-PROJECT_LOC/Appli/TouchGFX/generated/images/src/image_ui_camera.cpp</locationURI>
-		</link>
-		<link>
-			<name>Application/User/generated/image_ui_fast.cpp</name>
-			<type>1</type>
-			<locationURI>PARENT-2-PROJECT_LOC/Appli/TouchGFX/generated/images/src/image_ui_fast.cpp</locationURI>
-		</link>
-		<link>
 			<name>Application/User/generated/image_ui_image.cpp</name>
 			<type>1</type>
 			<locationURI>PARENT-2-PROJECT_LOC/Appli/TouchGFX/generated/images/src/image_ui_image.cpp</locationURI>
-		</link>
-		<link>
-			<name>Application/User/generated/image_ui_logo.cpp</name>
-			<type>1</type>
-			<locationURI>PARENT-2-PROJECT_LOC/Appli/TouchGFX/generated/images/src/image_ui_logo.cpp</locationURI>
 		</link>
 		<link>
 			<name>Application/User/generated/image_ui_media.cpp</name>
@@ -1635,11 +1615,6 @@
 			<name>Application/User/generated/image_ui_mic.cpp</name>
 			<type>1</type>
 			<locationURI>PARENT-2-PROJECT_LOC/Appli/TouchGFX/generated/images/src/image_ui_mic.cpp</locationURI>
-		</link>
-		<link>
-			<name>Application/User/generated/image_ui_pcmd.cpp</name>
-			<type>1</type>
-			<locationURI>PARENT-2-PROJECT_LOC/Appli/TouchGFX/generated/images/src/image_ui_pcmd.cpp</locationURI>
 		</link>
 		<link>
 			<name>Application/User/generated/image_ui_peak.cpp</name>
@@ -1680,16 +1655,6 @@
 			<name>Application/User/generated/image_ui_standard.cpp</name>
 			<type>1</type>
 			<locationURI>PARENT-2-PROJECT_LOC/Appli/TouchGFX/generated/images/src/image_ui_standard.cpp</locationURI>
-		</link>
-		<link>
-			<name>Application/User/generated/image_ui_touch.cpp</name>
-			<type>1</type>
-			<locationURI>PARENT-2-PROJECT_LOC/Appli/TouchGFX/generated/images/src/image_ui_touch.cpp</locationURI>
-		</link>
-		<link>
-			<name>Application/User/generated/image_ui_warn.cpp</name>
-			<type>1</type>
-			<locationURI>PARENT-2-PROJECT_LOC/Appli/TouchGFX/generated/images/src/image_ui_warn.cpp</locationURI>
 		</link>
 		<link>
 			<name>Application/User/generated/Font_NotoSansSC_VF_15_4bpp_19.cpp</name>
@@ -1750,6 +1715,11 @@
 			<name>Application/User/generated/image_brand_mark.cpp</name>
 			<type>1</type>
 			<locationURI>PARENT-2-PROJECT_LOC/Appli/TouchGFX/generated/images/src/image_brand_mark.cpp</locationURI>
+		</link>
+		<link>
+			<name>Application/User/generated/image_boot_ring.cpp</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/Appli/TouchGFX/generated/images/src/image_boot_ring.cpp</locationURI>
 		</link>
 	</linkedResources>
 </projectDescription>

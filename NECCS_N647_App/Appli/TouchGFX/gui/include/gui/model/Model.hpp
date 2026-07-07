@@ -23,7 +23,18 @@ enum AppUiScreen
     APP_UI_SCREEN_MICS = 1,
     APP_UI_SCREEN_PERF = 2,
     APP_UI_SCREEN_SETTINGS = 3,
-    APP_UI_SCREEN_MEDIA = 4
+    APP_UI_SCREEN_MEDIA = 4,
+    /* Boot/self-check page; entered only at startup, never via navigation. */
+    APP_UI_SCREEN_BOOT = 5
+};
+
+/* Boot checklist module states derived from the bring-up snapshot. */
+enum AppUiBootModuleState
+{
+    APP_UI_BOOT_MODULE_PENDING = 0,
+    APP_UI_BOOT_MODULE_READY = 1,
+    APP_UI_BOOT_MODULE_FAILED = 2,
+    APP_UI_BOOT_MODULE_SKIPPED = 3
 };
 
 enum AppUiProfile
@@ -95,6 +106,11 @@ enum AppUiAcousticFlag
 struct AppUiSnapshot
 {
     uint32_t frameSeq;
+    uint32_t bringupEnabledMask;
+    uint32_t bringupReadyMask;
+    uint32_t bringupFailedMask;
+    uint32_t bringupSkippedMask;
+    uint32_t bootElapsedMs;
     uint32_t powerFlags;
     uint32_t batteryMv;
     uint32_t systemMv;
@@ -235,6 +251,7 @@ protected:
     ModelListener* modelListener;
     AppUiSnapshot snapshot;
     uint32_t tickCount;
+    uint32_t bootTicks;
 };
 
 #endif /* MODEL_HPP */

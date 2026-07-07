@@ -12,6 +12,7 @@ TEXT_LOCATION_FLASH_PRAGMA
 KEEP extern const uint32_t indicesGb[] TEXT_LOCATION_FLASH_ATTRIBUTE = {
     0, // T_APP_TITLE: "????"
     5, // T_WC_TITLE_LEFT: "<>"
+    5, // T_WC_TITLE_CENTER: "<>"
     5, // T_WC_BODY_LEFT: "<>"
     5, // T_WC_BODY_CENTER: "<>"
     5, // T_WC_BODY_RIGHT: "<>"

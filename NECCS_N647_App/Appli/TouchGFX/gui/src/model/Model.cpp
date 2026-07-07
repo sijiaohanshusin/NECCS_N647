@@ -246,6 +246,47 @@ static void AppCameraDisplay_SetVisible(uint8_t visible)
 {
     (void)visible;
 }
+
+typedef enum
+{
+    APP_BRINGUP_MODULE_CLOCK = 0,
+    APP_BRINGUP_MODULE_MEMORY,
+    APP_BRINGUP_MODULE_DISPLAY,
+    APP_BRINGUP_MODULE_TOUCH,
+    APP_BRINGUP_MODULE_I2C,
+    APP_BRINGUP_MODULE_CAMERA,
+    APP_BRINGUP_MODULE_PCMD_RAW,
+    APP_BRINGUP_MODULE_AUDIO_FRAME,
+    APP_BRINGUP_MODULE_ACOUSTIC,
+    APP_BRINGUP_MODULE_UI_OVERLAY,
+    APP_BRINGUP_MODULE_MEDIA,
+    APP_BRINGUP_MODULE_COUNT
+} AppBringUpModule_t;
+
+typedef struct
+{
+    uint32_t magic;
+    uint32_t seq;
+    uint32_t enabled_mask;
+    uint32_t started_mask;
+    uint32_t ready_mask;
+    uint32_t failed_mask;
+    uint32_t skipped_mask;
+    uint32_t active_mask;
+    uint32_t control_mask;
+    uint32_t loop_count;
+} AppBringUpSnapshot_t;
+
+static void App_BringUpStatus_GetSnapshot(AppBringUpSnapshot_t* snapshot)
+{
+    if (snapshot != 0)
+    {
+        memset(snapshot, 0, sizeof(*snapshot));
+        /* Simulator boots instantly with every module ready. */
+        snapshot->enabled_mask = 0x7FFU;
+        snapshot->ready_mask = 0x7FFU;
+    }
+}
 #endif
 
 namespace
@@ -349,7 +390,7 @@ void pollAcoustic(AppUiSnapshot& snapshot)
     snapshot.contrastPct = acoustic.contrast_pct;
     snapshot.peakIndex = acoustic.peak_index;
     snapshot.srpMsX100 = acoustic.srp_ms_x100;
-    snapshot.uiFpsX10 = (acoustic.fps_x10 != 0U) ? acoustic.fps_x10 : 200U;
+    snapshot.uiFpsX10 = acoustic.fps_x10;
     snapshot.srpPreprocessCycles = acoustic.perf.preprocess_cycles;
     snapshot.srpFftCycles = acoustic.perf.fft_cycles;
     snapshot.srpGccCycles = acoustic.perf.gcc_cycles;
@@ -478,6 +519,17 @@ void pollPower(AppUiSnapshot& snapshot)
     snapshot.powerState = power.state;
 }
 
+void pollBringup(AppUiSnapshot& snapshot)
+{
+    AppBringUpSnapshot_t bringup;
+    memset(&bringup, 0, sizeof(bringup));
+    App_BringUpStatus_GetSnapshot(&bringup);
+    snapshot.bringupEnabledMask = bringup.enabled_mask;
+    snapshot.bringupReadyMask = bringup.ready_mask;
+    snapshot.bringupFailedMask = bringup.failed_mask;
+    snapshot.bringupSkippedMask = bringup.skipped_mask;
+}
+
 void pollMedia(AppUiSnapshot& snapshot)
 {
     AppMediaStatus_t media;
@@ -510,12 +562,32 @@ void pollMedia(AppUiSnapshot& snapshot)
 }
 }
 
+namespace
+{
+/* Boot page pacing: minimum splash time, and a hard cap after which the main
+ * UI is entered regardless of module state (modules keep starting in the
+ * background and their live status is visible on the main pages). The
+ * acoustic engine is intentionally NOT watched: it only becomes ready after
+ * the first valid PCMD frame (~10 s), which is too long to gate the UI on. */
+constexpr uint32_t APP_UI_BOOT_MIN_TICKS = 168U;  /* ~2.8 s @60 Hz */
+constexpr uint32_t APP_UI_BOOT_MAX_TICKS = 300U;  /* ~5 s @60 Hz */
+constexpr uint32_t APP_UI_BOOT_WATCHED_MASK =
+    (1UL << 4) |   /* I2C / power rail        */
+    (1UL << 5) |   /* camera                  */
+    (1UL << 6) |   /* PCMD mic array          */
+    (1UL << 10);   /* media / filesystem      */
+}
+
+/* GDB-visible probe: {tickCount, bootTicks, activeScreen, bringup summary}. */
+volatile uint32_t g_app_ui_debug[4];
+
 Model::Model()
     : modelListener(0),
-      tickCount(0U)
+      tickCount(0U),
+      bootTicks(0U)
 {
     memset(&snapshot, 0, sizeof(snapshot));
-    snapshot.activeScreen = APP_UI_SCREEN_IMAGE;
+    snapshot.activeScreen = APP_UI_SCREEN_BOOT;
     snapshot.activeProfile = APP_UI_PROFILE_BALANCED;
     snapshot.uiFpsX10 = 200U;
     snapshot.srpMsX100 = 640U;
@@ -528,12 +600,35 @@ void Model::tick()
     ++tickCount;
     snapshot.frameSeq = tickCount;
 
+    pollBringup(snapshot);
     pollAcoustic(snapshot);
     pollPcmd(snapshot);
     pollCameraDisplay(snapshot);
     pollTouch(snapshot);
     pollPower(snapshot);
     pollMedia(snapshot);
+
+    if (snapshot.activeScreen == APP_UI_SCREEN_BOOT)
+    {
+        ++bootTicks;
+        snapshot.bootElapsedMs = (bootTicks * 1000U) / 60U;
+
+        const uint32_t watched = snapshot.bringupEnabledMask & APP_UI_BOOT_WATCHED_MASK;
+        const uint32_t resolved = (snapshot.bringupReadyMask |
+                                   snapshot.bringupFailedMask |
+                                   snapshot.bringupSkippedMask) & watched;
+        const bool allResolved = (watched != 0U) && (resolved == watched);
+        if (((bootTicks >= APP_UI_BOOT_MIN_TICKS) && allResolved) ||
+            (bootTicks >= APP_UI_BOOT_MAX_TICKS))
+        {
+            setActiveScreen(APP_UI_SCREEN_IMAGE);
+        }
+    }
+
+    g_app_ui_debug[0] = tickCount;
+    g_app_ui_debug[1] = bootTicks;
+    g_app_ui_debug[2] = snapshot.activeScreen;
+    g_app_ui_debug[3] = (snapshot.bringupEnabledMask << 16) | (snapshot.bringupReadyMask & 0xFFFFU);
 
     if ((modelListener != 0) && ((tickCount % 3U) == 0U))
     {

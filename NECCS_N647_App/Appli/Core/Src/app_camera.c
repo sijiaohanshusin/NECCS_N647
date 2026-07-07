@@ -655,7 +655,7 @@ static int32_t AppCamera_StartCapture(uint8_t preview)
         g_app_camera_start_status = APP_CAMERA_ERROR_DISPLAY_INIT;
         return APP_CAMERA_ERROR_DISPLAY_INIT;
       }
-      AppCameraDisplay_SetVisible(1U);
+      /* Layer visibility is owned by the UI Model (per-page policy). */
       g_app_camera_status.flags |= APP_CAMERA_FLAG_PREVIEW | APP_CAMERA_FLAG_DISPLAY_READY;
     }
     g_app_camera_start_status = APP_CAMERA_OK;
@@ -675,7 +675,7 @@ static int32_t AppCamera_StartCapture(uint8_t preview)
       g_app_camera_start_status = APP_CAMERA_ERROR_DISPLAY_INIT;
       return APP_CAMERA_ERROR_DISPLAY_INIT;
     }
-    AppCameraDisplay_SetVisible(1U);
+    /* Layer visibility is owned by the UI Model (per-page policy). */
     g_app_camera_status.flags |= APP_CAMERA_FLAG_PREVIEW | APP_CAMERA_FLAG_DISPLAY_READY;
   }
   else

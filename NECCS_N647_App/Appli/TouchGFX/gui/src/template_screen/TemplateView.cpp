@@ -7,50 +7,38 @@
 
 namespace
 {
-constexpr int16_t CameraPreviewX = 192;
-constexpr int16_t CameraPreviewY = 60;
-constexpr int16_t CameraPreviewW = 640;
-constexpr int16_t CameraPreviewH = 480;
+/* ---- geometry ---- */
 constexpr int16_t ScreenW = 1024;
 constexpr int16_t ScreenH = 600;
-constexpr int16_t NavW = 176;
-constexpr int16_t RightHudX = 848;
-constexpr int16_t RightHudW = 160;
+constexpr int16_t BarH = 44;
+constexpr int16_t NavW = 76;
+constexpr int16_t CamX = 192;
+constexpr int16_t CamY = 60;
+constexpr int16_t CamW = 640;
+constexpr int16_t CamH = 480;
+constexpr int16_t ContentX = 92;
+constexpr int16_t RailX = 844;
+constexpr int16_t RailW = 172;
 
-const touchgfx::colortype ColorBg = touchgfx::Color::getColorFromRGB(7, 12, 16);
-const touchgfx::colortype ColorPanel = touchgfx::Color::getColorFromRGB(13, 20, 25);
-const touchgfx::colortype ColorPanel2 = touchgfx::Color::getColorFromRGB(18, 27, 32);
-const touchgfx::colortype ColorLine = touchgfx::Color::getColorFromRGB(48, 83, 88);
-const touchgfx::colortype ColorCyan = touchgfx::Color::getColorFromRGB(94, 236, 214);
-const touchgfx::colortype ColorGreen = touchgfx::Color::getColorFromRGB(86, 220, 144);
-const touchgfx::colortype ColorText = touchgfx::Color::getColorFromRGB(226, 238, 233);
-const touchgfx::colortype ColorMuted = touchgfx::Color::getColorFromRGB(130, 154, 156);
-const touchgfx::colortype ColorAmber = touchgfx::Color::getColorFromRGB(245, 184, 70);
-const touchgfx::colortype ColorRed = touchgfx::Color::getColorFromRGB(235, 88, 72);
-
+/* ---- design tokens ---- */
 touchgfx::colortype rgb(uint8_t r, uint8_t g, uint8_t b)
 {
     return touchgfx::Color::getColorFromRGB(r, g, b);
 }
 
-const char* screenName(uint8_t screen)
-{
-    switch (screen)
-    {
-    case APP_UI_SCREEN_IMAGE:
-        return "成像";
-    case APP_UI_SCREEN_MICS:
-        return "阵列";
-    case APP_UI_SCREEN_PERF:
-        return "性能";
-    case APP_UI_SCREEN_SETTINGS:
-        return "设置";
-    case APP_UI_SCREEN_MEDIA:
-        return "媒体";
-    default:
-        return "成像";
-    }
-}
+const touchgfx::colortype ColorBg = rgb(7, 13, 20);
+const touchgfx::colortype ColorPanel = rgb(15, 23, 35);
+const touchgfx::colortype ColorPanel2 = rgb(22, 32, 46);
+const touchgfx::colortype ColorPanelHi = rgb(31, 44, 62);
+const touchgfx::colortype ColorLine = rgb(36, 53, 74);
+const touchgfx::colortype ColorBlue = rgb(61, 126, 255);
+const touchgfx::colortype ColorBlueDim = rgb(28, 58, 110);
+const touchgfx::colortype ColorRed = rgb(229, 72, 77);
+const touchgfx::colortype ColorRedDim = rgb(96, 34, 40);
+const touchgfx::colortype ColorGreen = rgb(46, 194, 126);
+const touchgfx::colortype ColorAmber = rgb(245, 184, 74);
+const touchgfx::colortype ColorText = rgb(242, 245, 249);
+const touchgfx::colortype ColorMuted = rgb(140, 160, 180);
 
 const char* profileName(uint8_t profile)
 {
@@ -62,32 +50,6 @@ const char* profileName(uint8_t profile)
         return "质量";
     default:
         return "标准";
-    }
-}
-
-const char* profileShortName(uint8_t profile)
-{
-    switch (profile)
-    {
-    case APP_UI_PROFILE_FAST:
-        return "FAST";
-    case APP_UI_PROFILE_QUALITY:
-        return "QUAL";
-    default:
-        return "STD";
-    }
-}
-
-const char* touchName(uint8_t ic)
-{
-    switch (ic)
-    {
-    case 1U:
-        return "FT5X06";
-    case 2U:
-        return "GT9XXX";
-    default:
-        return "等待";
     }
 }
 
@@ -108,20 +70,7 @@ const char* powerStateName(uint8_t state)
     case APP_UI_POWER_STATE_FAULT:
         return "故障";
     default:
-        return "等待";
-    }
-}
-
-const char* selectedMediaName(uint8_t type)
-{
-    switch (type)
-    {
-    case 1U:
-        return "BMP";
-    case 2U:
-        return "AVI";
-    default:
-        return "无";
+        return "USB";
     }
 }
 
@@ -129,31 +78,17 @@ touchgfx::colortype levelColor(uint8_t level)
 {
     if (level > 82U)
     {
-        return rgb(225, 91, 63);
+        return rgb(120, 45, 48);
     }
     if (level > 58U)
     {
-        return rgb(214, 170, 65);
+        return rgb(112, 84, 34);
     }
     if (level > 28U)
     {
-        return rgb(62, 172, 132);
+        return rgb(28, 84, 66);
     }
-    return rgb(43, 73, 78);
-}
-
-void formatCyclesM(char* buffer, uint32_t bufferSize, const char* label, uint32_t cycles)
-{
-    if ((buffer == 0) || (bufferSize == 0U))
-    {
-        return;
-    }
-    (void)snprintf(buffer,
-                   bufferSize,
-                   "%s %lu.%luM",
-                   label,
-                   static_cast<unsigned long>(cycles / 1000000UL),
-                   static_cast<unsigned long>((cycles / 100000UL) % 10UL));
+    return rgb(24, 36, 52);
 }
 
 void setupLabel(AppTextLabel& label,
@@ -164,42 +99,63 @@ void setupLabel(AppTextLabel& label,
                 uint8_t scale,
                 const char* text,
                 touchgfx::colortype fg,
-                touchgfx::colortype bg,
-                AppTextLabel::Align align = AppTextLabel::ALIGN_LEFT,
-                bool opaqueBackground = true)
+                AppTextLabel::Align align = AppTextLabel::ALIGN_LEFT)
 {
     label.setPosition(x, y, w, h);
     label.setScale(scale);
-    label.setColors(fg, bg, opaqueBackground);
+    label.setColors(fg, ColorBg, false);
     label.setAlignment(align);
     label.setText(text);
+}
+
+void formatCyclesM(char* buffer, uint32_t bufferSize, uint32_t cycles)
+{
+    (void)snprintf(buffer,
+                   bufferSize,
+                   "%lu.%luM",
+                   static_cast<unsigned long>(cycles / 1000000UL),
+                   static_cast<unsigned long>((cycles / 100000UL) % 10UL));
 }
 }
 
 TemplateView::TemplateView()
     : navPressedCallback(this, &TemplateView::onNavPressed),
+      quickPressedCallback(this, &TemplateView::onQuickPressed),
       profilePressedCallback(this, &TemplateView::onProfilePressed),
-      imageActionPressedCallback(this, &TemplateView::onImageActionPressed),
       mediaPressedCallback(this, &TemplateView::onMediaPressed),
-      activeScreen(APP_UI_SCREEN_IMAGE),
+      activeScreen(APP_UI_SCREEN_BOOT),
       activeProfile(APP_UI_PROFILE_BALANCED),
-      mediaPreviewGeneration(0U)
+      bootEmblemAlpha(0U),
+      bootPhase(0U),
+      bootBarWidth(0),
+      bootBarTarget(0),
+      mediaPreviewGeneration(0U),
+      recActive(false)
 {
 }
 
 void TemplateView::setupScreen()
 {
-    setupStaticUi();
-    setupNavigation();
+    background.setPosition(0, 0, ScreenW, ScreenH);
+    background.setColor(ColorBg);
+    add(background);
+
+    cameraPreviewKey.setPosition(CamX, CamY, CamW, CamH);
+    cameraPreviewKey.setColor(rgb(255, 0, 255));
+    cameraPreviewKey.setVisible(false);
+    add(cameraPreviewKey);
+
     setupImagePage();
     setupMicPage();
-    setupPerfPage();
-    setupSettingsPage();
+    setupSystemPage();
+    setupParamsPage();
     setupMediaPage();
-    setupDetails();
+    setupStatusBar();
+    setupNavigation();
+    setupBootPage();
+
     refreshVisibility();
     refreshNavigation();
-    refreshProfileButtons();
     invalidate();
 }
 
@@ -207,106 +163,90 @@ void TemplateView::tearDownScreen()
 {
 }
 
-void TemplateView::setupStaticUi()
+/* ------------------------------------------------------------------ */
+/* setup                                                               */
+/* ------------------------------------------------------------------ */
+
+void TemplateView::setupStatusBar()
 {
-    background.setPosition(0, 0, ScreenW, ScreenH);
-    background.setColor(ColorBg);
-    add(background);
-
-    cameraPreviewKey.setPosition(CameraPreviewX, CameraPreviewY, CameraPreviewW, CameraPreviewH);
-    cameraPreviewKey.setColor(rgb(255, 0, 255));
-    cameraPreviewKey.setVisible(false);
-    add(cameraPreviewKey);
-
-    topBar.setPosition(0, 0, ScreenW, 56);
+    topBar.setPosition(0, 0, ScreenW, BarH);
     topBar.setColor(ColorPanel);
     add(topBar);
 
-    navPanel.setPosition(0, 56, NavW, 544);
-    navPanel.setColor(ColorPanel2);
-    add(navPanel);
+    topBarLine.setPosition(0, BarH, ScreenW, 1);
+    topBarLine.setColor(ColorLine);
+    add(topBarLine);
 
-    contentPanel.setPosition(192, 86, 560, 468);
-    contentPanel.setColor(ColorPanel);
-    add(contentPanel);
+    brandMark.setBitmap(touchgfx::Bitmap(BITMAP_BRAND_MARK_ID));
+    brandMark.setPosition(14, 6, 35, 32);
+    add(brandMark);
 
-    detailPanel.setPosition(776, 86, 232, 468);
-    detailPanel.setColor(ColorPanel2);
-    add(detailPanel);
+    setupLabel(brandTitle, 58, 10, 170, 26, 2, "声学成像仪", ColorText);
+    add(brandTitle);
 
-    imageHudPanel.setPosition(RightHudX, 72, RightHudW, 468);
-    imageHudPanel.setColor(ColorPanel);
-    add(imageHudPanel);
+    modeChip.setPosition(250, 8, 190, 28);
+    modeChip.setStyle(ColorPanel2, 14U);
+    modeChip.setBorder(ColorBlueDim, true);
+    add(modeChip);
 
-    imageBottomPanel.setPosition(CameraPreviewX, 548, CameraPreviewW, 42);
-    imageBottomPanel.setColor(ColorPanel);
-    add(imageBottomPanel);
+    setupLabel(modeChipLabel, 250, 12, 190, 20, 1, "通用 · 标准", ColorBlue, AppTextLabel::ALIGN_CENTER);
+    add(modeChipLabel);
 
-    cameraFrame[0].setPosition(CameraPreviewX - 4, CameraPreviewY - 4, CameraPreviewW + 8, 3);
-    cameraFrame[1].setPosition(CameraPreviewX - 4, CameraPreviewY + CameraPreviewH + 1, CameraPreviewW + 8, 3);
-    cameraFrame[2].setPosition(CameraPreviewX - 4, CameraPreviewY - 4, 3, CameraPreviewH + 8);
-    cameraFrame[3].setPosition(CameraPreviewX + CameraPreviewW + 1, CameraPreviewY - 4, 3, CameraPreviewH + 8);
-    for (uint32_t i = 0U; i < CameraFrameCount; ++i)
-    {
-        cameraFrame[i].setColor(ColorLine);
-        add(cameraFrame[i]);
-    }
+    recDot.setPosition(786, 17, 10, 10);
+    recDot.setColor(ColorRed);
+    recDot.setVisible(false);
+    add(recDot);
 
-    logoImage.setBitmap(touchgfx::Bitmap(BITMAP_UI_LOGO_ID));
-    logoImage.setPosition(24, 16, 80, 24);
-    add(logoImage);
+    setupLabel(recLabel, 802, 11, 60, 22, 1, "", ColorRed);
+    recLabel.setVisible(false);
+    add(recLabel);
 
-    setupLabel(titleLabel, 190, 10, 330, 32, 3, "声学成像", ColorText, ColorPanel, AppTextLabel::ALIGN_LEFT, false);
-    add(titleLabel);
+    setupLabel(sdLabel, 660, 11, 110, 22, 1, "SD --", ColorMuted, AppTextLabel::ALIGN_RIGHT);
+    add(sdLabel);
 
-    setupLabel(modeLabel, 560, 16, 370, 24, 2, "Wide32 48k 标准", ColorCyan, ColorPanel, AppTextLabel::ALIGN_RIGHT, false);
-    add(modeLabel);
+    setupLabel(battLabel, 500, 11, 110, 22, 1, "", ColorMuted, AppTextLabel::ALIGN_RIGHT);
+    battLabel.setVisible(false);
+    add(battLabel);
 
-    statusDot.setPosition(970, 20, 18, 18);
-    statusDot.setColor(ColorAmber);
-    add(statusDot);
-
-    setupLabel(pageTitleLabel, 206, 100, 520, 28, 2, "声学热图", ColorText, ColorPanel);
-    add(pageTitleLabel);
+    setupLabel(fpsLabel, 902, 11, 110, 22, 1, "--", ColorMuted, AppTextLabel::ALIGN_RIGHT);
+    add(fpsLabel);
 }
 
 void TemplateView::setupNavigation()
 {
-    const char* labels[NavCount] = {"成像", "阵列", "性能", "设置", "媒体"};
-    const uint16_t icons[NavCount] = {
+    navPanel.setPosition(0, BarH + 1, NavW, ScreenH - BarH - 1);
+    navPanel.setColor(ColorPanel);
+    add(navPanel);
+
+    navPanelLine.setPosition(NavW, BarH + 1, 1, ScreenH - BarH - 1);
+    navPanelLine.setColor(ColorLine);
+    add(navPanelLine);
+
+    navActiveBar.setPosition(0, 64, 3, 64);
+    navActiveBar.setColor(ColorBlue);
+    add(navActiveBar);
+
+    static const char* labels[NavCount] = {"成像", "阵列", "参数", "媒体", "系统"};
+    static const uint16_t icons[NavCount] = {
         BITMAP_UI_IMAGE_ID,
         BITMAP_UI_MIC_ID,
-        BITMAP_UI_PERF_ID,
         BITMAP_UI_SETTINGS_ID,
-        BITMAP_UI_MEDIA_ID
+        BITMAP_UI_MEDIA_ID,
+        BITMAP_UI_PERF_ID
     };
 
     for (uint32_t i = 0U; i < NavCount; ++i)
     {
-        const int16_t y = static_cast<int16_t>(82 + (i * 78));
-        navButton[i].setPosition(18, y, 140, 58);
-        navButton[i].setColor(ColorPanel);
-        navButton[i].setBorderColor(ColorLine);
-        navButton[i].setBorderSize(2);
-        add(navButton[i]);
+        const int16_t y = static_cast<int16_t>(64 + (i * 82));
 
         navIcon[i].setBitmap(touchgfx::Bitmap(icons[i]));
-        navIcon[i].setPosition(42, static_cast<int16_t>(y + 17), 24, 24);
+        navIcon[i].setPosition(26, static_cast<int16_t>(y + 10), 24, 24);
         add(navIcon[i]);
 
-        setupLabel(navLabel[i],
-                   84,
-                   static_cast<int16_t>(y + 17),
-                   60,
-                   24,
-                   2,
-                   labels[i],
-                   ColorText,
-                   ColorPanel,
-                   AppTextLabel::ALIGN_CENTER);
+        setupLabel(navLabel[i], 0, static_cast<int16_t>(y + 38), NavW, 18, 1, labels[i], ColorMuted, AppTextLabel::ALIGN_CENTER);
         add(navLabel[i]);
 
-        navTouch[i].setPosition(18, y, 140, 58);
+        navTouch[i].setPosition(0, y, NavW, 64);
         navTouch[i].setAction(navPressedCallback);
         add(navTouch[i]);
     }
@@ -314,227 +254,288 @@ void TemplateView::setupNavigation()
 
 void TemplateView::setupImagePage()
 {
-    const uint16_t hudIcons[4] = {
-        BITMAP_UI_PEAK_ID,
-        BITMAP_UI_PCMD_ID,
-        BITMAP_UI_CAMERA_ID,
-        BITMAP_UI_BATTERY_ID
-    };
+    /* camera window frame + corner accents */
+    cameraFrame[0].setPosition(CamX - 3, CamY - 3, CamW + 6, 2);
+    cameraFrame[1].setPosition(CamX - 3, CamY + CamH + 1, CamW + 6, 2);
+    cameraFrame[2].setPosition(CamX - 3, CamY - 3, 2, CamH + 6);
+    cameraFrame[3].setPosition(CamX + CamW + 1, CamY - 3, 2, CamH + 6);
     for (uint32_t i = 0U; i < 4U; ++i)
     {
-        imageHudIcon[i].setBitmap(touchgfx::Bitmap(hudIcons[i]));
-        imageHudIcon[i].setPosition(870, static_cast<int16_t>(98 + (i * 64)), 24, 24);
-        add(imageHudIcon[i]);
+        cameraFrame[i].setColor(ColorLine);
+        add(cameraFrame[i]);
     }
 
-    setupLabel(imageHudLabel[0], 910, 88, 92, 22, 1, "声源", ColorMuted, ColorPanel);
-    setupLabel(imageHudLabel[1], 910, 112, 92, 24, 2, "--", ColorText, ColorPanel);
-    setupLabel(imageHudLabel[2], 910, 152, 92, 22, 1, "PCMD", ColorMuted, ColorPanel);
-    setupLabel(imageHudLabel[3], 910, 176, 92, 24, 2, "等待", ColorAmber, ColorPanel);
-    setupLabel(imageHudLabel[4], 910, 216, 92, 22, 1, "相机", ColorMuted, ColorPanel);
-    setupLabel(imageHudLabel[5], 910, 240, 92, 24, 2, "等待", ColorAmber, ColorPanel);
-    setupLabel(imageHudLabel[6], 910, 280, 92, 22, 1, "性能", ColorMuted, ColorPanel);
-    setupLabel(imageHudLabel[7], 910, 304, 92, 24, 2, "-- FPS", ColorCyan, ColorPanel);
-    for (uint32_t i = 0U; i < ImageHudCount; ++i)
+    const int16_t cornerLen = 22;
+    const int16_t cx0 = CamX - 3;
+    const int16_t cy0 = CamY - 3;
+    const int16_t cx1 = CamX + CamW + 1;
+    const int16_t cy1 = CamY + CamH + 1;
+    cameraCorner[0].setPosition(cx0, cy0, cornerLen, 2);
+    cameraCorner[1].setPosition(cx0, cy0, 2, cornerLen);
+    cameraCorner[2].setPosition(static_cast<int16_t>(cx1 + 2 - cornerLen), cy0, cornerLen, 2);
+    cameraCorner[3].setPosition(cx1, cy0, 2, cornerLen);
+    cameraCorner[4].setPosition(cx0, cy1, cornerLen, 2);
+    cameraCorner[5].setPosition(cx0, static_cast<int16_t>(cy1 + 2 - cornerLen), 2, cornerLen);
+    cameraCorner[6].setPosition(static_cast<int16_t>(cx1 + 2 - cornerLen), cy1, cornerLen, 2);
+    cameraCorner[7].setPosition(cx1, static_cast<int16_t>(cy1 + 2 - cornerLen), 2, cornerLen);
+    for (uint32_t i = 0U; i < 8U; ++i)
     {
-        add(imageHudLabel[i]);
+        cameraCorner[i].setColor(ColorBlue);
+        add(cameraCorner[i]);
     }
 
-    const char* profileLabels[ProfileCount] = {"快", "标", "质"};
-    const uint16_t profileIcons[ProfileCount] = {
-        BITMAP_UI_FAST_ID,
-        BITMAP_UI_STANDARD_ID,
-        BITMAP_UI_QUALITY_ID
-    };
-    for (uint32_t i = 0U; i < ProfileCount; ++i)
-    {
-        const int16_t y = static_cast<int16_t>(356 + (i * 46));
-        imageProfileButton[i].setPosition(858, y, 136, 36);
-        imageProfileButton[i].setColor(ColorPanel2);
-        imageProfileButton[i].setBorderColor(ColorLine);
-        imageProfileButton[i].setBorderSize(2);
-        add(imageProfileButton[i]);
-
-        imageProfileIcon[i].setBitmap(touchgfx::Bitmap(profileIcons[i]));
-        imageProfileIcon[i].setPosition(876, static_cast<int16_t>(y + 6), 24, 24);
-        add(imageProfileIcon[i]);
-
-        setupLabel(imageProfileLabel[i],
-                   916,
-                   static_cast<int16_t>(y + 7),
-                   62,
-                   20,
-                   1,
-                   profileLabels[i],
-                   ColorText,
-                   ColorPanel2,
-                   AppTextLabel::ALIGN_CENTER);
-        add(imageProfileLabel[i]);
-
-        imageProfileTouch[i].setPosition(858, y, 136, 36);
-        imageProfileTouch[i].setAction(profilePressedCallback);
-        add(imageProfileTouch[i]);
-    }
-
-    const char* actions[ImageActionCount] = {"截图", "录像"};
-    const uint16_t actionIcons[ImageActionCount] = {
+    /* left quick-action column */
+    static const char* quickNames[QuickCount] = {"截屏", "录像", "触发", "调色板", "模式"};
+    static const uint16_t quickIcons[QuickCount] = {
         BITMAP_UI_SNAPSHOT_ID,
-        BITMAP_UI_RECORD_ID
+        BITMAP_UI_RECORD_ID,
+        BITMAP_UI_PEAK_ID,
+        BITMAP_UI_QUALITY_ID,
+        BITMAP_UI_STANDARD_ID
     };
-    for (uint32_t i = 0U; i < ImageActionCount; ++i)
+    for (uint32_t i = 0U; i < QuickCount; ++i)
     {
-        const int16_t x = static_cast<int16_t>(858 + (i * 70));
-        imageActionButton[i].setPosition(x, 504, 62, 30);
-        imageActionButton[i].setColor(ColorPanel2);
-        imageActionButton[i].setBorderColor(ColorLine);
-        imageActionButton[i].setBorderSize(2);
-        add(imageActionButton[i]);
+        const int16_t y = static_cast<int16_t>(CamY + (i * 78));
+        quickButton[i].setPosition(84, y, 96, 68);
+        quickButton[i].setStyle(ColorPanel2, 10U);
+        quickButton[i].setBorder(ColorLine, true);
+        add(quickButton[i]);
 
-        imageActionIcon[i].setBitmap(touchgfx::Bitmap(actionIcons[i]));
-        imageActionIcon[i].setPosition(static_cast<int16_t>(x + 8), 507, 24, 24);
-        add(imageActionIcon[i]);
+        quickIcon[i].setBitmap(touchgfx::Bitmap(quickIcons[i]));
+        quickIcon[i].setPosition(120, static_cast<int16_t>(y + 9), 24, 24);
+        add(quickIcon[i]);
 
-        setupLabel(imageActionLabel[i],
-                   static_cast<int16_t>(x + 28),
-                   511,
-                   28,
-                   16,
-                   1,
-                   actions[i],
-                   ColorText,
-                   ColorPanel2,
-                   AppTextLabel::ALIGN_CENTER);
-        add(imageActionLabel[i]);
+        setupLabel(quickLabel[i], 84, static_cast<int16_t>(y + 40), 96, 20, 1, quickNames[i], ColorText, AppTextLabel::ALIGN_CENTER);
+        add(quickLabel[i]);
 
-        imageActionTouch[i].setPosition(x, 504, 62, 30);
-        imageActionTouch[i].setAction(imageActionPressedCallback);
-        add(imageActionTouch[i]);
+        quickTouch[i].setPosition(84, y, 96, 68);
+        quickTouch[i].setAction(quickPressedCallback);
+        add(quickTouch[i]);
     }
 
-    setupLabel(heatMetricLabel[0], 210, 558, 166, 22, 1, "方位 --", ColorText, ColorPanel);
-    setupLabel(heatMetricLabel[1], 382, 558, 132, 22, 1, "俯仰 --", ColorText, ColorPanel);
-    setupLabel(heatMetricLabel[2], 520, 558, 142, 22, 1, "质量 --", ColorCyan, ColorPanel);
-    setupLabel(heatMetricLabel[3], 668, 558, 142, 22, 1, "FPS --", ColorAmber, ColorPanel);
-
-    for (uint32_t i = 0U; i < 4U; ++i)
+    /* right data rail */
+    railCard[0].setPosition(RailX, 60, RailW, 122);
+    railCard[1].setPosition(RailX, 190, RailW, 112);
+    railCard[2].setPosition(RailX, 310, RailW, 102);
+    railCard[3].setPosition(RailX, 420, RailW, 88);
+    for (uint32_t i = 0U; i < RailCardCount; ++i)
     {
-        add(heatMetricLabel[i]);
+        railCard[i].setStyle(ColorPanel, 10U);
+        railCard[i].setBorder(ColorLine, true);
+        add(railCard[i]);
+    }
+
+    setupLabel(railSourceTitle, RailX + 14, 70, 144, 20, 1, "声源方位", ColorMuted);
+    setupLabel(railTheta, RailX + 14, 92, 144, 26, 2, "-- °", ColorText);
+    setupLabel(railPhi, RailX + 14, 120, 144, 26, 2, "-- °", ColorText);
+    add(railSourceTitle);
+    add(railTheta);
+    add(railPhi);
+
+    railQualityTrack.setPosition(RailX + 14, 158, 144, 6);
+    railQualityTrack.setColor(ColorPanel2);
+    add(railQualityTrack);
+    railQualityFill.setPosition(RailX + 14, 158, 4, 6);
+    railQualityFill.setColor(ColorBlue);
+    add(railQualityFill);
+
+    setupLabel(railStateTitle, RailX + 14, 200, 144, 20, 1, "链路状态", ColorMuted);
+    add(railStateTitle);
+    static const char* stateNames[RailStateRows] = {"麦阵", "相机", "SD"};
+    for (uint32_t i = 0U; i < RailStateRows; ++i)
+    {
+        const int16_t y = static_cast<int16_t>(224 + (i * 24));
+        setupLabel(railStateName[i], RailX + 14, y, 60, 20, 1, stateNames[i], ColorMuted);
+        setupLabel(railStateValue[i], RailX + 70, y, 88, 20, 1, "等待", ColorAmber, AppTextLabel::ALIGN_RIGHT);
+        add(railStateName[i]);
+        add(railStateValue[i]);
+    }
+
+    setupLabel(railPerfTitle, RailX + 14, 320, 144, 20, 1, "性能", ColorMuted);
+    setupLabel(railPerfMs, RailX + 14, 342, 144, 24, 2, "SRP --", ColorText);
+    setupLabel(railPerfFps, RailX + 14, 368, 144, 20, 1, "热图 --", ColorMuted);
+    setupLabel(railPerfCam, RailX + 14, 388, 144, 20, 1, "相机 --", ColorMuted);
+    add(railPerfTitle);
+    add(railPerfMs);
+    add(railPerfFps);
+    add(railPerfCam);
+
+    setupLabel(railModeTitle, RailX + 14, 430, 144, 20, 1, "Wide32 · 48k", ColorMuted);
+    setupLabel(railModeValue, RailX + 14, 452, 144, 24, 2, "标准", ColorBlue);
+    setupLabel(railSceneValue, RailX + 14, 478, 144, 20, 1, "通用场景", ColorMuted);
+    add(railModeTitle);
+    add(railModeValue);
+    add(railSceneValue);
+
+    /* bottom strip under the camera window */
+    stripPanel.setPosition(CamX, 548, CamW, 40);
+    stripPanel.setColor(ColorPanel);
+    add(stripPanel);
+
+    static const char* stripInitial[StripCount] = {"方位 --", "俯仰 --", "质量 --", "峰值 --"};
+    for (uint32_t i = 0U; i < StripCount; ++i)
+    {
+        setupLabel(stripLabel[i],
+                   static_cast<int16_t>(CamX + 18 + (i * 158)),
+                   557,
+                   150,
+                   22,
+                   1,
+                   stripInitial[i],
+                   (i == 2U) ? ColorBlue : ((i == 3U) ? ColorAmber : ColorText));
+        add(stripLabel[i]);
     }
 }
 
 void TemplateView::setupMicPage()
 {
+    setupLabel(micTitle, ContentX + 24, 64, 400, 26, 2, "麦克风阵列", ColorText);
+    add(micTitle);
+
     for (uint32_t i = 0U; i < MicCount; ++i)
     {
         const int16_t col = static_cast<int16_t>(i % 8U);
         const int16_t row = static_cast<int16_t>(i / 8U);
-        const int16_t x = static_cast<int16_t>(206 + (col * 64));
-        const int16_t y = static_cast<int16_t>(150 + (row * 62));
+        const int16_t x = static_cast<int16_t>(ContentX + 24 + (col * 112));
+        const int16_t y = static_cast<int16_t>(108 + (row * 82));
 
-        micCell[i].setPosition(x,
-                               y,
-                               54,
-                               46);
-        micCell[i].setColor(rgb(27, 45, 50));
-        micCell[i].setBorderColor(ColorLine);
-        micCell[i].setBorderSize(2);
+        micCell[i].setPosition(x, y, 100, 70);
+        micCell[i].setStyle(levelColor(0U), 8U);
+        micCell[i].setBorder(ColorLine, true);
         add(micCell[i]);
 
-        setupLabel(micValueLabel[i],
-                   static_cast<int16_t>(x - 2),
-                   static_cast<int16_t>(y + 14),
-                   58,
-                   18,
-                   1,
-                   "M00 --",
-                   ColorText,
-                   rgb(27, 45, 50),
-                   AppTextLabel::ALIGN_CENTER);
-        add(micValueLabel[i]);
+        char idx[8];
+        (void)snprintf(idx, sizeof(idx), "M%02lu", static_cast<unsigned long>(i));
+        setupLabel(micIndexLabel[i], x, static_cast<int16_t>(y + 10), 100, 20, 1, idx, ColorMuted, AppTextLabel::ALIGN_CENTER);
+        add(micIndexLabel[i]);
+
+        setupLabel(micDbLabel[i], x, static_cast<int16_t>(y + 34), 100, 22, 1, "--", ColorText, AppTextLabel::ALIGN_CENTER);
+        add(micDbLabel[i]);
     }
 
-    setupLabel(micSummaryLabel[0], 206, 416, 220, 24, 1, "32 路阵列健康", ColorText, ColorPanel);
-    setupLabel(micSummaryLabel[1], 206, 462, 170, 24, 1, "平均 --dBFS", ColorCyan, ColorPanel);
-    setupLabel(micSummaryLabel[2], 400, 462, 170, 24, 1, "峰值 --dBFS", ColorAmber, ColorPanel);
-    setupLabel(micSummaryLabel[3], 400, 416, 250, 24, 1, "PCMD 等待", ColorAmber, ColorPanel);
-
+    setupLabel(micSummary[0], ContentX + 24, 448, 260, 24, 1, "阵列状态 等待", ColorAmber);
+    setupLabel(micSummary[1], ContentX + 300, 448, 200, 24, 1, "有效 --/32", ColorText);
+    setupLabel(micSummary[2], ContentX + 24, 480, 260, 24, 1, "平均 -- dBFS", ColorMuted);
+    setupLabel(micSummary[3], ContentX + 300, 480, 200, 24, 1, "峰值 -- dBFS", ColorMuted);
     for (uint32_t i = 0U; i < 4U; ++i)
     {
-        add(micSummaryLabel[i]);
+        add(micSummary[i]);
     }
 }
 
-void TemplateView::setupPerfPage()
+void TemplateView::setupSystemPage()
 {
-    const char* labels[PerfCount] = {"预处理", "FFT", "GCC", "SRP", "总计"};
+    setupLabel(sysTitle, ContentX + 24, 64, 400, 26, 2, "系统状态", ColorText);
+    add(sysTitle);
 
+    sysPerfCard.setPosition(ContentX + 24, 104, 520, 440);
+    sysPerfCard.setStyle(ColorPanel, 12U);
+    sysPerfCard.setBorder(ColorLine, true);
+    add(sysPerfCard);
+
+    sysInfoCard.setPosition(ContentX + 560, 104, 356, 440);
+    sysInfoCard.setStyle(ColorPanel, 12U);
+    sysInfoCard.setBorder(ColorLine, true);
+    add(sysInfoCard);
+
+    static const char* perfNames[PerfCount] = {"预处理", "FFT", "GCC", "SRP 搜索", "总计"};
     for (uint32_t i = 0U; i < PerfCount; ++i)
     {
-        const int16_t y = static_cast<int16_t>(160 + (i * 58));
-        setupLabel(perfLabel[i], 206, static_cast<int16_t>(y - 2), 190, 24, 1, labels[i], ColorText, ColorPanel);
-        add(perfLabel[i]);
+        const int16_t y = static_cast<int16_t>(140 + (i * 78));
+        setupLabel(perfName[i], ContentX + 48, y, 130, 22, 1, perfNames[i], ColorText);
+        add(perfName[i]);
 
-        perfTrack[i].setPosition(410, y, 278, 24);
-        perfTrack[i].setColor(rgb(28, 39, 44));
+        perfTrack[i].setPosition(ContentX + 180, static_cast<int16_t>(y + 2), 240, 16);
+        perfTrack[i].setColor(ColorPanel2);
         add(perfTrack[i]);
 
-        perfFill[i].setPosition(410, y, 20, 24);
-        perfFill[i].setColor(ColorCyan);
+        perfFill[i].setPosition(ContentX + 180, static_cast<int16_t>(y + 2), 12, 16);
+        perfFill[i].setColor(ColorBlue);
         add(perfFill[i]);
+
+        setupLabel(perfValue[i], ContentX + 434, y, 96, 22, 1, "--", ColorMuted, AppTextLabel::ALIGN_RIGHT);
+        add(perfValue[i]);
+    }
+
+    static const char* infoNames[SysInfoCount] = {"电池", "系统电压", "电流", "触摸", "相机帧", "显示错误", "UI 帧率", "版本"};
+    for (uint32_t i = 0U; i < SysInfoCount; ++i)
+    {
+        const int16_t y = static_cast<int16_t>(140 + (i * 48));
+        setupLabel(sysInfoName[i], ContentX + 584, y, 110, 22, 1, infoNames[i], ColorMuted);
+        setupLabel(sysInfoValue[i], ContentX + 690, y, 200, 22, 1, "--", ColorText, AppTextLabel::ALIGN_RIGHT);
+        add(sysInfoName[i]);
+        add(sysInfoValue[i]);
     }
 }
 
-void TemplateView::setupSettingsPage()
+void TemplateView::setupParamsPage()
 {
-    setupLabel(settingsLabel[0], 206, 150, 500, 24, 1, "模式 Wide32 / 48 kHz", ColorText, ColorPanel);
-    setupLabel(settingsLabel[1], 206, 194, 500, 24, 1, "频点策略 标准 B16", ColorCyan, ColorPanel);
-    setupLabel(settingsLabel[2], 206, 238, 500, 24, 1, "麦克风对 标准 160", ColorText, ColorPanel);
-    setupLabel(settingsLabel[3], 206, 282, 500, 24, 1, "搜索 9x9 粗搜 / Top3 精搜", ColorText, ColorPanel);
-    setupLabel(settingsLabel[4], 206, 326, 500, 24, 1, "输入 等待真实采集", ColorAmber, ColorPanel);
-    setupLabel(settingsLabel[5], 206, 370, 500, 24, 1, "高频近场 Core16/192k 暂停", ColorMuted, ColorPanel);
-    setupLabel(settingsLabel[6], 206, 414, 500, 24, 1, "调试信息 默认关闭", ColorMuted, ColorPanel);
+    setupLabel(paramsTitle, ContentX + 24, 64, 400, 26, 2, "参数", ColorText);
+    add(paramsTitle);
 
-    for (uint32_t i = 0U; i < SettingsCount; ++i)
+    setupLabel(paramsProfileCaption, ContentX + 24, 108, 300, 22, 1, "显示模式", ColorMuted);
+    add(paramsProfileCaption);
+
+    static const char* chipNames[ProfileCount] = {"快速", "标准", "质量"};
+    for (uint32_t i = 0U; i < ProfileCount; ++i)
     {
-        add(settingsLabel[i]);
+        const int16_t x = static_cast<int16_t>(ContentX + 24 + (i * 136));
+        profileChip[i].setPosition(x, 136, 120, 44);
+        profileChip[i].setStyle(ColorPanel2, 12U);
+        profileChip[i].setBorder(ColorLine, true);
+        add(profileChip[i]);
+
+        setupLabel(profileChipLabel[i], x, 146, 120, 24, 2, chipNames[i], ColorText, AppTextLabel::ALIGN_CENTER);
+        add(profileChipLabel[i]);
+
+        profileTouch[i].setPosition(x, 136, 120, 44);
+        profileTouch[i].setAction(profilePressedCallback);
+        add(profileTouch[i]);
+    }
+
+    static const char* rowNames[ParamRowCount] = {"场景模式", "频带", "温度 / 声速", "调色板"};
+    static const char* rowValues[ParamRowCount] = {"通用", "563 - 7875 Hz", "25℃ / 346 m/s", "铁红"};
+    for (uint32_t i = 0U; i < ParamRowCount; ++i)
+    {
+        const int16_t y = static_cast<int16_t>(208 + (i * 78));
+        paramRowPanel[i].setPosition(ContentX + 24, y, 892, 64);
+        paramRowPanel[i].setStyle(ColorPanel, 12U);
+        paramRowPanel[i].setBorder(ColorLine, true);
+        add(paramRowPanel[i]);
+
+        setupLabel(paramRowName[i], ContentX + 48, static_cast<int16_t>(y + 20), 220, 24, 2, rowNames[i], ColorMuted);
+        setupLabel(paramRowValue[i], ContentX + 500, static_cast<int16_t>(y + 20), 392, 24, 2, rowValues[i], ColorText, AppTextLabel::ALIGN_RIGHT);
+        add(paramRowName[i]);
+        add(paramRowValue[i]);
     }
 }
 
 void TemplateView::setupMediaPage()
 {
-    const char* initial[MediaLabelCount] = {
-        "SD 等待",
-        "文件系统 未挂载",
-        "空间 -- / -- MB",
-        "截图 00000 BMP",
-        "视频 00000 AVI",
-        "录制 00:00 F0000 DROP0",
-        "选择 无",
-        "最近 无",
-        "读取 0B 错误 0",
-        "媒体空闲"
-    };
+    setupLabel(mediaTitle, ContentX + 24, 64, 400, 26, 2, "媒体", ColorText);
+    add(mediaTitle);
 
-    for (uint32_t i = 0U; i < MediaLabelCount; ++i)
-    {
-        setupLabel(mediaLabel[i],
-                   206,
-                   static_cast<int16_t>(142 + (i * 32)),
-                   250,
-                   24,
-                   1,
-                   initial[i],
-                   (i < 2U) ? ColorCyan : ColorText,
-                   ColorPanel);
-        add(mediaLabel[i]);
-    }
-
-    mediaPreview.setPosition(470, 142, 260, 220);
-    mediaPreview.setColors(rgb(9, 15, 18), ColorLine);
+    mediaPreview.setPosition(ContentX + 24, 108, 512, 304);
+    mediaPreview.setColors(rgb(10, 16, 24), ColorLine);
     add(mediaPreview);
 
-    const char* actions[MediaActionCount] = {"截图", "录像", "下一个", "读取", "同步"};
-    const uint16_t icons[MediaActionCount] = {
+    mediaInfoCard.setPosition(ContentX + 560, 108, 356, 304);
+    mediaInfoCard.setStyle(ColorPanel, 12U);
+    mediaInfoCard.setBorder(ColorLine, true);
+    add(mediaInfoCard);
+
+    static const char* infoNames[MediaInfoCount] = {"SD", "文件系统", "空间", "截屏", "录像", "选择", "读取", "状态"};
+    for (uint32_t i = 0U; i < MediaInfoCount; ++i)
+    {
+        const int16_t y = static_cast<int16_t>(130 + (i * 34));
+        setupLabel(mediaInfoName[i], ContentX + 584, y, 90, 22, 1, infoNames[i], ColorMuted);
+        setupLabel(mediaInfoValue[i], ContentX + 674, y, 218, 22, 1, "--", ColorText, AppTextLabel::ALIGN_RIGHT);
+        add(mediaInfoName[i]);
+        add(mediaInfoValue[i]);
+    }
+
+    static const char* actions[MediaActionCount] = {"截屏", "录像", "下一个", "读取", "同步"};
+    static const uint16_t icons[MediaActionCount] = {
         BITMAP_UI_SNAPSHOT_ID,
         BITMAP_UI_RECORD_ID,
         BITMAP_UI_MEDIA_ID,
@@ -543,92 +544,138 @@ void TemplateView::setupMediaPage()
     };
     for (uint32_t i = 0U; i < MediaActionCount; ++i)
     {
-        const int16_t x = static_cast<int16_t>(206 + (i * 104));
-        mediaButton[i].setPosition(x, 516, 88, 38);
-        mediaButton[i].setColor(ColorPanel2);
-        mediaButton[i].setBorderColor(ColorLine);
-        mediaButton[i].setBorderSize(2);
+        const int16_t x = static_cast<int16_t>(ContentX + 24 + (i * 150));
+        mediaButton[i].setPosition(x, 452, 134, 52);
+        mediaButton[i].setStyle(ColorPanel2, 12U);
+        mediaButton[i].setBorder(ColorLine, true);
         add(mediaButton[i]);
 
         mediaButtonIcon[i].setBitmap(touchgfx::Bitmap(icons[i]));
-        mediaButtonIcon[i].setPosition(static_cast<int16_t>(x + 9), 523, 24, 24);
+        mediaButtonIcon[i].setPosition(static_cast<int16_t>(x + 18), 466, 24, 24);
         add(mediaButtonIcon[i]);
 
-        setupLabel(mediaButtonLabel[i],
-                   static_cast<int16_t>(x + 36),
-                   527,
-                   48,
-                   16,
-                   1,
-                   actions[i],
-                   ColorText,
-                   ColorPanel2,
-                   AppTextLabel::ALIGN_CENTER);
+        setupLabel(mediaButtonLabel[i], static_cast<int16_t>(x + 48), 467, 78, 22, 1, actions[i], ColorText);
         add(mediaButtonLabel[i]);
 
-        mediaTouch[i].setPosition(x, 516, 88, 38);
+        mediaTouch[i].setPosition(x, 452, 134, 52);
         mediaTouch[i].setAction(mediaPressedCallback);
         add(mediaTouch[i]);
     }
 }
 
-void TemplateView::setupDetails()
+void TemplateView::setupBootPage()
 {
-    const char* initial[DetailCount] = {
-        "电源 等待",
-        "电量 --%",
-        "电池 --.--V",
-        "系统 --.--V",
-        "IBAT +0.00A",
-        "触摸 等待",
-        "坐标 X0000 Y0000",
-        "模式 标准",
-        "帧号 000000",
-        "UI 20.0FPS",
-        "BQ 0x0000 PIN 00"
-    };
+    bootBg.setPosition(0, 0, ScreenW, ScreenH);
+    bootBg.setColor(ColorBg);
+    add(bootBg);
 
-    for (uint32_t i = 0U; i < DetailCount; ++i)
+    for (uint32_t i = 0U; i < BootRingCount; ++i)
     {
-        setupLabel(detailLabel[i],
-                   792,
-                   static_cast<int16_t>(98 + (i * 31)),
-                   200,
-                   23,
-                   1,
-                   initial[i],
-                   (i == 0U) ? ColorCyan : ColorText,
-                   ColorPanel2);
-        add(detailLabel[i]);
+        bootRing[i].setBitmap(touchgfx::Bitmap(BITMAP_BOOT_RING_ID));
+        bootRing[i].setScalingAlgorithm(touchgfx::ScalableImage::NEAREST_NEIGHBOR);
+        bootRing[i].setPosition(452, 130, 120, 120);
+        bootRing[i].setAlpha(0U);
+        add(bootRing[i]);
     }
 
-    const char* labels[ProfileCount] = {"快", "标", "质"};
-    const uint16_t icons[ProfileCount] = {
-        BITMAP_UI_FAST_ID,
-        BITMAP_UI_STANDARD_ID,
-        BITMAP_UI_QUALITY_ID
-    };
-    for (uint32_t i = 0U; i < ProfileCount; ++i)
+    bootEmblem.setBitmap(touchgfx::Bitmap(BITMAP_BOOT_EMBLEM_ID));
+    bootEmblem.setPosition(428, 112, 168, 154);
+    bootEmblem.setAlpha(0U);
+    add(bootEmblem);
+
+    setupLabel(bootTitle, 312, 306, 400, 40, 3, "声学成像仪", ColorText, AppTextLabel::ALIGN_CENTER);
+    add(bootTitle);
+
+    setupLabel(bootSubtitle, 312, 352, 400, 20, 1, "ACOUSTIC CAMERA · STM32N6", ColorMuted, AppTextLabel::ALIGN_CENTER);
+    add(bootSubtitle);
+
+    static const char* itemNames[BootItemCount] = {"电源管理", "相机", "麦克风阵列", "声学引擎", "媒体存储"};
+    for (uint32_t i = 0U; i < BootItemCount; ++i)
     {
-        const int16_t x = static_cast<int16_t>(792 + (i * 68));
-        profileButton[i].setPosition(x, 532, 58, 30);
-        profileButton[i].setColor(ColorPanel);
-        profileButton[i].setBorderColor(ColorLine);
-        profileButton[i].setBorderSize(2);
-        add(profileButton[i]);
+        const int16_t y = static_cast<int16_t>(396 + (i * 26));
+        bootItemDot[i].setPosition(382, static_cast<int16_t>(y + 7), 8, 8);
+        bootItemDot[i].setColor(ColorMuted);
+        add(bootItemDot[i]);
 
-        profileIcon[i].setBitmap(touchgfx::Bitmap(icons[i]));
-        profileIcon[i].setPosition(static_cast<int16_t>(x + 8), 535, 24, 24);
-        add(profileIcon[i]);
+        setupLabel(bootItemName[i], 402, y, 130, 22, 1, itemNames[i], ColorMuted);
+        setupLabel(bootItemState[i], 520, y, 122, 22, 1, "等待", ColorMuted, AppTextLabel::ALIGN_RIGHT);
+        add(bootItemName[i]);
+        add(bootItemState[i]);
+    }
 
-        setupLabel(profileLabel[i], static_cast<int16_t>(x + 30), 539, 24, 16, 1, labels[i], ColorText, ColorPanel, AppTextLabel::ALIGN_CENTER);
-        add(profileLabel[i]);
+    bootBarTrack.setPosition(382, 536, 260, 4);
+    bootBarTrack.setColor(ColorPanel2);
+    add(bootBarTrack);
 
-        profileTouch[i].setPosition(x, 532, 58, 30);
-        profileTouch[i].setAction(profilePressedCallback);
-        add(profileTouch[i]);
+    bootBarFill.setPosition(382, 536, 2, 4);
+    bootBarFill.setColor(ColorBlue);
+    add(bootBarFill);
+
+    setupLabel(bootVersion, 312, 560, 400, 20, 1, "NECCS N647 · FW " __DATE__, ColorMuted, AppTextLabel::ALIGN_CENTER);
+    add(bootVersion);
+}
+
+/* ------------------------------------------------------------------ */
+/* animation                                                           */
+/* ------------------------------------------------------------------ */
+
+void TemplateView::handleTickEvent()
+{
+    if (activeScreen != APP_UI_SCREEN_BOOT)
+    {
+        return;
+    }
+
+    /* Expanding sonar rings around the emblem centre (512, 192). */
+    constexpr uint16_t Period = 96U;
+    constexpr int16_t RingCx = 512;
+    constexpr int16_t RingCy = 192;
+    bootPhase = static_cast<uint16_t>((bootPhase + 1U) % Period);
+    for (uint32_t i = 0U; i < BootRingCount; ++i)
+    {
+        const uint16_t offset = static_cast<uint16_t>((bootPhase + ((Period / BootRingCount) * i)) % Period);
+        const int16_t diameter = static_cast<int16_t>(96 + ((260 * offset) / Period));
+        const uint32_t fade = Period - offset;
+        const uint8_t alpha = static_cast<uint8_t>((170U * fade * fade) / (Period * Period));
+
+        bootRing[i].invalidate();
+        bootRing[i].setPosition(static_cast<int16_t>(RingCx - (diameter / 2)),
+                                static_cast<int16_t>(RingCy - (diameter / 2)),
+                                diameter,
+                                diameter);
+        bootRing[i].setAlpha(alpha);
+        bootRing[i].invalidate();
+    }
+
+    if (bootEmblemAlpha < 255U)
+    {
+        const uint16_t next = static_cast<uint16_t>(bootEmblemAlpha + 6U);
+        bootEmblemAlpha = (next >= 255U) ? 255U : static_cast<uint8_t>(next);
+        bootEmblem.setAlpha(bootEmblemAlpha);
+        bootEmblem.invalidate();
+    }
+
+    if (bootBarWidth != bootBarTarget)
+    {
+        int16_t step = static_cast<int16_t>((bootBarTarget - bootBarWidth) / 4);
+        if (step == 0)
+        {
+            step = (bootBarTarget > bootBarWidth) ? 1 : -1;
+        }
+        bootBarWidth = static_cast<int16_t>(bootBarWidth + step);
+        if (bootBarWidth < 2)
+        {
+            bootBarWidth = 2;
+        }
+        bootBarFill.setPosition(382, 536, bootBarWidth, 4);
+        bootBarTrack.invalidate();
+        bootBarFill.invalidate();
     }
 }
+
+/* ------------------------------------------------------------------ */
+/* refresh                                                             */
+/* ------------------------------------------------------------------ */
 
 void TemplateView::updateSnapshot(const AppUiSnapshot& snapshot)
 {
@@ -639,636 +686,698 @@ void TemplateView::updateSnapshot(const AppUiSnapshot& snapshot)
     if (previousScreen != activeScreen)
     {
         refreshVisibility();
+        refreshNavigation();
     }
 
-    refreshNavigation();
-    refreshProfileButtons();
-    refreshDetails(snapshot);
-
-    if (activeScreen == APP_UI_SCREEN_IMAGE)
+    if (activeScreen == APP_UI_SCREEN_BOOT)
     {
+        refreshBootPage(snapshot);
+        return;
+    }
+
+    refreshStatusBar(snapshot);
+
+    switch (activeScreen)
+    {
+    case APP_UI_SCREEN_IMAGE:
         refreshImagePage(snapshot);
-    }
-    else if (activeScreen == APP_UI_SCREEN_MICS)
-    {
+        break;
+    case APP_UI_SCREEN_MICS:
         refreshMicPage(snapshot);
-    }
-    else if (activeScreen == APP_UI_SCREEN_PERF)
-    {
-        refreshPerfPage(snapshot);
-    }
-    else if (activeScreen == APP_UI_SCREEN_SETTINGS)
-    {
-        refreshSettingsPage(snapshot);
-    }
-    else
-    {
+        break;
+    case APP_UI_SCREEN_PERF:
+        refreshSystemPage(snapshot);
+        break;
+    case APP_UI_SCREEN_SETTINGS:
+        refreshParamsPage(snapshot);
+        break;
+    default:
         refreshMediaPage(snapshot);
+        break;
     }
 }
 
 void TemplateView::refreshVisibility()
 {
-    const bool imageVisible = (activeScreen == APP_UI_SCREEN_IMAGE);
+    const bool bootVisible = (activeScreen == APP_UI_SCREEN_BOOT);
+    const bool imageVisible = (activeScreen == APP_UI_SCREEN_IMAGE) && !bootVisible;
     const bool micVisible = (activeScreen == APP_UI_SCREEN_MICS);
-    const bool perfVisible = (activeScreen == APP_UI_SCREEN_PERF);
-    const bool settingsVisible = (activeScreen == APP_UI_SCREEN_SETTINGS);
+    const bool sysVisible = (activeScreen == APP_UI_SCREEN_PERF);
+    const bool paramsVisible = (activeScreen == APP_UI_SCREEN_SETTINGS);
     const bool mediaVisible = (activeScreen == APP_UI_SCREEN_MEDIA);
+    const bool chromeVisible = !bootVisible;
 
-    /* Camera LTDC layer visibility is owned by the Model (setActiveScreen);
-     * the View only manages its own widgets. */
+    /* boot */
+    bootBg.setVisible(bootVisible);
+    for (uint32_t i = 0U; i < BootRingCount; ++i)
+    {
+        bootRing[i].setVisible(bootVisible);
+    }
+    bootEmblem.setVisible(bootVisible);
+    bootTitle.setVisible(bootVisible);
+    bootSubtitle.setVisible(bootVisible);
+    for (uint32_t i = 0U; i < BootItemCount; ++i)
+    {
+        bootItemDot[i].setVisible(bootVisible);
+        bootItemName[i].setVisible(bootVisible);
+        bootItemState[i].setVisible(bootVisible);
+    }
+    bootBarTrack.setVisible(bootVisible);
+    bootBarFill.setVisible(bootVisible);
+    bootVersion.setVisible(bootVisible);
+
+    /* chrome */
+    topBar.setVisible(chromeVisible);
+    topBarLine.setVisible(chromeVisible);
+    brandMark.setVisible(chromeVisible);
+    brandTitle.setVisible(chromeVisible);
+    modeChip.setVisible(chromeVisible);
+    modeChipLabel.setVisible(chromeVisible);
+    recDot.setVisible(chromeVisible && recActive);
+    recLabel.setVisible(chromeVisible && recActive);
+    sdLabel.setVisible(chromeVisible);
+    battLabel.setVisible(chromeVisible);
+    fpsLabel.setVisible(chromeVisible);
+    navPanel.setVisible(chromeVisible);
+    navPanelLine.setVisible(chromeVisible);
+    navActiveBar.setVisible(chromeVisible);
+    for (uint32_t i = 0U; i < NavCount; ++i)
+    {
+        navIcon[i].setVisible(chromeVisible);
+        navLabel[i].setVisible(chromeVisible);
+        navTouch[i].setVisible(chromeVisible);
+    }
+
+    /* imaging */
     cameraPreviewKey.setVisible(imageVisible);
-    imageHudPanel.setVisible(imageVisible);
-    imageBottomPanel.setVisible(imageVisible);
-    imageHudPanel.invalidate();
-    imageBottomPanel.invalidate();
-
-    for (uint32_t i = 0U; i < CameraFrameCount; ++i)
-    {
-        cameraFrame[i].setVisible(imageVisible);
-        cameraFrame[i].invalidate();
-    }
-
-    contentPanel.setVisible(!imageVisible);
-    detailPanel.setVisible(!imageVisible);
-    pageTitleLabel.setVisible(!imageVisible);
-    contentPanel.invalidate();
-    detailPanel.invalidate();
-    pageTitleLabel.invalidate();
-
-    for (uint32_t i = 0U; i < DetailCount; ++i)
-    {
-        detailLabel[i].setVisible(!imageVisible);
-        detailLabel[i].invalidate();
-    }
-    for (uint32_t i = 0U; i < ProfileCount; ++i)
-    {
-        profileButton[i].setVisible(!imageVisible);
-        profileTouch[i].setVisible(!imageVisible);
-        profileLabel[i].setVisible(!imageVisible);
-        profileIcon[i].setVisible(!imageVisible);
-        profileButton[i].invalidate();
-        profileTouch[i].invalidate();
-        profileLabel[i].invalidate();
-        profileIcon[i].invalidate();
-
-        imageProfileButton[i].setVisible(imageVisible);
-        imageProfileTouch[i].setVisible(imageVisible);
-        imageProfileLabel[i].setVisible(imageVisible);
-        imageProfileIcon[i].setVisible(imageVisible);
-        imageProfileButton[i].invalidate();
-        imageProfileTouch[i].invalidate();
-        imageProfileLabel[i].invalidate();
-        imageProfileIcon[i].invalidate();
-    }
-
     for (uint32_t i = 0U; i < 4U; ++i)
     {
-        heatMetricLabel[i].setVisible(imageVisible);
-        imageHudIcon[i].setVisible(imageVisible);
-        heatMetricLabel[i].invalidate();
-        imageHudIcon[i].invalidate();
+        cameraFrame[i].setVisible(imageVisible);
     }
-    for (uint32_t i = 0U; i < ImageHudCount; ++i)
+    for (uint32_t i = 0U; i < 8U; ++i)
     {
-        imageHudLabel[i].setVisible(imageVisible);
-        imageHudLabel[i].invalidate();
+        cameraCorner[i].setVisible(imageVisible);
     }
-    for (uint32_t i = 0U; i < ImageActionCount; ++i)
+    for (uint32_t i = 0U; i < QuickCount; ++i)
     {
-        imageActionButton[i].setVisible(imageVisible);
-        imageActionIcon[i].setVisible(imageVisible);
-        imageActionTouch[i].setVisible(imageVisible);
-        imageActionLabel[i].setVisible(imageVisible);
-        imageActionButton[i].invalidate();
-        imageActionIcon[i].invalidate();
-        imageActionTouch[i].invalidate();
-        imageActionLabel[i].invalidate();
+        quickButton[i].setVisible(imageVisible);
+        quickIcon[i].setVisible(imageVisible);
+        quickLabel[i].setVisible(imageVisible);
+        quickTouch[i].setVisible(imageVisible);
+    }
+    for (uint32_t i = 0U; i < RailCardCount; ++i)
+    {
+        railCard[i].setVisible(imageVisible);
+    }
+    railSourceTitle.setVisible(imageVisible);
+    railTheta.setVisible(imageVisible);
+    railPhi.setVisible(imageVisible);
+    railQualityTrack.setVisible(imageVisible);
+    railQualityFill.setVisible(imageVisible);
+    railStateTitle.setVisible(imageVisible);
+    for (uint32_t i = 0U; i < RailStateRows; ++i)
+    {
+        railStateName[i].setVisible(imageVisible);
+        railStateValue[i].setVisible(imageVisible);
+    }
+    railPerfTitle.setVisible(imageVisible);
+    railPerfMs.setVisible(imageVisible);
+    railPerfFps.setVisible(imageVisible);
+    railPerfCam.setVisible(imageVisible);
+    railModeTitle.setVisible(imageVisible);
+    railModeValue.setVisible(imageVisible);
+    railSceneValue.setVisible(imageVisible);
+    stripPanel.setVisible(imageVisible);
+    for (uint32_t i = 0U; i < StripCount; ++i)
+    {
+        stripLabel[i].setVisible(imageVisible);
     }
 
+    /* array */
+    micTitle.setVisible(micVisible);
     for (uint32_t i = 0U; i < MicCount; ++i)
     {
         micCell[i].setVisible(micVisible);
-        micValueLabel[i].setVisible(micVisible);
-        micCell[i].invalidate();
-        micValueLabel[i].invalidate();
+        micIndexLabel[i].setVisible(micVisible);
+        micDbLabel[i].setVisible(micVisible);
     }
     for (uint32_t i = 0U; i < 4U; ++i)
     {
-        micSummaryLabel[i].setVisible(micVisible);
-        micSummaryLabel[i].invalidate();
+        micSummary[i].setVisible(micVisible);
     }
 
+    /* system */
+    sysTitle.setVisible(sysVisible);
+    sysPerfCard.setVisible(sysVisible);
+    sysInfoCard.setVisible(sysVisible);
     for (uint32_t i = 0U; i < PerfCount; ++i)
     {
-        perfLabel[i].setVisible(perfVisible);
-        perfTrack[i].setVisible(perfVisible);
-        perfFill[i].setVisible(perfVisible);
-        perfLabel[i].invalidate();
-        perfTrack[i].invalidate();
-        perfFill[i].invalidate();
+        perfName[i].setVisible(sysVisible);
+        perfTrack[i].setVisible(sysVisible);
+        perfFill[i].setVisible(sysVisible);
+        perfValue[i].setVisible(sysVisible);
+    }
+    for (uint32_t i = 0U; i < SysInfoCount; ++i)
+    {
+        sysInfoName[i].setVisible(sysVisible);
+        sysInfoValue[i].setVisible(sysVisible);
     }
 
-    for (uint32_t i = 0U; i < SettingsCount; ++i)
+    /* params */
+    paramsTitle.setVisible(paramsVisible);
+    paramsProfileCaption.setVisible(paramsVisible);
+    for (uint32_t i = 0U; i < ProfileCount; ++i)
     {
-        settingsLabel[i].setVisible(settingsVisible);
-        settingsLabel[i].invalidate();
+        profileChip[i].setVisible(paramsVisible);
+        profileChipLabel[i].setVisible(paramsVisible);
+        profileTouch[i].setVisible(paramsVisible);
+    }
+    for (uint32_t i = 0U; i < ParamRowCount; ++i)
+    {
+        paramRowPanel[i].setVisible(paramsVisible);
+        paramRowName[i].setVisible(paramsVisible);
+        paramRowValue[i].setVisible(paramsVisible);
     }
 
-    for (uint32_t i = 0U; i < MediaLabelCount; ++i)
-    {
-        mediaLabel[i].setVisible(mediaVisible);
-        mediaLabel[i].invalidate();
-    }
+    /* media */
+    mediaTitle.setVisible(mediaVisible);
     mediaPreview.setVisible(mediaVisible);
-    mediaPreview.invalidate();
+    mediaInfoCard.setVisible(mediaVisible);
+    for (uint32_t i = 0U; i < MediaInfoCount; ++i)
+    {
+        mediaInfoName[i].setVisible(mediaVisible);
+        mediaInfoValue[i].setVisible(mediaVisible);
+    }
     for (uint32_t i = 0U; i < MediaActionCount; ++i)
     {
         mediaButton[i].setVisible(mediaVisible);
         mediaButtonIcon[i].setVisible(mediaVisible);
-        mediaTouch[i].setVisible(mediaVisible);
         mediaButtonLabel[i].setVisible(mediaVisible);
-        mediaButton[i].invalidate();
-        mediaButtonIcon[i].invalidate();
-        mediaTouch[i].invalidate();
-        mediaButtonLabel[i].invalidate();
+        mediaTouch[i].setVisible(mediaVisible);
     }
 
-    cameraPreviewKey.invalidate();
     invalidate();
 }
 
 void TemplateView::refreshNavigation()
 {
-    char text[40];
-    (void)snprintf(text, sizeof(text), "N647 %s", screenName(activeScreen));
-    pageTitleLabel.setText(text);
+    static const uint8_t navScreens[NavCount] = {
+        APP_UI_SCREEN_IMAGE,
+        APP_UI_SCREEN_MICS,
+        APP_UI_SCREEN_SETTINGS,
+        APP_UI_SCREEN_MEDIA,
+        APP_UI_SCREEN_PERF
+    };
 
     for (uint32_t i = 0U; i < NavCount; ++i)
     {
-        const bool selected = (i == activeScreen);
-        const touchgfx::colortype buttonColor = selected ? rgb(24, 60, 62) : ColorPanel;
-        const touchgfx::colortype borderColor = selected ? ColorCyan : ColorLine;
-        const touchgfx::colortype textColor = selected ? ColorText : ColorMuted;
-
-        navButton[i].setColor(buttonColor);
-        navButton[i].setBorderColor(borderColor);
-        navButton[i].invalidate();
-        navLabel[i].setColors(textColor, buttonColor, true);
-        navIcon[i].invalidate();
+        const bool active = (navScreens[i] == activeScreen);
+        navLabel[i].setColors(active ? ColorBlue : ColorMuted, ColorBg, false);
+        if (active)
+        {
+            navActiveBar.setPosition(0, static_cast<int16_t>(64 + (i * 82)), 3, 64);
+        }
     }
+    navActiveBar.invalidate();
+    navPanel.invalidate();
 }
 
-void TemplateView::refreshProfileButtons()
-{
-    char mode[40];
-    (void)snprintf(mode, sizeof(mode), "Wide32 48k %s", profileName(activeProfile));
-    modeLabel.setText(mode);
-
-    for (uint32_t i = 0U; i < ProfileCount; ++i)
-    {
-        const bool selected = (i == activeProfile);
-        const touchgfx::colortype buttonColor = selected ? rgb(24, 60, 62) : ColorPanel;
-        const touchgfx::colortype borderColor = selected ? ColorCyan : ColorLine;
-        profileButton[i].setColor(buttonColor);
-        profileButton[i].setBorderColor(borderColor);
-        profileButton[i].invalidate();
-        profileIcon[i].invalidate();
-        profileLabel[i].setColors(selected ? ColorText : ColorMuted, buttonColor, true);
-
-        imageProfileButton[i].setColor(buttonColor);
-        imageProfileButton[i].setBorderColor(borderColor);
-        imageProfileButton[i].invalidate();
-        imageProfileIcon[i].invalidate();
-        imageProfileLabel[i].setColors(selected ? ColorText : ColorMuted, buttonColor, true);
-    }
-}
-
-void TemplateView::refreshDetails(const AppUiSnapshot& snapshot)
+void TemplateView::refreshStatusBar(const AppUiSnapshot& snapshot)
 {
     char text[48];
-    const bool powerReady = ((snapshot.powerFlags & APP_UI_POWER_FLAG_BQ_PRESENT) != 0U);
-    const bool adcReady = ((snapshot.powerFlags & APP_UI_POWER_FLAG_ADC_VALID) != 0U);
-    const bool powerFault = ((snapshot.powerState == APP_UI_POWER_STATE_FAULT) ||
-                             (snapshot.powerState == APP_UI_POWER_STATE_UNDERVOLTAGE));
 
-    statusDot.setColor(powerFault ? rgb(225, 91, 63) :
-                       (adcReady ? rgb(82, 196, 126) :
-                       (snapshot.touchReady ? rgb(109, 212, 186) : rgb(226, 172, 62))));
-    statusDot.invalidate();
+    (void)snprintf(text, sizeof(text), "通用 · %s", profileName(activeProfile));
+    modeChipLabel.setText(text);
 
-    (void)snprintf(text, sizeof(text), "电源 %s", powerStateName(snapshot.powerState));
-    detailLabel[0].setText(text);
-
-    if (powerReady && adcReady)
+    const bool recording = (snapshot.mediaFlags & APP_UI_MEDIA_FLAG_RECORDING) != 0U;
+    if (recording != recActive)
     {
-        (void)snprintf(text, sizeof(text), "电量 %03u%%", snapshot.batteryPct);
-        detailLabel[1].setText(text);
-        (void)snprintf(text, sizeof(text), "电池 %lu.%02luV",
-                       static_cast<unsigned long>(snapshot.batteryMv / 1000U),
-                       static_cast<unsigned long>((snapshot.batteryMv % 1000U) / 10U));
-        detailLabel[2].setText(text);
-        (void)snprintf(text, sizeof(text), "系统 %lu.%02luV",
-                       static_cast<unsigned long>(snapshot.systemMv / 1000U),
-                       static_cast<unsigned long>((snapshot.systemMv % 1000U) / 10U));
-        detailLabel[3].setText(text);
+        recActive = recording;
+        recDot.setVisible(recActive);
+        recLabel.setVisible(recActive);
+        recDot.invalidate();
+        recLabel.invalidate();
+    }
+    if (recording)
+    {
+        (void)snprintf(text,
+                       sizeof(text),
+                       "%02lu:%02lu",
+                       static_cast<unsigned long>(snapshot.mediaRecordSeconds / 60U),
+                       static_cast<unsigned long>(snapshot.mediaRecordSeconds % 60U));
+        recLabel.setText(text);
+    }
+
+    if ((snapshot.mediaFlags & APP_UI_MEDIA_FLAG_FS_MOUNTED) != 0U)
+    {
+        const uint32_t freeMb = (snapshot.mediaFreeMb <= snapshot.mediaTotalMb)
+                                ? snapshot.mediaFreeMb
+                                : snapshot.mediaTotalMb;
+        if (freeMb >= 1024U)
+        {
+            (void)snprintf(text, sizeof(text), "SD %lu.%luG",
+                           static_cast<unsigned long>(freeMb / 1024U),
+                           static_cast<unsigned long>(((freeMb % 1024U) * 10U) / 1024U));
+        }
+        else
+        {
+            (void)snprintf(text, sizeof(text), "SD %luM", static_cast<unsigned long>(freeMb));
+        }
+        sdLabel.setColors(ColorMuted, ColorBg, false);
     }
     else
     {
-        detailLabel[1].setText("电量 --%");
-        detailLabel[2].setText("电池 --.--V");
-        detailLabel[3].setText("系统 --.--V");
+        (void)snprintf(text, sizeof(text), "SD --");
+        sdLabel.setColors(ColorAmber, ColorBg, false);
+    }
+    sdLabel.setText(text);
+
+    if (snapshot.batteryMv != 0U)
+    {
+        (void)snprintf(text, sizeof(text), "%s %u%%", powerStateName(snapshot.powerState), snapshot.batteryPct);
+        battLabel.setVisible(true);
+        battLabel.setText(text);
+    }
+    else if (battLabel.isVisible())
+    {
+        battLabel.setVisible(false);
+        battLabel.invalidate();
     }
 
-    const int32_t currentMa = snapshot.batteryCurrentMa;
-    const uint32_t absCurrentMa = (currentMa < 0) ? static_cast<uint32_t>(-currentMa) : static_cast<uint32_t>(currentMa);
-    (void)snprintf(text, sizeof(text), "IBAT %c%lu.%02luA",
-                   (currentMa < 0) ? '-' : '+',
-                   static_cast<unsigned long>(absCurrentMa / 1000U),
-                   static_cast<unsigned long>((absCurrentMa % 1000U) / 10U));
-    detailLabel[4].setText(text);
+    if (snapshot.uiFpsX10 != 0U)
+    {
+        (void)snprintf(text, sizeof(text), "热图 %u.%u fps",
+                       snapshot.uiFpsX10 / 10U,
+                       snapshot.uiFpsX10 % 10U);
+    }
+    else
+    {
+        (void)snprintf(text, sizeof(text), "热图 --");
+    }
+    fpsLabel.setText(text);
+}
 
-    (void)snprintf(text, sizeof(text), "触摸 %s %s", touchName(snapshot.touchIc), snapshot.touchDown ? "按下" : "抬起");
-    detailLabel[5].setText(text);
-    (void)snprintf(text, sizeof(text), "坐标 X%04u Y%04u", snapshot.touchX, snapshot.touchY);
-    detailLabel[6].setText(text);
-    (void)snprintf(text, sizeof(text), "模式 %s", profileName(snapshot.activeProfile));
-    detailLabel[7].setText(text);
-    (void)snprintf(text, sizeof(text), "帧号 %06lu", static_cast<unsigned long>(snapshot.frameSeq));
-    detailLabel[8].setText(text);
-    (void)snprintf(text, sizeof(text), "UI %lu.%luFPS",
-                   static_cast<unsigned long>(snapshot.uiFpsX10 / 10U),
-                   static_cast<unsigned long>(snapshot.uiFpsX10 % 10U));
-    detailLabel[9].setText(text);
-    (void)snprintf(text, sizeof(text), "BQ 0x%04X PIN %02lX",
-                   static_cast<unsigned int>(snapshot.chargerStatus),
-                   static_cast<unsigned long>(snapshot.powerPinState & 0xFFU));
-    detailLabel[10].setText(text);
+void TemplateView::refreshBootPage(const AppUiSnapshot& snapshot)
+{
+    /* Boot checklist rows map to bring-up module bit positions. */
+    static const uint8_t moduleBits[BootItemCount] = {4U, 5U, 6U, 8U, 10U};
+
+    uint32_t readyCount = 0U;
+    uint32_t watchedCount = 0U;
+
+    for (uint32_t i = 0U; i < BootItemCount; ++i)
+    {
+        const uint32_t mask = 1UL << moduleBits[i];
+        const bool enabled = (snapshot.bringupEnabledMask & mask) != 0U;
+        uint8_t state = APP_UI_BOOT_MODULE_PENDING;
+
+        if (!enabled)
+        {
+            if ((snapshot.bringupSkippedMask & mask) != 0U)
+            {
+                state = APP_UI_BOOT_MODULE_SKIPPED;
+            }
+        }
+        else
+        {
+            ++watchedCount;
+            if ((snapshot.bringupReadyMask & mask) != 0U)
+            {
+                state = APP_UI_BOOT_MODULE_READY;
+                ++readyCount;
+            }
+            else if ((snapshot.bringupFailedMask & mask) != 0U)
+            {
+                state = APP_UI_BOOT_MODULE_FAILED;
+                ++readyCount; /* resolved, keeps the bar honest */
+            }
+            else if ((snapshot.bringupSkippedMask & mask) != 0U)
+            {
+                state = APP_UI_BOOT_MODULE_SKIPPED;
+                ++readyCount;
+            }
+        }
+
+        switch (state)
+        {
+        case APP_UI_BOOT_MODULE_READY:
+            bootItemDot[i].setColor(ColorGreen);
+            bootItemState[i].setColors(ColorGreen, ColorBg, false);
+            bootItemState[i].setText("就绪");
+            break;
+        case APP_UI_BOOT_MODULE_FAILED:
+            bootItemDot[i].setColor(ColorRed);
+            bootItemState[i].setColors(ColorRed, ColorBg, false);
+            bootItemState[i].setText("失败");
+            break;
+        case APP_UI_BOOT_MODULE_SKIPPED:
+            bootItemDot[i].setColor(ColorMuted);
+            bootItemState[i].setColors(ColorMuted, ColorBg, false);
+            bootItemState[i].setText("跳过");
+            break;
+        default:
+            bootItemDot[i].setColor(ColorMuted);
+            bootItemState[i].setColors(ColorMuted, ColorBg, false);
+            bootItemState[i].setText("等待");
+            break;
+        }
+        bootItemDot[i].invalidate();
+    }
+
+    if (watchedCount == 0U)
+    {
+        bootBarTarget = 24;
+    }
+    else
+    {
+        bootBarTarget = static_cast<int16_t>((260U * readyCount) / watchedCount);
+        if (bootBarTarget < 24)
+        {
+            bootBarTarget = 24;
+        }
+    }
 }
 
 void TemplateView::refreshImagePage(const AppUiSnapshot& snapshot)
 {
     char text[64];
-    const bool acousticRunning = ((snapshot.acousticFlags & APP_UI_ACOUSTIC_FLAG_RUNNING) != 0U);
-    const bool acousticValid = ((snapshot.acousticFlags & APP_UI_ACOUSTIC_FLAG_VALID) != 0U);
-    const bool acousticDegraded = ((snapshot.acousticFlags & APP_UI_ACOUSTIC_FLAG_AUTO_DEGRADED) != 0U);
-    const bool pcmdLive = ((snapshot.pcmdFlags & APP_UI_PCMD_FLAG_FRAME_VALID) != 0U);
-    const bool pcmdRawValid = ((snapshot.pcmdFlags & APP_UI_PCMD_FLAG_RAW_VALID) != 0U);
-    const bool pcmdFault = ((snapshot.pcmdFlags & APP_UI_PCMD_FLAG_RAW_FAULT) != 0U);
-    const bool recording = ((snapshot.mediaFlags & APP_UI_MEDIA_FLAG_RECORDING) != 0U);
 
-    (void)snprintf(text, sizeof(text), "Wide32 %s  T%+03d P%+03d Q%02u",
-                   profileShortName(activeProfile),
-                   snapshot.thetaDeg,
-                   snapshot.phiDeg,
-                   snapshot.qualityPct);
-    modeLabel.setText(text);
+    (void)snprintf(text, sizeof(text), "方位 %+d°", snapshot.thetaDeg);
+    railTheta.setText(text);
+    stripLabel[0].setText(text);
 
-    (void)snprintf(text, sizeof(text), "%+03d / %+03d", snapshot.thetaDeg, snapshot.phiDeg);
-    imageHudLabel[1].setText(text);
-    imageHudLabel[1].setColors(acousticValid ? ColorText : ColorMuted, ColorPanel);
+    (void)snprintf(text, sizeof(text), "俯仰 %+d°", snapshot.phiDeg);
+    railPhi.setText(text);
+    stripLabel[1].setText(text);
 
-    if (pcmdFault)
+    (void)snprintf(text, sizeof(text), "质量 %02u%%", snapshot.qualityPct);
+    stripLabel[2].setText(text);
+
+    (void)snprintf(text, sizeof(text), "峰值 %d dBFS", snapshot.pcmdRawPeakDbfs);
+    stripLabel[3].setText(text);
+
+    int16_t fillW = static_cast<int16_t>((144 * snapshot.qualityPct) / 100);
+    if (fillW < 4)
     {
-        imageHudLabel[3].setText("异常");
-        imageHudLabel[3].setColors(ColorRed, ColorPanel);
+        fillW = 4;
     }
-    else if (pcmdRawValid && pcmdLive)
+    railQualityFill.setPosition(RailX + 14, 158, fillW, 6);
+    railQualityTrack.invalidate();
+    railQualityFill.invalidate();
+
+    const bool pcmdOk = (snapshot.pcmdFlags & APP_UI_PCMD_FLAG_FRAME_VALID) != 0U;
+    const bool pcmdFault = (snapshot.pcmdFlags & APP_UI_PCMD_FLAG_RAW_FAULT) != 0U;
+    railStateValue[0].setColors(pcmdFault ? ColorRed : (pcmdOk ? ColorGreen : ColorAmber), ColorBg, false);
+    railStateValue[0].setText(pcmdFault ? "故障" : (pcmdOk ? "正常" : "等待"));
+
+    const bool camOk = (snapshot.cameraSwapCount != 0U);
+    railStateValue[1].setColors(camOk ? ColorGreen : ColorAmber, ColorBg, false);
+    railStateValue[1].setText(camOk ? "显示中" : "等待");
+
+    const bool sdOk = (snapshot.mediaFlags & APP_UI_MEDIA_FLAG_FS_MOUNTED) != 0U;
+    railStateValue[2].setColors(sdOk ? ColorGreen : ColorAmber, ColorBg, false);
+    railStateValue[2].setText(sdOk ? "已挂载" : "--");
+
+    if (snapshot.acousticProcessedFrames != 0U)
     {
-        imageHudLabel[3].setText("正常");
-        imageHudLabel[3].setColors(ColorGreen, ColorPanel);
+        (void)snprintf(text, sizeof(text), "SRP %u.%02u ms",
+                       snapshot.srpMsX100 / 100U,
+                       snapshot.srpMsX100 % 100U);
     }
     else
     {
-        imageHudLabel[3].setText("等待");
-        imageHudLabel[3].setColors(ColorAmber, ColorPanel);
+        (void)snprintf(text, sizeof(text), "SRP --");
     }
+    railPerfMs.setText(text);
 
-    imageHudLabel[5].setText(acousticRunning ? "显示中" : "等待");
-    imageHudLabel[5].setColors(acousticRunning ? ColorGreen : ColorAmber, ColorPanel);
+    if (snapshot.uiFpsX10 != 0U)
+    {
+        (void)snprintf(text, sizeof(text), "热图 %u.%u fps",
+                       snapshot.uiFpsX10 / 10U,
+                       snapshot.uiFpsX10 % 10U);
+    }
+    else
+    {
+        (void)snprintf(text, sizeof(text), "热图 --");
+    }
+    railPerfFps.setText(text);
 
-    (void)snprintf(text, sizeof(text), "%lu.%lu FPS",
-                   static_cast<unsigned long>(snapshot.uiFpsX10 / 10U),
-                   static_cast<unsigned long>(snapshot.uiFpsX10 % 10U));
-    imageHudLabel[7].setText(text);
-    imageHudLabel[7].setColors((snapshot.uiFpsX10 >= 100U) ? ColorCyan : ColorAmber, ColorPanel);
+    (void)snprintf(text, sizeof(text), "相机 %lu 帧", static_cast<unsigned long>(snapshot.cameraSwapCount));
+    railPerfCam.setText(text);
 
-    (void)snprintf(text, sizeof(text), "方位 %+03d", snapshot.thetaDeg);
-    heatMetricLabel[0].setText(text);
-    (void)snprintf(text, sizeof(text), "俯仰 %+03d", snapshot.phiDeg);
-    heatMetricLabel[1].setText(text);
-    (void)snprintf(text, sizeof(text), "质量 %02u%%", snapshot.qualityPct);
-    heatMetricLabel[2].setText(text);
-    (void)snprintf(text, sizeof(text), "FPS %lu.%lu",
-                   static_cast<unsigned long>(snapshot.uiFpsX10 / 10U),
-                   static_cast<unsigned long>(snapshot.uiFpsX10 % 10U));
-    heatMetricLabel[3].setText(text);
+    railModeValue.setText(profileName(activeProfile));
 
-    (void)snprintf(text, sizeof(text), "SRP %lu.%02lums",
-                   static_cast<unsigned long>(snapshot.srpMsX100 / 100U),
-                   static_cast<unsigned long>(snapshot.srpMsX100 % 100U));
-    imageHudLabel[6].setText(acousticDegraded ? "性能 降级" : "性能");
-    imageHudLabel[7].setText(text);
+    /* quick buttons: record button reflects state */
+    const bool recording = (snapshot.mediaFlags & APP_UI_MEDIA_FLAG_RECORDING) != 0U;
+    quickButton[1].setFillColor(recording ? ColorRedDim : ColorPanel2);
+    quickLabel[1].setText(recording ? "停止" : "录像");
+    quickLabel[1].setColors(recording ? ColorRed : ColorText, ColorBg, false);
 
-    imageActionButton[1].setBorderColor(recording ? ColorRed : ColorLine);
-    imageActionButton[1].setColor(recording ? rgb(70, 28, 30) : ColorPanel2);
-    imageActionButton[1].invalidate();
-    imageActionLabel[1].setText(recording ? "停止" : "录像");
-    imageActionLabel[1].setColors(ColorText, recording ? rgb(70, 28, 30) : ColorPanel2, true);
+    quickLabel[4].setText(profileName(activeProfile));
 }
 
 void TemplateView::refreshMicPage(const AppUiSnapshot& snapshot)
 {
-    int32_t dbSum = 0;
-    int8_t peakDbfs = -90;
     char text[32];
-    const bool pcmdLive = ((snapshot.pcmdFlags & APP_UI_PCMD_FLAG_FRAME_VALID) != 0U);
-    const bool pcmdStarted = ((snapshot.pcmdFlags & APP_UI_PCMD_FLAG_STARTED) != 0U);
-    const bool pcmdDebug = ((snapshot.pcmdFlags & APP_UI_PCMD_FLAG_DEBUG_ENABLED) != 0U);
-    const bool pcmdRawValid = ((snapshot.pcmdFlags & APP_UI_PCMD_FLAG_RAW_VALID) != 0U);
-    const bool pcmdRawFault = ((snapshot.pcmdFlags & APP_UI_PCMD_FLAG_RAW_FAULT) != 0U);
-    const bool pcmdHighFloor =
-        ((snapshot.pcmdRawQualityFlags & APP_UI_PCMD_RAW_FLAG_HIGH_FLOOR) != 0U);
+    uint32_t activeCount = 0U;
+    int32_t avgSum = 0;
+    int8_t peak = -90;
 
     for (uint32_t i = 0U; i < MicCount; ++i)
     {
         const uint8_t level = snapshot.micLevel[i];
         const int8_t dbfs = snapshot.micDbfs[i];
-        const touchgfx::colortype color = levelColor(level);
-        dbSum += static_cast<int32_t>(dbfs);
-        if (dbfs > peakDbfs)
+
+        micCell[i].setFillColor(levelColor(level));
+
+        if (dbfs > -85)
         {
-            peakDbfs = dbfs;
+            ++activeCount;
         }
-        micCell[i].setColor(color);
-        (void)snprintf(text, sizeof(text), "M%02lu %d",
-                       static_cast<unsigned long>(i + 1U),
-                       static_cast<int>(dbfs));
-        micValueLabel[i].setColors(rgb(235, 239, 232), color, true);
-        micValueLabel[i].setText(text);
-        micCell[i].invalidate();
-        micValueLabel[i].invalidate();
+        avgSum += dbfs;
+        if (dbfs > peak)
+        {
+            peak = dbfs;
+        }
+
+        (void)snprintf(text, sizeof(text), "%d", dbfs);
+        micDbLabel[i].setText(text);
     }
 
-    (void)snprintf(text, sizeof(text), "平均 %lddBFS", static_cast<long>(dbSum / static_cast<int32_t>(MicCount)));
-    micSummaryLabel[1].setText(text);
-    (void)snprintf(text, sizeof(text), "峰值 %ddBFS", static_cast<int>(peakDbfs));
-    micSummaryLabel[2].setText(text);
+    const bool rawValid = (snapshot.pcmdFlags & APP_UI_PCMD_FLAG_RAW_VALID) != 0U;
+    const bool fault = (snapshot.pcmdFlags & APP_UI_PCMD_FLAG_RAW_FAULT) != 0U;
+    micSummary[0].setColors(fault ? ColorRed : (rawValid ? ColorGreen : ColorAmber), ColorBg, false);
+    micSummary[0].setText(fault ? "阵列状态 故障" : (rawValid ? "阵列状态 正常" : "阵列状态 等待"));
 
-    micSummaryLabel[0].setText(pcmdRawValid ? "32 路 PCMD 原始音频" :
-                               (pcmdRawFault ? "32 路原始音频异常" : "32 路原始音频等待"));
-    if (pcmdDebug)
-    {
-        (void)snprintf(text, sizeof(text), "P%X C%X R%lX",
-                       snapshot.pcmdDevicePresentMask,
-                       snapshot.pcmdDeviceConfigOkMask,
-                       static_cast<unsigned long>(snapshot.pcmdRawQualityFlags & 0xFFU));
-        micSummaryLabel[3].setText(text);
-    }
-    else if (pcmdRawFault)
-    {
-        (void)snprintf(text, sizeof(text), "PCMD 削顶 %u.%u%%",
-                       static_cast<unsigned int>(snapshot.pcmdRawRailPercentX10 / 10U),
-                       static_cast<unsigned int>(snapshot.pcmdRawRailPercentX10 % 10U));
-        micSummaryLabel[3].setText(text);
-    }
-    else if (pcmdHighFloor && !pcmdRawValid)
-    {
-        micSummaryLabel[3].setText("PCMD 底噪偏高");
-    }
-    else if (pcmdLive)
-    {
-        micSummaryLabel[3].setText(pcmdRawValid ? "PCMD 正常" : "PCMD 帧等待原始音频");
-    }
-    else if (pcmdStarted)
-    {
-        micSummaryLabel[3].setText("PCMD 原始音频等待");
-    }
-    else
-    {
-        micSummaryLabel[3].setText("PCMD 离线");
-    }
+    (void)snprintf(text, sizeof(text), "有效 %lu/32", static_cast<unsigned long>(activeCount));
+    micSummary[1].setText(text);
+
+    (void)snprintf(text, sizeof(text), "平均 %ld dBFS", static_cast<long>(avgSum / 32));
+    micSummary[2].setText(text);
+
+    (void)snprintf(text, sizeof(text), "峰值 %d dBFS", peak);
+    micSummary[3].setText(text);
 }
 
-void TemplateView::refreshPerfPage(const AppUiSnapshot& snapshot)
+void TemplateView::refreshSystemPage(const AppUiSnapshot& snapshot)
 {
-    const touchgfx::colortype fillColors[PerfCount] = {
-        ColorCyan,
-        rgb(83, 160, 204),
-        ColorAmber,
-        ColorRed,
-        ColorGreen
+    char text[48];
+
+    const uint32_t cycles[PerfCount] = {
+        snapshot.srpPreprocessCycles,
+        snapshot.srpFftCycles,
+        snapshot.srpGccCycles,
+        snapshot.srpCoarseCycles + snapshot.srpFineCycles,
+        snapshot.srpTotalCycles
     };
 
     for (uint32_t i = 0U; i < PerfCount; ++i)
     {
-        const uint16_t width = static_cast<uint16_t>((390U * snapshot.perfLoad[i]) / 100U);
+        const uint8_t load = (i < 5U) ? snapshot.perfLoad[i] : 0U;
+        int16_t w = static_cast<int16_t>((240 * ((load > 100U) ? 100U : load)) / 100U);
+        if (w < 6)
+        {
+            w = 6;
+        }
+        perfFill[i].setPosition(ContentX + 180, perfFill[i].getY(), w, 16);
         perfTrack[i].invalidate();
-        perfFill[i].setPosition(perfTrack[i].getX(), perfTrack[i].getY(), width, perfTrack[i].getHeight());
-        perfFill[i].setColor(fillColors[i]);
         perfFill[i].invalidate();
+
+        formatCyclesM(text, sizeof(text), cycles[i]);
+        perfValue[i].setText(text);
     }
 
-    if ((snapshot.pcmdFlags & APP_UI_PCMD_FLAG_DEBUG_ENABLED) != 0U)
+    (void)snprintf(text, sizeof(text), "%lu.%02luV %u%%",
+                   static_cast<unsigned long>(snapshot.batteryMv / 1000U),
+                   static_cast<unsigned long>((snapshot.batteryMv % 1000U) / 10U),
+                   snapshot.batteryPct);
+    sysInfoValue[0].setText(text);
+
+    (void)snprintf(text, sizeof(text), "%lu.%02luV",
+                   static_cast<unsigned long>(snapshot.systemMv / 1000U),
+                   static_cast<unsigned long>((snapshot.systemMv % 1000U) / 10U));
+    sysInfoValue[1].setText(text);
+
+    (void)snprintf(text, sizeof(text), "%+ld mA", static_cast<long>(snapshot.batteryCurrentMa));
+    sysInfoValue[2].setText(text);
+
+    if (snapshot.touchReady != 0U)
     {
-        char text[32];
-        perfLabel[0].setText("采集");
-        (void)snprintf(text, sizeof(text), "FPS %lu.%lu",
-                       static_cast<unsigned long>(snapshot.pcmdFpsX10 / 10U),
-                       static_cast<unsigned long>(snapshot.pcmdFpsX10 % 10U));
-        perfLabel[1].setText(text);
-        (void)snprintf(text, sizeof(text), "发布 %lu", static_cast<unsigned long>(snapshot.pcmdPublishedFrames % 1000U));
-        perfLabel[2].setText(text);
-        (void)snprintf(text, sizeof(text), "丢帧 %lu", static_cast<unsigned long>(snapshot.pcmdDroppedHalves % 1000U));
-        perfLabel[3].setText(text);
-        (void)snprintf(text, sizeof(text), "DMA2D %lu", static_cast<unsigned long>(snapshot.cameraDma2dCopyCount % 1000U));
-        perfLabel[4].setText(text);
+        (void)snprintf(text, sizeof(text), "X%u Y%u", snapshot.touchX, snapshot.touchY);
+        sysInfoValue[3].setText(text);
     }
     else
     {
-        char text[32];
-        formatCyclesM(text, sizeof(text), "预处理", snapshot.srpPreprocessCycles);
-        perfLabel[0].setText(text);
-        formatCyclesM(text, sizeof(text), "FFT", snapshot.srpFftCycles);
-        perfLabel[1].setText(text);
-        formatCyclesM(text, sizeof(text), "GCC", snapshot.srpGccCycles);
-        perfLabel[2].setText(text);
-        formatCyclesM(text, sizeof(text), "搜索", snapshot.srpCoarseCycles + snapshot.srpFineCycles);
-        perfLabel[3].setText(text);
-        formatCyclesM(text, sizeof(text), "总计", snapshot.srpTotalCycles);
-        perfLabel[4].setText(text);
+        sysInfoValue[3].setText("等待");
     }
+
+    (void)snprintf(text, sizeof(text), "%lu", static_cast<unsigned long>(snapshot.cameraSwapCount));
+    sysInfoValue[4].setText(text);
+
+    (void)snprintf(text, sizeof(text), "%lu", static_cast<unsigned long>(snapshot.cameraDisplayErrorCount));
+    sysInfoValue[5].setText(text);
+
+    (void)snprintf(text, sizeof(text), "%u.%u", snapshot.uiFpsX10 / 10U, snapshot.uiFpsX10 % 10U);
+    sysInfoValue[6].setText(text);
+
+    sysInfoValue[7].setText(__DATE__);
 }
 
-void TemplateView::refreshSettingsPage(const AppUiSnapshot& snapshot)
+void TemplateView::refreshParamsPage(const AppUiSnapshot& snapshot)
 {
-    char text[48];
-    const bool pcmdLive = ((snapshot.pcmdFlags & APP_UI_PCMD_FLAG_FRAME_VALID) != 0U);
-    const bool pcmdStarted = ((snapshot.pcmdFlags & APP_UI_PCMD_FLAG_STARTED) != 0U);
-    const bool pcmdDebug = ((snapshot.pcmdFlags & APP_UI_PCMD_FLAG_DEBUG_ENABLED) != 0U);
-    const bool pcmdRawValid = ((snapshot.pcmdFlags & APP_UI_PCMD_FLAG_RAW_VALID) != 0U);
-    const bool acousticRunning = ((snapshot.acousticFlags & APP_UI_ACOUSTIC_FLAG_RUNNING) != 0U);
-    const bool acousticValid = ((snapshot.acousticFlags & APP_UI_ACOUSTIC_FLAG_VALID) != 0U);
-    const bool acousticDegraded = ((snapshot.acousticFlags & APP_UI_ACOUSTIC_FLAG_AUTO_DEGRADED) != 0U);
+    (void)snapshot;
 
-    (void)snprintf(text, sizeof(text), "麦克风对 %s %u",
-                   profileName(snapshot.activeProfile),
-                   (snapshot.activeProfile == APP_UI_PROFILE_FAST) ? 96U :
-                   ((snapshot.activeProfile == APP_UI_PROFILE_QUALITY) ? 240U : 160U));
-    settingsLabel[2].setText(text);
-
-    settingsLabel[1].setText((snapshot.activeProfile == APP_UI_PROFILE_FAST) ? "频点策略 快速 B12" :
-                             ((snapshot.activeProfile == APP_UI_PROFILE_QUALITY) ? "频点策略 高质量 B40" :
-                              "频点策略 标准 B16"));
-    settingsLabel[4].setText(acousticValid ? "输入 PCMD -> SRP 有效" :
-                             (pcmdLive ? "输入 PCMD 帧等待 SRP" :
-                             (pcmdRawValid ? "输入 原始音频等待帧" :
-                             (pcmdStarted ? "输入 原始音频校验中" : "输入 等待采集"))));
-    if (pcmdDebug)
+    for (uint32_t i = 0U; i < ProfileCount; ++i)
     {
-        (void)snprintf(text, sizeof(text), "PCMD 帧%lu 丢%lu 同步%lu",
-                       static_cast<unsigned long>(snapshot.pcmdPublishedFrames),
-                       static_cast<unsigned long>(snapshot.pcmdDroppedHalves),
-                       static_cast<unsigned long>(snapshot.pcmdSyncMissCount));
-        settingsLabel[6].setText(text);
-    }
-    else
-    {
-        if (acousticRunning)
-        {
-            (void)snprintf(text, sizeof(text), "%s 处理%lu 失败%lu",
-                           acousticDegraded ? "SRP 降级" : "SRP 运行",
-                           static_cast<unsigned long>(snapshot.acousticProcessedFrames % 1000U),
-                           static_cast<unsigned long>(snapshot.acousticFailedFrames % 1000U));
-            settingsLabel[6].setText(text);
-        }
-        else
-        {
-            settingsLabel[6].setText(pcmdRawValid ? "真实采集 原始音频正常" : "真实采集 等待原始音频");
-        }
+        const bool active = (i == activeProfile);
+        profileChip[i].setFillColor(active ? ColorBlueDim : ColorPanel2);
+        profileChip[i].setBorder(active ? ColorBlue : ColorLine, true);
+        profileChipLabel[i].setColors(active ? ColorText : ColorMuted, ColorBg, false);
+        profileChip[i].invalidate();
     }
 }
 
 void TemplateView::refreshMediaPage(const AppUiSnapshot& snapshot)
 {
-    char text[96];
-    const bool sdReady = ((snapshot.mediaFlags & APP_UI_MEDIA_FLAG_SD_READY) != 0U);
-    const bool mounted = ((snapshot.mediaFlags & APP_UI_MEDIA_FLAG_FS_MOUNTED) != 0U);
-    const bool formatted = ((snapshot.mediaFlags & APP_UI_MEDIA_FLAG_FORMATTED) != 0U);
-    const bool recording = ((snapshot.mediaFlags & APP_UI_MEDIA_FLAG_RECORDING) != 0U);
-    const bool busy = ((snapshot.mediaFlags & APP_UI_MEDIA_FLAG_BUSY) != 0U);
-    const uint32_t minutes = snapshot.mediaRecordSeconds / 60U;
-    const uint32_t seconds = snapshot.mediaRecordSeconds % 60U;
+    char text[64];
 
-    mediaPreview.setSource(snapshot.mediaPreviewPixels,
-                           snapshot.mediaPreviewWidth,
-                           snapshot.mediaPreviewHeight,
-                           (snapshot.mediaPreviewValid != 0U));
-    if (mediaPreviewGeneration != snapshot.mediaPreviewGeneration)
-    {
-        mediaPreviewGeneration = snapshot.mediaPreviewGeneration;
-        mediaPreview.invalidate();
-    }
+    const bool sdReady = (snapshot.mediaFlags & APP_UI_MEDIA_FLAG_SD_READY) != 0U;
+    mediaInfoValue[0].setColors(sdReady ? ColorGreen : ColorAmber, ColorBg, false);
+    mediaInfoValue[0].setText(sdReady ? "正常" : "等待");
 
-    mediaLabel[0].setText(sdReady ? "SD 就绪" : "SD 等待");
-    mediaLabel[0].setColors(sdReady ? ColorCyan : ColorAmber, ColorPanel);
+    const bool mounted = (snapshot.mediaFlags & APP_UI_MEDIA_FLAG_FS_MOUNTED) != 0U;
+    mediaInfoValue[1].setColors(mounted ? ColorGreen : ColorAmber, ColorBg, false);
+    mediaInfoValue[1].setText(mounted ? "已挂载" : "未挂载");
 
-    (void)snprintf(text, sizeof(text), "文件系统 %s%s", mounted ? "已挂载" : "未挂载", formatted ? " 已格式化" : "");
-    mediaLabel[1].setText(text);
-    mediaLabel[1].setColors(mounted ? ColorCyan : ColorRed, ColorPanel);
-
-    (void)snprintf(text, sizeof(text), "空间 %lu / %lu MB",
+    (void)snprintf(text, sizeof(text), "%lu / %lu MB",
                    static_cast<unsigned long>(snapshot.mediaFreeMb),
                    static_cast<unsigned long>(snapshot.mediaTotalMb));
-    mediaLabel[2].setText(text);
+    mediaInfoValue[2].setText(text);
 
-    (void)snprintf(text, sizeof(text), "截图 %05lu BMP",
-                   static_cast<unsigned long>(snapshot.mediaScreenshots));
-    mediaLabel[3].setText(text);
+    (void)snprintf(text, sizeof(text), "%lu 张", static_cast<unsigned long>(snapshot.mediaScreenshots));
+    mediaInfoValue[3].setText(text);
 
-    (void)snprintf(text, sizeof(text), "视频 %05lu AVI",
-                   static_cast<unsigned long>(snapshot.mediaVideos));
-    mediaLabel[4].setText(text);
-
-    (void)snprintf(text, sizeof(text), "录制 %02lu:%02lu F%04lu 丢%lu",
-                   static_cast<unsigned long>(minutes),
-                   static_cast<unsigned long>(seconds),
-                   static_cast<unsigned long>(snapshot.mediaRecordFrames),
-                   static_cast<unsigned long>(snapshot.mediaDroppedFrames));
-    mediaLabel[5].setText(text);
-    mediaLabel[5].setColors(recording ? ColorRed : ColorText, ColorPanel);
-
-    if (snapshot.mediaSelectedFile[0] != '\0')
+    if ((snapshot.mediaFlags & APP_UI_MEDIA_FLAG_RECORDING) != 0U)
     {
-        (void)snprintf(text, sizeof(text), "选择 %s %s",
-                       selectedMediaName(snapshot.mediaSelectedType),
-                       snapshot.mediaSelectedFile);
+        (void)snprintf(text, sizeof(text), "录制中 %02lu:%02lu",
+                       static_cast<unsigned long>(snapshot.mediaRecordSeconds / 60U),
+                       static_cast<unsigned long>(snapshot.mediaRecordSeconds % 60U));
+        mediaInfoValue[4].setColors(ColorRed, ColorBg, false);
     }
     else
     {
-        (void)snprintf(text, sizeof(text), "选择 %s", selectedMediaName(snapshot.mediaSelectedType));
+        (void)snprintf(text, sizeof(text), "%lu 段", static_cast<unsigned long>(snapshot.mediaVideos));
+        mediaInfoValue[4].setColors(ColorText, ColorBg, false);
     }
-    mediaLabel[6].setText(text);
+    mediaInfoValue[4].setText(text);
 
-    if (snapshot.mediaLastFile[0] != '\0')
-    {
-        (void)snprintf(text, sizeof(text), "最近 %s", snapshot.mediaLastFile);
-    }
-    else
-    {
-        (void)snprintf(text, sizeof(text), "最近 无");
-    }
-    mediaLabel[7].setText(text);
+    mediaInfoValue[5].setText((snapshot.mediaSelectedFile[0] != '\0') ? snapshot.mediaSelectedFile : "--");
 
-    (void)snprintf(text, sizeof(text), "读取 %luB 错误 %lu",
-                   static_cast<unsigned long>(snapshot.mediaLastReadBytes),
-                   static_cast<unsigned long>(snapshot.mediaLastError));
-    mediaLabel[8].setText(text);
-    mediaLabel[8].setColors((snapshot.mediaLastError == 0U) ? ColorText : ColorRed, ColorPanel);
-
-    if (snapshot.mediaPreviewValid != 0U)
+    if (snapshot.mediaPreviewFrameCount > 1U)
     {
-        (void)snprintf(text, sizeof(text), "预览 %s F%lu/%lu",
-                       selectedMediaName(snapshot.mediaPreviewType),
-                       static_cast<unsigned long>(snapshot.mediaPreviewFrameIndex),
+        (void)snprintf(text, sizeof(text), "帧 %lu/%lu",
+                       static_cast<unsigned long>(snapshot.mediaPreviewFrameIndex + 1U),
                        static_cast<unsigned long>(snapshot.mediaPreviewFrameCount));
     }
     else
     {
-        (void)snprintf(text, sizeof(text), "%s %s",
-                       busy ? "忙" : "空闲",
-                       mounted ? "媒体就绪" : "等待媒体");
+        (void)snprintf(text, sizeof(text), "%lu B", static_cast<unsigned long>(snapshot.mediaLastReadBytes));
     }
-    mediaLabel[9].setText(text);
+    mediaInfoValue[6].setText(text);
 
-    mediaButtonLabel[1].setText(recording ? "停止" : "录像");
-
-    for (uint32_t i = 0U; i < MediaActionCount; ++i)
+    if (snapshot.mediaLastError != 0U)
     {
-        const bool primary = ((i == 0U) || (i == 1U));
-        const touchgfx::colortype buttonColor = busy ? rgb(34, 40, 42) :
-                                                (recording && (i == 1U) ? rgb(70, 28, 30) :
-                                                (primary ? rgb(24, 60, 62) : ColorPanel2));
-        const touchgfx::colortype borderColor = busy ? ColorLine :
-                                                (recording && (i == 1U) ? ColorRed :
-                                                (primary ? ColorCyan : ColorLine));
-        mediaButton[i].setColor(buttonColor);
-        mediaButton[i].setBorderColor(borderColor);
-        mediaButton[i].invalidate();
-        mediaButtonIcon[i].invalidate();
-        mediaButtonLabel[i].setColors(busy ? ColorMuted : ColorText, buttonColor, true);
+        (void)snprintf(text, sizeof(text), "错误 %lu", static_cast<unsigned long>(snapshot.mediaLastError));
+        mediaInfoValue[7].setColors(ColorRed, ColorBg, false);
+    }
+    else if ((snapshot.mediaFlags & APP_UI_MEDIA_FLAG_BUSY) != 0U)
+    {
+        (void)snprintf(text, sizeof(text), "忙");
+        mediaInfoValue[7].setColors(ColorAmber, ColorBg, false);
+    }
+    else
+    {
+        (void)snprintf(text, sizeof(text), "空闲");
+        mediaInfoValue[7].setColors(ColorMuted, ColorBg, false);
+    }
+    mediaInfoValue[7].setText(text);
+
+    mediaPreview.setSource(snapshot.mediaPreviewPixels,
+                           snapshot.mediaPreviewWidth,
+                           snapshot.mediaPreviewHeight,
+                           snapshot.mediaPreviewValid != 0U);
+    if (snapshot.mediaPreviewGeneration != mediaPreviewGeneration)
+    {
+        mediaPreviewGeneration = snapshot.mediaPreviewGeneration;
+        mediaPreview.invalidate();
     }
 }
 
+/* ------------------------------------------------------------------ */
+/* input                                                               */
+/* ------------------------------------------------------------------ */
+
 void TemplateView::onNavPressed(const touchgfx::AbstractButton& source)
 {
+    static const uint8_t navScreens[NavCount] = {
+        APP_UI_SCREEN_IMAGE,
+        APP_UI_SCREEN_MICS,
+        APP_UI_SCREEN_SETTINGS,
+        APP_UI_SCREEN_MEDIA,
+        APP_UI_SCREEN_PERF
+    };
+
     for (uint32_t i = 0U; i < NavCount; ++i)
     {
         if (&source == &navTouch[i])
         {
-            presenter->selectScreen(static_cast<uint8_t>(i));
+            presenter->selectScreen(navScreens[i]);
             return;
         }
+    }
+}
+
+void TemplateView::onQuickPressed(const touchgfx::AbstractButton& source)
+{
+    if (&source == &quickTouch[0])
+    {
+        presenter->requestScreenshot();
+    }
+    else if (&source == &quickTouch[1])
+    {
+        presenter->toggleRecording();
+    }
+    else if (&source == &quickTouch[2])
+    {
+        /* trigger mode arrives with the P6 feature pass */
+    }
+    else if (&source == &quickTouch[3])
+    {
+        /* palette cycling arrives with the heatmap v2 pass */
+    }
+    else if (&source == &quickTouch[4])
+    {
+        presenter->selectProfile(static_cast<uint8_t>((activeProfile + 1U) % ProfileCount));
     }
 }
 
@@ -1276,7 +1385,7 @@ void TemplateView::onProfilePressed(const touchgfx::AbstractButton& source)
 {
     for (uint32_t i = 0U; i < ProfileCount; ++i)
     {
-        if ((&source == &profileTouch[i]) || (&source == &imageProfileTouch[i]))
+        if (&source == &profileTouch[i])
         {
             presenter->selectProfile(static_cast<uint8_t>(i));
             return;
@@ -1284,45 +1393,26 @@ void TemplateView::onProfilePressed(const touchgfx::AbstractButton& source)
     }
 }
 
-void TemplateView::onImageActionPressed(const touchgfx::AbstractButton& source)
+void TemplateView::onMediaPressed(const touchgfx::AbstractButton& source)
 {
-    if (&source == &imageActionTouch[0])
+    if (&source == &mediaTouch[0])
     {
         presenter->requestScreenshot();
     }
-    else if (&source == &imageActionTouch[1])
+    else if (&source == &mediaTouch[1])
     {
         presenter->toggleRecording();
     }
-}
-
-void TemplateView::onMediaPressed(const touchgfx::AbstractButton& source)
-{
-    for (uint32_t i = 0U; i < MediaActionCount; ++i)
+    else if (&source == &mediaTouch[2])
     {
-        if (&source == &mediaTouch[i])
-        {
-            if (i == 0U)
-            {
-                presenter->requestScreenshot();
-            }
-            else if (i == 1U)
-            {
-                presenter->toggleRecording();
-            }
-            else if (i == 2U)
-            {
-                presenter->selectNextMedia();
-            }
-            else if (i == 3U)
-            {
-                presenter->readSelectedMedia();
-            }
-            else
-            {
-                presenter->refreshMedia();
-            }
-            return;
-        }
+        presenter->selectNextMedia();
+    }
+    else if (&source == &mediaTouch[3])
+    {
+        presenter->readSelectedMedia();
+    }
+    else if (&source == &mediaTouch[4])
+    {
+        presenter->refreshMedia();
     }
 }

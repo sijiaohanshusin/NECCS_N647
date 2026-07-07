@@ -104,4 +104,26 @@ private:
     bool sourceValid;
 };
 
+/** Flat panel with software-drawn rounded corners and optional 1px border. */
+class AppRoundedPanel : public touchgfx::Widget
+{
+public:
+    AppRoundedPanel();
+
+    void setStyle(touchgfx::colortype fill, uint8_t cornerRadius);
+    void setBorder(touchgfx::colortype border, bool enabled);
+    void setFillColor(touchgfx::colortype fill);
+
+    virtual void draw(const touchgfx::Rect& area) const;
+    virtual touchgfx::Rect getSolidRect() const;
+
+private:
+    static const uint8_t MaxRadius = 20U;
+
+    touchgfx::colortype fillColor;
+    touchgfx::colortype borderColor;
+    uint8_t radius;
+    bool borderEnabled;
+};
+
 #endif /* APP_UI_WIDGETS_HPP */
