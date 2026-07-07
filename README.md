@@ -30,9 +30,9 @@
 - Follow-up multi-frame RAM Debug confirmed the same path remains healthy after
   several SRP frames: PCMD masks stay `0xf`, raw audio is valid, MIC dBFS is
   quiet (`-78..-90 dBFS` in the remote bench), and SAI/DMA errors remain zero.
-  The current blocker has moved to performance: Debug/O0 auto-degrades to Fast
-  (`96 pairs`) and still takes about `280 ms/frame`, so Release/optimized
-  profiling is required before enabling a 20 FPS product overlay.
+  Historical Debug/O0 runs auto-degraded to Fast (`96 pairs`) and took about
+  `280 ms/frame`; use the current optimized RAM-Debug/Release-style DWT numbers
+  below for any FPS or memory decision.
 - Full product-path RAM Debug now shows camera, PCMD, and SRP running together:
   camera reaches hundreds of LTDC swaps with zero LTDC errors, UI color-key
   holes are correct, PCMD stays valid, and SRP processes real frames. The
@@ -47,6 +47,33 @@
   ping-pong buffers; otherwise camera DMA can reuse the displayed buffer and
   tear the heatmap into horizontal fragments. Tighten the confidence gate again
   after live-sound/FPS validation.
+- Performance work must stay measurement-led. The first optimization pass added
+  `.SRP_FAST` for SRP hot data in internal RAM, cached SRP phase steps, and a
+  guarded DMA2D camera compose copy with CPU fallback. Validate those counters
+  and FPS/cycle deltas before adding MVE/Q15/NPU or changing search quality.
+- Latest optimized `PerfRam` validation on 2026-07-07 uses `DEBUG + -Os + RAM`
+  because RAM runs need `sys_clock_config_debug()` and HyperRAM init. Current
+  retained DWT baselines at 600 MHz after phase-start/unrolled accumulation:
+  clean `0x0d` SRP is `53.5M cycles` (`89.1 ms`, or `66.8 ms @800 MHz`);
+  full `0x1f` SRP is `79.8M cycles` (`133.0 ms`, or `99.8 ms @800 MHz`).
+  A fine-phase cache was tried and reverted because it helped `0x0d` slightly
+  but worsened the real full path. `coarse + fine` remains about `96%` of SRP
+  time, so the next algorithm work should target MVE/LUT search accumulation;
+  full-path work must also address camera/PCMD contention.
+- Acoustic product modes are separate runtime paths. Use
+  `AppAcousticService_SetMode()` as the product switch: `FAST` defaults to
+  `STANDARD_B12`, `STANDARD` defaults to effective-bin `STANDARD_B16`, and
+  `HIGH_QUALITY` keeps the full `QUALITY_B40` reference. A mode switch resets
+  the bin policy to `PROFILE_DEFAULT`; use `AppAcousticService_SetBinPolicy()`
+  only as an explicit override for `B12/B16/B24/B40` experiments. Snapshots
+  expose requested/active mode, bin policy, and bin count. Keep `QUALITY_B40`
+  as the regression reference when tuning standard mode.
+- Memory placement is now a first-class design rule. Keep DMA-owned buffers in
+  noncacheable or explicitly synchronized regions, keep hot DSP workspaces and
+  small LUTs in internal RAM, and keep large UI/camera/media/self-test buffers
+  in external RAM. Before adding `.ITCM`, `.DTCM`, or extra SRAM banks, verify
+  the real N647 memory map, MPU/cache attributes, and RAM Debug/Release linker
+  behavior, then document the section contract in `docs/n647_bringup_status.md`.
 - Layered debug can disable heavy modules at the `main()` GDB breakpoint by
   writing `g_app_bringup_control_mask`. Keep the POWER bit set for hardware
   modules in the current state machine: `0x00` UI only, `0x03` POWER+camera,
@@ -166,6 +193,29 @@ Run from the repository root:
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\tools\build_n647_app.ps1 -Configuration Release
 ```
+
+## Product UI Resource Rules
+
+- TouchGFX bitmap, font, and text resources are read-only product assets. Keep
+  generated `ExtFlashSection`, `FontFlashSection`, `FontSearchFlashSection`,
+  and `TextFlashSection` in the dedicated `.touchgfx_resources` linker section.
+- Release maps `.touchgfx_resources` to XIP `ROM` at `0x7010_0000...`; this is
+  the product rule for bitmap, font, and text assets. Do not let the Release
+  product build fall back into internal SRAM, because SRP hot data, stacks,
+  noncacheable DMA buffers, and ThreadX runtime already compete for the 2 MB
+  internal RAM.
+- RAM Debug is the deliberate exception: GDB loads sections before the app has
+  initialized external RAM, so `.touchgfx_resources` is mapped to internal RAM
+  for the RAM-Debug ELF. The Debug configuration is intentionally `-Os + DEBUG
+  + -g3`; do not use an `-O0` RAM build as the performance or memory baseline.
+- IMAGE page uses the fixed camera preview/color-key window
+  `x=192, y=60, w=640, h=480`. Do not place opaque TouchGFX widgets inside this
+  rectangle. Acoustic heatmap drawing belongs to the camera overlay path
+  (`AppCameraDisplay_DrawAcousticOverlay()`), while TouchGFX should draw only
+  the surrounding HUD.
+- Keep UI assets small and explicit: product logo plus status/mode/navigation
+  icons. Avoid full-screen decorative bitmaps, repeated PNGs, and large CJK
+  wildcard character sets unless the memory map is rechecked after generation.
 
 ## NPU Bring-Up Without MIC Hardware
 

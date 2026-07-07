@@ -574,3 +574,309 @@ powershell -ExecutionPolicy Bypass -File .\tools\debug\flash_n647_release.ps1 -B
   instead. `pcmd_published_fps_x10` can remain `0` under heavy camera load even
   while `published_frames` advances, so count/duration is the more reliable
   comparison metric in overloaded scenes.
+- 2026-07-07 first optimization implementation after the performance probe:
+  `app_acoustic_srp.c` now places the real-time SRP workspace in a new
+  `.SRP_FAST` linker section in internal RAM and leaves only the synthetic
+  planar self-test buffer in `.EXTRAM`. The SRP coarse search no longer calls
+  `arm_sin_cos_f32()` inside every frame/grid/pair accumulation; it prebuilds
+  `sin_start/cos_start/sin_delta/cos_delta` phase steps during SRP init/profile
+  setup. The fine search still rebuilds phase steps per selected top-k region,
+  but accumulation now uses the same phase-step path, preparing the inner loop
+  for later MVE work without changing the math.
+- 2026-07-07 display-side first optimization implementation:
+  `AppCameraDisplay_PrepareDisplayFrame()` now tries a guarded DMA2D RGB565
+  full-frame copy from the completed DCMIPP buffer to the independent compose
+  framebuffer. If DMA2D is busy, misconfigured, or times out, it aborts the
+  transfer and falls back to the previous CPU `memcpy` path. New GDB-readable
+  counters are `g_app_camera_dma2d_copy_count`,
+  `g_app_camera_dma2d_fallback_count`, and
+  `g_app_camera_dma2d_error_code`.
+- 2026-07-07 build validation after first optimization implementation:
+  `tools\build_n647_app.ps1 -Configuration Debug` passed, and
+  `tools\build_n647_app.ps1 -Configuration Release` passed. Release map check:
+  `.SRP_FAST` is at `0x3400cf00..0x340c7d20`, size `0xbae20` (~765 KB), in the
+  current 2 MB internal RAM region. `.EXTRAM` remains at `0x90600000`, size
+  `0x31f260`. Release ELF size after this step is `text=377210`,
+  `data=52964`, `bss=4764968`. Runtime FPS/cycle validation still needs the
+  N647 debug loop after power-cycle.
+- 2026-07-07 RAM Debug smoke after first optimization implementation:
+  `tools\debug\n647_debug_env.ps1 -CheckOnly` passed. The first
+  `debug_n647_ram.ps1 -ConnectUnderReset -SkipBuild -Batch` attempt loaded the
+  ELF but lost AP/core state after reset; after H7 relay power-cycle, the same
+  command reached `main()` at `0x3400f352` with `SP=0x341fffe8`. This validates
+  load/reset/entry for the optimized source in the then-current Debug RAM mode,
+  but it is not a retained performance number. Current RAM Debug has since been
+  fixed to `-Os + DEBUG + -g3`.
+- 2026-07-07 DMA2D camera-compose breakpoint smoke:
+  a temporary GDB run used `g_app_bringup_control_mask=0x03` and stopped after
+  the 11th `AppCameraDisplay_RequestSwap` entry. Log:
+  `_debug_logs/gdb_dma2d_break_20260707_095218.log`. Readback showed
+  `control_mask=0x3`, `ready_mask=0x237`, `failed_mask=0`, `swap_count=10`,
+  `compose_count=10`, `g_app_camera_dma2d_copy_count=10`,
+  `g_app_camera_dma2d_fallback_count=0`,
+  `g_app_camera_dma2d_error_code=0`, and `ltdc_error_count=3`. This confirms the
+  guarded DMA2D copy path is being used for camera compose. The LTDC error count
+  still needs follow-up correlation during a longer visual/FPS run.
+- 2026-07-07 optimized RAM performance validation after `.SRP_FAST` +
+  phase-step SRP + DMA2D compose:
+  temporary `PerfRam` was rebuilt from the Debug RAM configuration with `-Os`
+  and `DEBUG` kept enabled. Keeping `DEBUG` is intentional for RAM sampling:
+  `main.c` only runs `sys_clock_config_debug()` and HyperRAM init in that path;
+  a no-`DEBUG` RAM-linked Release-like ELF skipped those steps and lost
+  halt/read access after running. GDB sampling used one connected session:
+  load, set `g_app_bringup_control_mask`, run for the host-side duration, halt,
+  then read snapshots. All runs had `SCB->CCR=0x30201`, `DWT_CTRL=0x80000001`,
+  and `SystemCoreClock=600000000`.
+
+  | Scene | Duration | Camera FPS / ms | PCMD FPS / ms by count | Acoustic processed FPS / ms by count | SRP cycles | SRP ms/FPS @600 MHz | Est. ms/FPS @800 MHz | SRP split | Notes |
+  | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
+  | `0x03` POWER+camera | 20 s | 5.60 / 178.6 | off | off | n/a | n/a | n/a | n/a | DMA2D compose active: copy `112`, fallback `0`, error `0`; LTDC errors `0`. |
+  | `0x05` POWER+PCMD | 15 s | off | 145.80 / 6.9 | off | n/a | n/a | n/a | n/a | PCMD healthy: masks `0xf`, SAI/DMA errors `0`, quiet `peak/avg=-84/-87 dBFS`. Count includes PCMD reset/config settle; steady counter reports near 187.5 FPS but see tick caveat below. |
+  | `0x07` POWER+camera+PCMD | 20 s | 5.60 / 178.6 | 46.70 / 21.4 | off | n/a | n/a | n/a | n/a | Camera still drags PCMD publish/SAI service down without SAI/DMA errors. |
+  | `0x0d` POWER+PCMD+acoustic | 30 s | off | 167.10 / 6.0 | 8.83 / 113.2 | 54,923,860 | 91.5 ms / 10.92 FPS | 68.7 ms / 14.57 FPS | coarse 52.3%, fine 44.7%, pre+FFT+GCC 2.8% | This is the clean SRP number after internal RAM + phase-step optimization. |
+  | `0x1f` full path | 30 s | 8.73 / 114.5 | 72.17 / 13.9 | 2.73 / 365.9 | 91,381,282 | 152.3 ms / 6.57 FPS | 114.2 ms / 8.75 FPS | coarse 51.7%, fine 44.9%, pre+FFT+GCC 3.3% | Full path still has camera/overlay/PCMD contention; DMA2D copy `262`, fallback `0`, error `0`, overlay draw `231`. |
+
+  Current optimized logs:
+  `_debug_logs/perfram_current_mask_3_20260707_102727.gdb.log`,
+  `_debug_logs/perfram_current_mask_5_20260707_102829.gdb.log`,
+  `_debug_logs/perfram_current_mask_7_20260707_102914.gdb.log`,
+  `_debug_logs/perfram_current_mask_d_20260707_103003.gdb.log`, and
+  `_debug_logs/perfram_current_mask_1f_20260707_103112.gdb.log`.
+- 2026-07-07 measurement caveat found during optimized validation:
+  `published_fps_x10`, `acoustic_fps_x10`, and `srp_ms_x100` are not reliable
+  in this RAM `PerfRam` run because the HAL tick-derived values appear off by
+  about 10x. Use DWT `perf.*_cycles` and host-duration count deltas for
+  optimization decisions until the tick scale is fixed or proven hardware-only.
+- Current performance conclusion after the first optimization:
+  1. SRP improved from the previous clean acoustic-only `~220.6M`/`367.7 ms`
+     class to `54.9M cycles`/`91.5 ms @600 MHz` (`68.7 ms @800 MHz`). That is
+     now close to 10 FPS at 600 MHz and about 14.6 FPS at 800 MHz, but still
+     short of 20 FPS for Balanced/160 pairs.
+  2. The SRP bottleneck remains almost entirely search accumulation:
+     `coarse + fine` is about `97%` of total cycles. Further gains should focus
+     on MVE-friendly dot products, reducing fine candidates, and memory/LUT
+     placement, not PCMD or FFT.
+  3. Full path is still much slower (`91.4M cycles`, `152.3 ms @600 MHz`), and
+     camera scenes continue to reduce PCMD publish rate despite zero SAI/DMA
+     errors. Next display/system work should investigate thread priorities,
+     interrupt latency, EXTRAM/AXI pressure, and overlay/camera scheduling.
+- 2026-07-07 second SRP optimization comparison:
+  kept only quality-neutral changes in `app_acoustic_srp.c`. The coarse phase
+  setup now derives `sin_start/cos_start` from the already-computed bin phase
+  delta, so each pair uses one `arm_sin_cos_f32()` instead of two when phase
+  steps are built. The accumulation loop is also pointer-based and unrolled by
+  four bins to reduce index arithmetic and improve the next MVE conversion path.
+  No pair count, grid count, bin range, or confidence logic was changed.
+
+  | Variant | Scene | SRP cycles | ms @600 MHz | ms @800 MHz | Delta vs previous optimized baseline | Notes |
+  | --- | --- | ---: | ---: | ---: | ---: | --- |
+  | Previous optimized baseline | `0x0d` POWER+PCMD+acoustic | 54,923,860 | 91.5 | 68.7 | baseline | `.SRP_FAST` + phase-step cache. |
+  | Retained phase-start/unroll | `0x0d` POWER+PCMD+acoustic | 53,478,704 | 89.1 | 66.8 | -2.6% | PCMD healthy, processed `300/30s`, failed `0`; log `_debug_logs/perfram_current_mask_d_20260707_105241.gdb.log`. |
+  | Fine phase cache trial | `0x0d` POWER+PCMD+acoustic | 52,088,276 | 86.8 | 65.1 | -5.2% | Helped the clean path slightly, but was not kept. |
+  | Previous optimized baseline | `0x1f` full path | 91,381,282 | 152.3 | 114.2 | baseline | Camera+PCMD+acoustic+overlay. |
+  | Retained phase-start/unroll | `0x1f` full path | 79,802,123 | 133.0 | 99.8 | -12.7% | Camera `~8.7 FPS`, PCMD no SAI/DMA errors, acoustic failed `0`; log `_debug_logs/perfram_current_mask_1f_20260707_105343.gdb.log`. |
+  | Fine phase cache trial | `0x1f` full path | 81,115,737 | 135.2 | 101.4 | -11.2% | Worse than retained code in the real full path, so reverted. |
+
+  Decision: do not keep the fine phase cache yet. It adds hot workspace pressure
+  and only helps the acoustic-only scene, while the product path gets slower.
+  The retained code gives a smaller clean-path gain but a better full-path gain,
+  so it is the safer baseline for the next round.
+- 2026-07-07 frequency-compressed standard-mode implementation:
+  frequency selection is now a runtime-configurable control. `AppAcousticImagingConfig_t`
+  carries an explicit `active_bins[]` list and `active_bin_count`, so SRP no
+  longer assumes every profile uses a continuous `active_bin_start..end` range.
+  Product modes are separate from low-level profiles: `FAST`, `STANDARD`, and
+  `HIGH_QUALITY` are selected with `AppAcousticService_SetMode()`, and each mode
+  can be switched at runtime. A mode switch resets the bin policy to
+  `PROFILE_DEFAULT` so `HIGH_QUALITY` always returns to full B40 unless a test
+  override is applied afterward.
+
+  Mode defaults:
+  - `FAST`: fast profile, 96 pairs, effective-bin `STANDARD_B12`.
+  - `STANDARD`: balanced profile, 160 pairs, effective-bin `STANDARD_B16`.
+  - `HIGH_QUALITY`: quality profile, 240 pairs, continuous `QUALITY_B40`.
+  - `STANDARD_B24` remains an explicit conservative field-test override.
+
+  `AppAcousticService_SetBinPolicy()` accepts
+  `PROFILE_DEFAULT/B12/B16/B24/B40` for controlled experiments, and
+  `AppAcousticServiceSnapshot_t` reports requested/active mode, requested/active
+  policy, and active bin count for GDB/UI diagnostics.
+
+  The selected standard-mode bins are not arbitrary. They were generated by
+  `tools/acoustic_imaging/select_effective_bins.py --random-trials 8`, which
+  scores each bin by synthetic localization error, high-SNR agreement, mean PHAT
+  peak quality, and long-baseline alias weighting, then applies a low/mid/high
+  band-balanced quota. Current firmware tables:
+  - `STANDARD_B12`: bins `7,8,9,10,12,14,16,17,26,27,40,41`
+    (`1312.5..7687.5 Hz`, sparse).
+  - `STANDARD_B16`: bins `6,7,8,9,10,12,14,16,17,20,23,26,27,38,40,41`
+    (`1125.0..7687.5 Hz`, sparse), current standard default.
+  - `STANDARD_B24`: bins `3,4,5,6,7,8,9,10,12,14,16,17,19,20,23,24,26,27,36,38,39,40,41,42`
+    (`562.5..7875.0 Hz`, sparse).
+  - `QUALITY_B40`: continuous bins `3..42` (`562.5..7875.0 Hz`).
+
+  Firmware SRP behavior:
+  - `QUALITY_B40` remains the continuous 40-bin reference path and still uses
+    the CMSIS contiguous GCC path plus the existing unrolled accumulation.
+  - `B12/B16/B24` use sparse selected-bin GCC gather and gap-aware steering
+    phase recurrence, so only selected FFT bins are processed.
+  - NPU heatmap remains disabled for compressed-bin profiles and is accepted
+    only for continuous B40 semantics.
+
+  PC tooling:
+  - `tools/acoustic_imaging/acoustic_imaging_model.py` now supports fixed bin
+    policies and mirrors the firmware coarse 9x9 + NMS top-k + fine-search path.
+  - `tools/acoustic_imaging/evaluate_bin_masks.py` compares `QUALITY_B40`,
+    `STANDARD_B24`, `STANDARD_B16`, `STANDARD_B12`, and `FAST_B12`, with optional
+    single-bin ablation.
+  - Quick simulation command:
+    `python tools\acoustic_imaging\evaluate_bin_masks.py --random-trials 12`.
+
+  Quick simulation result, 36 scenarios:
+
+  | Candidate | Pairs | Bins | Work vs Quality | P90 | P90 SNR>=10dB | Notes |
+  | --- | ---: | ---: | ---: | ---: | ---: | --- |
+  | `QUALITY_B40` | 240 | 40 | 100.0% | 2.6 deg | 2.5 deg | Regression reference. |
+  | `STANDARD_B24` | 160 | 24 | 40.0% | 2.7 deg | 2.5 deg | Conservative fallback. |
+  | `STANDARD_B16` | 160 | 16 | 26.7% | 2.6 deg | 2.5 deg | Default standard-mode candidate. |
+  | `STANDARD_B12` | 160 | 12 | 20.0% | 2.8 deg | 3.2 deg | Speed-pressure candidate. |
+  | `FAST_B12` | 96 | 12 | 12.0% | 2.6 deg | 2.9 deg | Auto-degrade candidate. |
+
+  Validation completed after this implementation, including the product-mode
+  split and explicit bin-policy override: Python unit tests passed,
+  `select_effective_bins.py --random-trials 8` reproduced the firmware bin
+  tables, `evaluate_bin_masks.py --random-trials 12` passed,
+  `evaluate_srp_profiles.py --random-trials 12` passed, and both
+  `tools\build_n647_app.ps1 -Configuration Debug` and `-Configuration Release`
+  passed. The selector and fixed-mask simulations prove the PC tool path works,
+  but they are not a final frequency-selection conclusion because the real board
+  still needs noise, aliasing, and full-path DWT validation. Next required
+  measurement is N6 DWT cycle comparison for mode defaults plus forced
+  `B12/B16/B24/B40`, first acoustic-only (`0x0d`) and then full path (`0x1f`).
+- Next engineering step after validation: normalize the whole firmware memory
+  allocation model instead of adding ad-hoc sections. Start from the actual
+  N647 memory map and linker support, then define named tiers for executable hot
+  code, DSP hot data/LUTs, DMA-visible noncacheable buffers, cacheable internal
+  SRAM, external frame/media buffers, and experimental/offline buffers. Current
+  project linkers only expose generic internal `RAM` at `0x34000000` and
+  `.EXTRAM`; do not invent `.ITCM`/`.DTCM`/extra SRAM banks until the N6 memory
+  map, MPU/cache policy, and debugger load path are verified.
+- 2026-07-07 board validation for fixed-bin standard mode:
+  used the RAM debug launch path with Release-like `-Os` optimization, `DEBUG`
+  kept only for the RAM/debug boot path, I/D cache enabled
+  (`SCB->CCR=0x00030201`), and `SystemCoreClock=600 MHz`. This is the current
+  reliable remote validation path because the true external-Flash Release image
+  still stops in BootROM with the present boot strap.
+
+  Acoustic-only/product-mode comparison with PCMD running (`g_app_bringup_control_mask=0x0d`):
+
+  | Mode / policy | Pairs | Bins | Total cycles | Time @600MHz | Est. @800MHz | Main cost |
+  | --- | ---: | ---: | ---: | ---: | ---: | --- |
+  | `STANDARD/B12` forced | 160 | 12 | 41.9M | 69.8 ms | 52.3 ms | coarse/fine search |
+  | `STANDARD/B16` forced | 160 | 16 | 48.3M | 80.5 ms | 60.3 ms | coarse/fine search |
+  | `STANDARD/B24` forced | 160 | 24 | 64.6M | 107.7 ms | 80.8 ms | coarse/fine search |
+  | `HIGH_QUALITY/B40` forced | 240 | 40 | 74.9M | 124.9 ms | 93.6 ms | coarse/fine search |
+
+  Full product path (`g_app_bringup_control_mask=0x1f`) with camera, PCMD,
+  acoustic service, and camera overlay active:
+
+  | Mode / policy | Pairs | Bins | Total cycles | Time @600MHz | Est. @800MHz | Notes |
+  | --- | ---: | ---: | ---: | ---: | ---: | --- |
+  | `STANDARD/B16` product default | 160 | 16 | 83.0M | 138.4 ms | 103.8 ms | About 9.6 FPS at 800 MHz before more optimization. |
+
+  Full-path stage cycles for `STANDARD/B16`: preprocess 0.49M, FFT 0.43M,
+  GCC 1.72M, coarse 42.8M, fine 37.5M, output 0.04M. The bottleneck is still
+  SRP coarse/fine search, and full path adds significant memory/display-system
+  contention compared with acoustic-only (`48.3M -> 83.0M cycles`).
+  Symbol-level halt inspection confirmed the same root cause: the final
+  full-path sample stopped in `App_AcousticSrp_AdvancePhase()` at
+  `app_acoustic_srp.c:550`, inside the sparse selected-bin phase recurrence.
+  Earlier transient halts can land in `HAL_DMA2D_PollForTransfer()` or XSPI
+  init depending on when GDB interrupts, but the measured acoustic frame cost is
+  dominated by SRP search, not by PCMD, FFT/GCC, TouchGFX, or camera ISR time.
+  Treat display/camera as a secondary bandwidth/EXTRAM/DMA2D contention source:
+  it inflates `STANDARD/B16` from about `48.3M` cycles acoustic-only to
+  `83.0M` cycles in the full product path.
+
+  Hardware chain status during full path was healthy enough for algorithm
+  validation: PCMD present/config/status masks were all `0xf`, PCMD raw audio
+  valid, SAI A/B DMA error counts were zero, and the selected standard bins were
+  exactly `6,7,8,9,10,12,14,16,17,20,23,26,27,38,40,41`. Camera/display also
+  ran: IMX219 chip id `0x0219`, 411 camera/display swaps in the sample window,
+  LTDC layer1/layer2 enabled, overlay update/draw counters increasing, DMA2D
+  copy count increasing, and DMA2D fallback/error zero.
+
+  Release build and flash were also verified on the same date:
+  `flash_n647_release.ps1 -BuildBundle -ResetAfter` built with zero errors and
+  zero warnings, programmed `_flash_images/n647_boot_bundle.hex`, and CubeProgrammer
+  verified the download. After both software reset and H7 relay power-cycle,
+  `probe_n647_state.ps1` still reported `PC=0x18003514/0x18003518 [BootROM]`.
+  Do not treat this as an application regression; it means the current remote
+  boot/debug condition is not entering the external-Flash XIP app. True Release
+  visual validation still requires the external-boot strap/path to be active.
+- 2026-07-07 product UI refactor checkpoint:
+  IMAGE is now a camera-first HUD instead of a debug-style panel page. The
+  fixed camera/color-key rectangle remains `192,60,640,480`; TouchGFX draws
+  the surrounding top/left/right/bottom HUD, and the acoustic heatmap remains
+  on the camera overlay path rather than a normal opaque TouchGFX widget.
+
+  UI pages were reorganized for product use:
+  - IMAGE: mode/status/FPS/quality/PCMD/source direction HUD around the camera.
+  - MICS: 32-channel dBFS health grid plus PCMD status.
+  - PERF: acoustic coarse/fine/GCC/FFT/total cycles plus camera/overlay counters.
+  - SET: product switches for mode/bin policy/overlay/diagnostics.
+  - MEDIA: icon-first screenshot/record/storage controls.
+
+  TouchGFX assets were regenerated from the final compact asset set under
+  `NECCS_N647_App/Appli/TouchGFX/assets/images/`, and `texts.xml` was reduced
+  to the Chinese/technical wildcard characters actually needed by the current
+  handwritten UI. Current generated product assets are logo plus 17 compact
+  24x24 status/mode/navigation icons.
+
+  Important memory rule confirmed: generated TouchGFX bitmap/font/text data is
+  read-only product data. Linker scripts now collect `ExtFlashSection`,
+  `FontFlashSection`, `FontSearchFlashSection`, and `TextFlashSection` into
+  `.touchgfx_resources`.
+  - Release: `.touchgfx_resources = 0x701613e0, size 0x14480`, mapped to XIP
+    `ROM`. This is the product/resource-placement rule.
+  - RAM Debug first tried `.touchgfx_resources = 0x90600000` in `EXTRAM`, but
+    GDB loading failed before `main` because external RAM is not initialized yet
+    at the load step. RAM Debug now maps `.touchgfx_resources` to internal RAM
+    instead; the validated load address was `0x341d0140`, size `0x14480`.
+  - Debug configuration is intentionally `-Os + DEBUG + -g3` so the RAM Debug
+    image fits and remains release-like enough for UI/performance diagnosis. Do
+    not use an `-O0` RAM image as the memory or performance baseline.
+  - Internal hot SRP data remains in `.SRP_FAST` (`0xbae20` bytes in the
+    current build), and camera/media/PCMD large buffers remain in `.EXTRAM`.
+
+  Validation completed for this checkpoint:
+  - `tools\debug\n647_debug_env.ps1 -CheckOnly` passed.
+  - Official Debug script passed after the RAM-Debug resource-placement fix:
+    `tools\build_n647_app.ps1 -Configuration Debug`, 0 errors, 0 warnings,
+    `text=431136, data=52964, bss=4772064`.
+  - Official Release script passed:
+    `tools\build_n647_app.ps1 -Configuration Release`, 0 errors, 0 warnings,
+    `text=427360, data=52964, bss=4771936`.
+  - H7 relay status/power-cycle path worked on `COM5`, then RAM Debug passed
+    with connect-under-reset and stopped at `main` after loading
+    `.touchgfx_resources` at `0x341d0140`.
+  - A 20 s full-path RAM Debug sample with `g_app_bringup_control_mask=0x1f`
+    showed the UI/camera/display path alive:
+    `SystemCoreClock=600000000`, `CCR=0x00030201`, camera frames `111`,
+    LTDC swaps `111`, LTDC errors `0`, overlay draws `80`, DMA2D copies `111`,
+    DMA2D error `0`.
+  - PCMD was present/configured/raw-valid in the same run:
+    `present=0xf`, `cfg=0xf`, `valid=1`, `rawvalid=1`, `frames=237`,
+    `rawpeak=-14 dBFS`, `rawavg=-66 dBFS`. `statusok=0x3` still needs later
+    audio-chain follow-up, but it did not block UI validation.
+  - Acoustic Standard/B16 still bottlenecked in SRP:
+    `processed=10`, `skipped=50`, `bins=16`, `total=86334337 cycles`,
+    `coarse=44294879`, `fine=39429955`, `gcc=243459`, `quality=1`,
+    `valid=0` in the quiet remote scene.
+  - Framebuffer dump/composite showed the actual product HUD, visible camera
+    layer, and acoustic overlay cells:
+    `_debug_logs/n647_ui_composite_latest.png`.
+
+  If a future RAM Debug load fails before `main`, do not move RAM-Debug
+  `.touchgfx_resources` back to `EXTRAM`; the proven rule is Release resources
+  in XIP ROM, RAM-Debug resources in internal RAM.
