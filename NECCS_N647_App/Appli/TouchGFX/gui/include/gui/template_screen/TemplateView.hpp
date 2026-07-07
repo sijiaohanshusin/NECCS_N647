@@ -20,6 +20,7 @@
 #include <touchgfx/Callback.hpp>
 #include <touchgfx/widgets/Box.hpp>
 #include <touchgfx/widgets/BoxWithBorder.hpp>
+#include <touchgfx/widgets/Image.hpp>
 #include <touchgfx/widgets/TouchArea.hpp>
 
 /**
@@ -69,6 +70,9 @@ private:
     static const uint32_t SettingsCount = 7U;
     static const uint32_t MediaLabelCount = 10U;
     static const uint32_t MediaActionCount = 5U;
+    static const uint32_t CameraFrameCount = 4U;
+    static const uint32_t ImageHudCount = 8U;
+    static const uint32_t ImageActionCount = 2U;
 
     void setupStaticUi();
     void setupNavigation();
@@ -89,6 +93,7 @@ private:
     void refreshMediaPage(const AppUiSnapshot& snapshot);
     void onNavPressed(const touchgfx::AbstractButton& source);
     void onProfilePressed(const touchgfx::AbstractButton& source);
+    void onImageActionPressed(const touchgfx::AbstractButton& source);
     void onMediaPressed(const touchgfx::AbstractButton& source);
 
     touchgfx::Box background;
@@ -97,18 +102,34 @@ private:
     touchgfx::Box navPanel;
     touchgfx::Box contentPanel;
     touchgfx::Box detailPanel;
+    touchgfx::Box imageHudPanel;
+    touchgfx::Box imageBottomPanel;
+    touchgfx::Box cameraFrame[CameraFrameCount];
     touchgfx::Box statusDot;
+    touchgfx::Image logoImage;
     touchgfx::BoxWithBorder navButton[NavCount];
+    touchgfx::Image navIcon[NavCount];
     touchgfx::TouchArea navTouch[NavCount];
     AppTextLabel navLabel[NavCount];
 
     touchgfx::BoxWithBorder profileButton[ProfileCount];
+    touchgfx::BoxWithBorder imageProfileButton[ProfileCount];
+    touchgfx::Image profileIcon[ProfileCount];
+    touchgfx::Image imageProfileIcon[ProfileCount];
+    touchgfx::TouchArea imageProfileTouch[ProfileCount];
     touchgfx::TouchArea profileTouch[ProfileCount];
     AppTextLabel profileLabel[ProfileCount];
+    AppTextLabel imageProfileLabel[ProfileCount];
 
     AppTextLabel titleLabel;
     AppTextLabel modeLabel;
     AppTextLabel pageTitleLabel;
+    AppTextLabel imageHudLabel[ImageHudCount];
+    touchgfx::Image imageHudIcon[4];
+    touchgfx::BoxWithBorder imageActionButton[ImageActionCount];
+    touchgfx::Image imageActionIcon[ImageActionCount];
+    touchgfx::TouchArea imageActionTouch[ImageActionCount];
+    AppTextLabel imageActionLabel[ImageActionCount];
     AppTextLabel detailLabel[DetailCount];
     AppTextLabel settingsLabel[SettingsCount];
     AppTextLabel mediaLabel[MediaLabelCount];
@@ -126,11 +147,13 @@ private:
     AppTextLabel perfLabel[PerfCount];
 
     touchgfx::BoxWithBorder mediaButton[MediaActionCount];
+    touchgfx::Image mediaButtonIcon[MediaActionCount];
     touchgfx::TouchArea mediaTouch[MediaActionCount];
     AppTextLabel mediaButtonLabel[MediaActionCount];
 
     touchgfx::Callback<TemplateView, const touchgfx::AbstractButton&> navPressedCallback;
     touchgfx::Callback<TemplateView, const touchgfx::AbstractButton&> profilePressedCallback;
+    touchgfx::Callback<TemplateView, const touchgfx::AbstractButton&> imageActionPressedCallback;
     touchgfx::Callback<TemplateView, const touchgfx::AbstractButton&> mediaPressedCallback;
 
     uint8_t activeScreen;

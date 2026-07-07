@@ -50,6 +50,9 @@ typedef struct
   uint32_t auto_disable_count;
   uint32_t overlay_update_count;
   uint32_t overlay_draw_count;
+  uint32_t dma2d_copy_count;
+  uint32_t dma2d_fallback_count;
+  uint32_t dma2d_error_code;
   int32_t init_status;
 } AppCameraDisplayStatus_t;
 
@@ -69,6 +72,9 @@ extern volatile uint32_t g_app_camera_ui_fb_addr;
 extern volatile uint32_t g_app_camera_ltdc_auto_disable_count;
 extern volatile uint32_t g_app_camera_overlay_update_count;
 extern volatile uint32_t g_app_camera_overlay_draw_count;
+extern volatile uint32_t g_app_camera_dma2d_copy_count;
+extern volatile uint32_t g_app_camera_dma2d_fallback_count;
+extern volatile uint32_t g_app_camera_dma2d_error_code;
 
 int32_t AppCameraDisplay_InitLayers(uint32_t initial_camera_addr);
 void AppCameraDisplay_SetVisible(uint8_t visible);

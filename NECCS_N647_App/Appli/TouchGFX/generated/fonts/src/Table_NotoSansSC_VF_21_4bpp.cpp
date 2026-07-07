@@ -83,63 +83,32 @@ KEEP extern const touchgfx::GlyphNode glyphs_NotoSansSC_VF_21_4bpp[] FONT_TABLE_
     {  5285, 0x0078,   9,  11,  11,   0,   9,   0,   0, 0x00 },
     {  5340, 0x0079,  10,  16,  11,   0,  10,   0,   0, 0x00 },
     {  5420, 0x007A,   9,  11,  11,   0,   9,   0,   0, 0x00 },
-    {     0, 0x4E0E,  17,  18,  17,   1,  21,   0,   0, 0x00 },
+    {     0, 0x4E2D,  17,  19,  18,   2,  21,   0,   0, 0x00 },
+    {   171, 0x4F53,  20,  19,  18,   1,  21,   0,   0, 0x00 },
     {     0, 0x50CF,  20,  19,  18,   1,  21,   0,   0, 0x00 },
-    {   190, 0x514B,  19,  20,  18,   1,  21,   0,   0, 0x00 },
-    {   390, 0x5165,  19,  19,  17,   1,  21,   0,   0, 0x00 },
-    {   580, 0x524D,  19,  20,  18,   1,  21,   0,   0, 0x00 },
-    {   780, 0x5408,  19,  20,  18,   1,  21,   0,   0, 0x00 },
-    {   980, 0x5411,  17,  19,  18,   2,  21,   0,   0, 0x00 },
-    {  1151, 0x542F,  18,  20,  18,   1,  21,   0,   0, 0x00 },
-    {  1331, 0x56FE,  17,  18,  17,   2,  21,   0,   0, 0x00 },
+    {   190, 0x51C6,  19,  19,  18,   1,  21,   0,   0, 0x00 },
+    {   380, 0x5217,  18,  20,  18,   1,  21,   0,   0, 0x00 },
     {     0, 0x58F0,  20,  20,  18,   0,  21,   0,   0, 0x00 },
-    {   200, 0x5B66,  19,  19,  18,   1,  21,   0,   0, 0x00 },
-    {   390, 0x5B9A,  19,  20,  18,   1,  21,   0,   0, 0x00 },
-    {   590, 0x5B9E,  19,  20,  18,   1,  21,   0,   0, 0x00 },
-    {   790, 0x5BF9,  19,  20,  18,   1,  21,   0,   0, 0x00 },
-    {   990, 0x5E73,  19,  17,  16,   1,  21,   0,   0, 0x00 },
-    {  1160, 0x5F0F,  20,  19,  18,   1,  21,   0,   0, 0x00 },
-    {  1350, 0x5F53,  16,  19,  18,   2,  21,   0,   0, 0x00 },
-    {  1502, 0x5F85,  19,  19,  18,   1,  21,   0,   0, 0x00 },
-    {     0, 0x6001,  19,  19,  18,   1,  21,   0,   0, 0x00 },
-    {   190, 0x6027,  20,  19,  18,   0,  21,   0,   0, 0x00 },
-    {   380, 0x6210,  19,  20,  18,   1,  21,   0,   0, 0x00 },
-    {   580, 0x636E,  20,  19,  18,   0,  21,   0,   0, 0x00 },
-    {   770, 0x641C,  19,  20,  18,   1,  21,   0,   0, 0x00 },
-    {   970, 0x6570,  20,  20,  18,   1,  21,   0,   0, 0x00 },
-    {  1170, 0x65B9,  19,  20,  18,   1,  21,   0,   0, 0x00 },
-    {  1370, 0x65F6,  18,  19,  18,   2,  21,   0,   0, 0x00 },
-    {  1541, 0x6682,  19,  20,  18,   1,  21,   0,   0, 0x00 },
-    {  1741, 0x672A,  19,  19,  18,   1,  21,   0,   0, 0x00 },
-    {  1931, 0x67D3,  19,  19,  18,   1,  21,   0,   0, 0x00 },
-    {     0, 0x6863,  19,  19,  18,   0,  21,   0,   0, 0x00 },
-    {   190, 0x6A21,  19,  19,  18,   1,  21,   0,   0, 0x00 },
-    {   380, 0x6BB5,  19,  20,  18,   1,  21,   0,   0, 0x00 },
-    {   580, 0x6E32,  19,  20,  18,   1,  21,   0,   0, 0x00 },
-    {     0, 0x70ED,  19,  20,  18,   1,  21,   0,   0, 0x00 },
-    {   200, 0x72B6,  20,  20,  18,   1,  21,   0,   0, 0x00 },
-    {   400, 0x7528,  19,  17,  16,   0,  21,   0,   0, 0x00 },
-    {   570, 0x771F,  19,  20,  18,   1,  21,   0,   0, 0x00 },
-    {     0, 0x7A33,  20,  19,  18,   0,  21,   0,   0, 0x00 },
-    {   190, 0x7B49,  19,  19,  18,   1,  21,   0,   0, 0x00 },
-    {   380, 0x7C97,  19,  19,  18,   1,  21,   0,   0, 0x00 },
-    {   570, 0x7CBE,  20,  19,  18,   1,  21,   0,   0, 0x00 },
-    {   760, 0x7F6E,  19,  18,  17,   1,  21,   0,   0, 0x00 },
+    {   200, 0x5A92,  19,  19,  18,   1,  21,   0,   0, 0x00 },
+    {   390, 0x5B66,  19,  19,  18,   1,  21,   0,   0, 0x00 },
+    {   580, 0x5E38,  18,  19,  18,   2,  21,   0,   0, 0x00 },
+    {   751, 0x5F02,  19,  18,  17,   1,  21,   0,   0, 0x00 },
+    {   931, 0x5F85,  19,  19,  18,   1,  21,   0,   0, 0x00 },
+    {  1121, 0x5FEB,  20,  20,  18,   1,  21,   0,   0, 0x00 },
+    {     0, 0x6027,  20,  19,  18,   0,  21,   0,   0, 0x00 },
+    {   190, 0x6210,  19,  20,  18,   1,  21,   0,   0, 0x00 },
+    {   390, 0x663E,  19,  18,  17,   1,  21,   0,   0, 0x00 },
+    {     0, 0x6807,  20,  19,  18,   0,  21,   0,   0, 0x00 },
+    {   190, 0x6B63,  19,  17,  16,   1,  21,   0,   0, 0x00 },
+    {     0, 0x793A,  19,  17,  16,   1,  21,   0,   0, 0x00 },
+    {   170, 0x7B49,  19,  19,  18,   1,  21,   0,   0, 0x00 },
+    {   360, 0x7F6E,  19,  18,  17,   1,  21,   0,   0, 0x00 },
     {     0, 0x80FD,  19,  19,  18,   1,  21,   0,   0, 0x00 },
-    {     0, 0x8861,  19,  19,  18,   1,  21,   0,   0, 0x00 },
-    {   190, 0x8BBE,  19,  19,  17,   1,  21,   0,   0, 0x00 },
-    {   380, 0x8D1F,  18,  20,  18,   1,  21,   0,   0, 0x00 },
-    {   560, 0x8DEF,  19,  19,  18,   1,  21,   0,   0, 0x00 },
-    {   750, 0x8F7D,  19,  19,  18,   1,  21,   0,   0, 0x00 },
-    {   940, 0x8F93,  19,  19,  18,   1,  21,   0,   0, 0x00 },
-    {     0, 0x914D,  20,  18,  17,   1,  21,   0,   0, 0x00 },
-    {   180, 0x91C7,  19,  18,  17,   1,  21,   0,   0, 0x00 },
-    {   360, 0x94FE,  20,  20,  18,   1,  21,   0,   0, 0x00 },
-    {   560, 0x96C6,  19,  19,  18,   1,  21,   0,   0, 0x00 },
-    {     0, 0x9891,  20,  20,  18,   1,  21,   0,   0, 0x00 },
-    {   200, 0x98CE,  19,  17,  16,   1,  21,   0,   0, 0x00 },
-    {   370, 0x9EA6,  19,  20,  18,   1,  21,   0,   0, 0x00 },
-    {     0, 0xFF1A,   3,  13,  13,   4,  21,   0,   0, 0x00 }
+    {     0, 0x8BBE,  19,  19,  17,   1,  21,   0,   0, 0x00 },
+    {   190, 0x8D28,  19,  19,  17,   1,  21,   0,   0, 0x00 },
+    {     0, 0x901F,  20,  20,  18,   1,  21,   0,   0, 0x00 },
+    {   200, 0x91CF,  19,  18,  17,   1,  21,   0,   0, 0x00 },
+    {   380, 0x9635,  19,  19,  18,   2,  21,   0,   0, 0x00 }
 };
 
 // NotoSansSC_VF_21_4bpp
@@ -158,8 +127,6 @@ KEEP extern const uint8_t unicodes_NotoSansSC_VF_21_4bpp_12[] FONT_GLYPH_LOCATIO
 FONT_GLYPH_LOCATION_FLASH_PRAGMA
 KEEP extern const uint8_t unicodes_NotoSansSC_VF_21_4bpp_13[] FONT_GLYPH_LOCATION_FLASH_ATTRIBUTE;
 FONT_GLYPH_LOCATION_FLASH_PRAGMA
-KEEP extern const uint8_t unicodes_NotoSansSC_VF_21_4bpp_14[] FONT_GLYPH_LOCATION_FLASH_ATTRIBUTE;
-FONT_GLYPH_LOCATION_FLASH_PRAGMA
 KEEP extern const uint8_t unicodes_NotoSansSC_VF_21_4bpp_15[] FONT_GLYPH_LOCATION_FLASH_ATTRIBUTE;
 FONT_GLYPH_LOCATION_FLASH_PRAGMA
 KEEP extern const uint8_t unicodes_NotoSansSC_VF_21_4bpp_16[] FONT_GLYPH_LOCATION_FLASH_ATTRIBUTE;
@@ -167,10 +134,6 @@ FONT_GLYPH_LOCATION_FLASH_PRAGMA
 KEEP extern const uint8_t unicodes_NotoSansSC_VF_21_4bpp_17[] FONT_GLYPH_LOCATION_FLASH_ATTRIBUTE;
 FONT_GLYPH_LOCATION_FLASH_PRAGMA
 KEEP extern const uint8_t unicodes_NotoSansSC_VF_21_4bpp_18[] FONT_GLYPH_LOCATION_FLASH_ATTRIBUTE;
-FONT_GLYPH_LOCATION_FLASH_PRAGMA
-KEEP extern const uint8_t unicodes_NotoSansSC_VF_21_4bpp_19[] FONT_GLYPH_LOCATION_FLASH_ATTRIBUTE;
-FONT_GLYPH_LOCATION_FLASH_PRAGMA
-KEEP extern const uint8_t unicodes_NotoSansSC_VF_21_4bpp_31[] FONT_GLYPH_LOCATION_FLASH_ATTRIBUTE;
 FONT_SEARCHTABLE_LOCATION_FLASH_PRAGMA
 KEEP extern const uint8_t* const unicodes_NotoSansSC_VF_21_4bpp[] FONT_SEARCHTABLE_LOCATION_FLASH_ATTRIBUTE = {
     unicodes_NotoSansSC_VF_21_4bpp_0,
@@ -187,24 +150,11 @@ KEEP extern const uint8_t* const unicodes_NotoSansSC_VF_21_4bpp[] FONT_SEARCHTAB
     unicodes_NotoSansSC_VF_21_4bpp_11,
     unicodes_NotoSansSC_VF_21_4bpp_12,
     unicodes_NotoSansSC_VF_21_4bpp_13,
-    unicodes_NotoSansSC_VF_21_4bpp_14,
+    0,
     unicodes_NotoSansSC_VF_21_4bpp_15,
     unicodes_NotoSansSC_VF_21_4bpp_16,
     unicodes_NotoSansSC_VF_21_4bpp_17,
-    unicodes_NotoSansSC_VF_21_4bpp_18,
-    unicodes_NotoSansSC_VF_21_4bpp_19,
-    0,
-    0,
-    0,
-    0,
-    0,
-    0,
-    0,
-    0,
-    0,
-    0,
-    0,
-    unicodes_NotoSansSC_VF_21_4bpp_31
+    unicodes_NotoSansSC_VF_21_4bpp_18
 };
 FONT_KERNING_LOCATION_FLASH_PRAGMA
 KEEP extern const touchgfx::KerningNode kerning_NotoSansSC_VF_21_4bpp[] FONT_KERNING_LOCATION_FLASH_ATTRIBUTE;
@@ -212,6 +162,6 @@ touchgfx::GeneratedFont& getFont_NotoSansSC_VF_21_4bpp();
 
 touchgfx::GeneratedFont& getFont_NotoSansSC_VF_21_4bpp()
 {
-    static touchgfx::GeneratedFont NotoSansSC_VF_21_4bpp(glyphs_NotoSansSC_VF_21_4bpp, 136, 26, 21, 0, 0, 4, 1, 1, 1, unicodes_NotoSansSC_VF_21_4bpp, kerning_NotoSansSC_VF_21_4bpp, 63, 46, 0, 0);
+    static touchgfx::GeneratedFont NotoSansSC_VF_21_4bpp(glyphs_NotoSansSC_VF_21_4bpp, 105, 26, 21, 0, 0, 4, 1, 1, 1, unicodes_NotoSansSC_VF_21_4bpp, kerning_NotoSansSC_VF_21_4bpp, 63, 46, 0, 0);
     return NotoSansSC_VF_21_4bpp;
 }

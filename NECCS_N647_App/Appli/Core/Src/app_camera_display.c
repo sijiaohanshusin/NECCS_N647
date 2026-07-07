@@ -16,8 +16,11 @@
 #define APP_CAMERA_DISPLAY_OVERLAY_BRINGUP_ENABLE 1U
 #define APP_CAMERA_DISPLAY_BRINGUP_PEAK_VALUE     224U
 #define APP_CAMERA_DISPLAY_COMPOSE_ENABLE          1U
+#define APP_CAMERA_DISPLAY_DMA2D_COPY_ENABLE       1U
+#define APP_CAMERA_DISPLAY_DMA2D_TIMEOUT_MS        10U
 
 extern LTDC_HandleTypeDef hltdc;
+extern DMA2D_HandleTypeDef hdma2d;
 
 typedef struct
 {
@@ -46,6 +49,9 @@ volatile uint32_t g_app_camera_overlay_update_count = 0U;
 volatile uint32_t g_app_camera_overlay_draw_count = 0U;
 volatile uint32_t g_app_camera_compose_addr = 0U;
 volatile uint32_t g_app_camera_compose_count = 0U;
+volatile uint32_t g_app_camera_dma2d_copy_count = 0U;
+volatile uint32_t g_app_camera_dma2d_fallback_count = 0U;
+volatile uint32_t g_app_camera_dma2d_error_code = 0U;
 
 static AppCameraDisplayAcousticOverlay_t s_acoustic_overlay;
 static uint16_t s_camera_display_compose_buffer[APP_CAMERA_DISPLAY_WIDTH * APP_CAMERA_DISPLAY_HEIGHT]
@@ -607,6 +613,75 @@ static int32_t AppCameraDisplay_DisableCameraLayer(void)
   return APP_CAMERA_DISPLAY_OK;
 }
 
+static uint8_t AppCameraDisplay_CopyFrameDma2d(uint32_t src_addr,
+                                               uint32_t dst_addr)
+{
+#if APP_CAMERA_DISPLAY_DMA2D_COPY_ENABLE
+  HAL_StatusTypeDef status;
+
+  if ((src_addr == 0U) ||
+      (dst_addr == 0U) ||
+      (hdma2d.Instance == 0) ||
+      (hdma2d.State != HAL_DMA2D_STATE_READY))
+  {
+    g_app_camera_dma2d_fallback_count++;
+    return 0U;
+  }
+
+  hdma2d.Init.Mode = DMA2D_M2M;
+  hdma2d.Init.ColorMode = DMA2D_OUTPUT_RGB565;
+  hdma2d.Init.OutputOffset = 0U;
+  hdma2d.Init.AlphaInverted = DMA2D_REGULAR_ALPHA;
+  hdma2d.Init.RedBlueSwap = DMA2D_RB_REGULAR;
+  hdma2d.Init.BytesSwap = DMA2D_BYTES_REGULAR;
+  hdma2d.Init.LineOffsetMode = DMA2D_LOM_PIXELS;
+  hdma2d.LayerCfg[DMA2D_FOREGROUND_LAYER].InputOffset = 0U;
+  hdma2d.LayerCfg[DMA2D_FOREGROUND_LAYER].InputColorMode = DMA2D_INPUT_RGB565;
+  hdma2d.LayerCfg[DMA2D_FOREGROUND_LAYER].AlphaMode = DMA2D_NO_MODIF_ALPHA;
+  hdma2d.LayerCfg[DMA2D_FOREGROUND_LAYER].InputAlpha = 255U;
+  hdma2d.LayerCfg[DMA2D_FOREGROUND_LAYER].AlphaInverted = DMA2D_REGULAR_ALPHA;
+  hdma2d.LayerCfg[DMA2D_FOREGROUND_LAYER].RedBlueSwap = DMA2D_RB_REGULAR;
+
+  AppCameraDisplay_CleanInvalidateDCache(dst_addr, APP_CAMERA_DISPLAY_CAMERA_FRAME_BYTES);
+
+  status = HAL_DMA2D_Init(&hdma2d);
+  if (status == HAL_OK)
+  {
+    status = HAL_DMA2D_ConfigLayer(&hdma2d, DMA2D_FOREGROUND_LAYER);
+  }
+  if (status == HAL_OK)
+  {
+    status = HAL_DMA2D_Start(&hdma2d,
+                             src_addr,
+                             dst_addr,
+                             APP_CAMERA_DISPLAY_WIDTH,
+                             APP_CAMERA_DISPLAY_HEIGHT);
+  }
+  if (status == HAL_OK)
+  {
+    status = HAL_DMA2D_PollForTransfer(&hdma2d, APP_CAMERA_DISPLAY_DMA2D_TIMEOUT_MS);
+  }
+  if (status != HAL_OK)
+  {
+    g_app_camera_dma2d_error_code = hdma2d.ErrorCode;
+    if (hdma2d.State != HAL_DMA2D_STATE_READY)
+    {
+      (void)HAL_DMA2D_Abort(&hdma2d);
+    }
+    g_app_camera_dma2d_fallback_count++;
+    return 0U;
+  }
+
+  AppCameraDisplay_InvalidateDCache(dst_addr, APP_CAMERA_DISPLAY_CAMERA_FRAME_BYTES);
+  g_app_camera_dma2d_copy_count++;
+  return 1U;
+#else
+  (void)src_addr;
+  (void)dst_addr;
+  return 0U;
+#endif
+}
+
 static uint32_t AppCameraDisplay_PrepareDisplayFrame(uint32_t frame_addr)
 {
 #if APP_CAMERA_DISPLAY_COMPOSE_ENABLE
@@ -618,10 +693,13 @@ static uint32_t AppCameraDisplay_PrepareDisplayFrame(uint32_t frame_addr)
   }
 
   AppCameraDisplay_InvalidateDCache(frame_addr, APP_CAMERA_DISPLAY_CAMERA_FRAME_BYTES);
-  (void)memcpy((void *)compose_addr,
-               (const void *)frame_addr,
-               APP_CAMERA_DISPLAY_CAMERA_FRAME_BYTES);
-  AppCameraDisplay_CleanDCache(compose_addr, APP_CAMERA_DISPLAY_CAMERA_FRAME_BYTES);
+  if (AppCameraDisplay_CopyFrameDma2d(frame_addr, compose_addr) == 0U)
+  {
+    (void)memcpy((void *)compose_addr,
+                 (const void *)frame_addr,
+                 APP_CAMERA_DISPLAY_CAMERA_FRAME_BYTES);
+    AppCameraDisplay_CleanDCache(compose_addr, APP_CAMERA_DISPLAY_CAMERA_FRAME_BYTES);
+  }
   g_app_camera_compose_addr = compose_addr;
   g_app_camera_compose_count++;
   return compose_addr;
@@ -841,6 +919,9 @@ void AppCameraDisplay_GetStatus(AppCameraDisplayStatus_t *status)
     status->auto_disable_count = g_app_camera_ltdc_auto_disable_count;
     status->overlay_update_count = g_app_camera_overlay_update_count;
     status->overlay_draw_count = g_app_camera_overlay_draw_count;
+    status->dma2d_copy_count = g_app_camera_dma2d_copy_count;
+    status->dma2d_fallback_count = g_app_camera_dma2d_fallback_count;
+    status->dma2d_error_code = g_app_camera_dma2d_error_code;
     status->init_status = (int32_t)g_app_camera_display_init_status;
   }
 }

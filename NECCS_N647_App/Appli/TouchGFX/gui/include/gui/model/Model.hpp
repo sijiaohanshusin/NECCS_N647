@@ -126,6 +126,17 @@ struct AppUiSnapshot
     uint32_t acousticFailedFrames;
     uint32_t acousticDegradedCount;
     uint32_t acousticActiveChannelMask;
+    uint32_t srpPreprocessCycles;
+    uint32_t srpFftCycles;
+    uint32_t srpGccCycles;
+    uint32_t srpCoarseCycles;
+    uint32_t srpFineCycles;
+    uint32_t srpTotalCycles;
+    uint32_t cameraSwapCount;
+    uint32_t cameraOverlayDrawCount;
+    uint32_t cameraDma2dCopyCount;
+    uint32_t cameraDisplayErrorCount;
+    uint32_t cameraDma2dErrorCode;
     const uint16_t* mediaPreviewPixels;
     int32_t batteryCurrentMa;
     int32_t acousticLastStatus;

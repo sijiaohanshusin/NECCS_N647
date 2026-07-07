@@ -361,6 +361,12 @@ void Model::tick()
     snapshot.peakIndex = acoustic.peak_index;
     snapshot.srpMsX100 = acoustic.srp_ms_x100;
     snapshot.uiFpsX10 = (acoustic.fps_x10 != 0U) ? acoustic.fps_x10 : 200U;
+    snapshot.srpPreprocessCycles = acoustic.perf.preprocess_cycles;
+    snapshot.srpFftCycles = acoustic.perf.fft_cycles;
+    snapshot.srpGccCycles = acoustic.perf.gcc_cycles;
+    snapshot.srpCoarseCycles = acoustic.perf.coarse_cycles;
+    snapshot.srpFineCycles = acoustic.perf.fine_cycles;
+    snapshot.srpTotalCycles = acoustic.perf.total_cycles;
     memcpy(snapshot.heat, acoustic.heat, sizeof(snapshot.heat));
     memcpy(snapshot.perfLoad, acoustic.perf_load, sizeof(snapshot.perfLoad));
     const bool acousticOverlayHasFrame =
@@ -435,6 +441,15 @@ void Model::tick()
     snapshot.pcmdRawActiveSlotCount = pcmd.raw_active_slot_count;
     snapshot.pcmdRawPeakDbfs = pcmd.raw_peak_dbfs;
     snapshot.pcmdRawAvgDbfs = pcmd.raw_avg_dbfs;
+
+    AppCameraDisplayStatus_t display;
+    memset(&display, 0, sizeof(display));
+    AppCameraDisplay_GetStatus(&display);
+    snapshot.cameraSwapCount = display.swap_count;
+    snapshot.cameraOverlayDrawCount = display.overlay_draw_count;
+    snapshot.cameraDma2dCopyCount = display.dma2d_copy_count;
+    snapshot.cameraDisplayErrorCount = display.error_count;
+    snapshot.cameraDma2dErrorCode = display.dma2d_error_code;
 
     AppTouchSnapshot_t touch;
     memset(&touch, 0, sizeof(touch));
