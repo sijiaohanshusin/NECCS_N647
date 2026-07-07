@@ -20,15 +20,33 @@
 #define APP_PCMD_CAPTURE_CLOCK_SETTLE_MS     1000U
 #define APP_PCMD_CAPTURE_CONFIG_LOCK_MS      3000U
 #define APP_PCMD_CAPTURE_RETRY_DELAY_MS      500U
+#define APP_PCMD_CAPTURE_CONFIG_ATTEMPTS     3U
+#define APP_PCMD_CAPTURE_CONFIG_RETRY_MS     20U
+#define APP_PCMD_CAPTURE_POST_CONFIG_SETTLE_MS  1000U
+#define APP_PCMD_CAPTURE_POST_CONFIG_DISCARD_HALVES  16U
+#define APP_PCMD_CAPTURE_POST_CONFIG_STATUS_KICK  1U
+#define APP_PCMD_CAPTURE_KEEP_SW_I2C_ACTIVE  0U
 #define APP_PCMD_CAPTURE_EVENT_HALF0         0x00000001UL
 #define APP_PCMD_CAPTURE_EVENT_HALF1         0x00000002UL
 #define APP_PCMD_CAPTURE_EVENT_MASK          (APP_PCMD_CAPTURE_EVENT_HALF0 | APP_PCMD_CAPTURE_EVENT_HALF1)
 #define APP_PCMD_CAPTURE_RAIL_ABS_LEVEL      32760
-#define APP_PCMD_CAPTURE_RAIL_FAULT_X10      20U
+#define APP_PCMD_CAPTURE_RAIL_FAULT_X10      1U
 #define APP_PCMD_CAPTURE_HIGH_FLOOR_DBFS     (-30)
 
 #ifndef APP_PCMD_SDOUT_BCLK_MARGIN_FIX
 #define APP_PCMD_SDOUT_BCLK_MARGIN_FIX       1U
+#endif
+
+#ifndef APP_PCMD_CAPTURE_I2C_BACKEND
+#define APP_PCMD_CAPTURE_I2C_BACKEND         APP_PCMD_CAPTURE_I2C_BACKEND_SW
+#endif
+
+#ifndef APP_PCMD_CAPTURE_STATUS_READ_ON_START
+#define APP_PCMD_CAPTURE_STATUS_READ_ON_START 0U
+#endif
+
+#ifndef APP_PCMD_CAPTURE_STATUS_POLL_MS
+#define APP_PCMD_CAPTURE_STATUS_POLL_MS      0U
 #endif
 
 extern SAI_HandleTypeDef hsai_BlockA1;
@@ -58,6 +76,19 @@ static uint8_t s_event_flags_created;
 static volatile uint8_t s_half_ready_mask[APP_PCMD_CAPTURE_DMA_HALVES];
 static volatile uint32_t s_frame_seq;
 static volatile uint8_t s_latest_frame_index;
+static volatile uint32_t s_raw_slot_abs_sum[APP_PCMD_CAPTURE_BUS_COUNT][APP_PCMD_CAPTURE_SLOTS_PER_BUS];
+static volatile int32_t s_raw_slot_dc_sum[APP_PCMD_CAPTURE_BUS_COUNT][APP_PCMD_CAPTURE_SLOTS_PER_BUS];
+static volatile uint32_t s_raw_slot_count[APP_PCMD_CAPTURE_BUS_COUNT][APP_PCMD_CAPTURE_SLOTS_PER_BUS];
+static volatile int16_t s_raw_slot_last_sample[APP_PCMD_CAPTURE_BUS_COUNT][APP_PCMD_CAPTURE_SLOTS_PER_BUS];
+static volatile uint32_t s_raw_rail_sample_count;
+static volatile uint32_t s_raw_total_sample_count;
+static volatile uint8_t s_raw_accum_enabled;
+static volatile uint8_t s_dma_discard_halves_remaining[APP_PCMD_CAPTURE_BUS_COUNT];
+static uint8_t s_i2c_force_software_backend;
+
+static void AppPcmdCapture_UpdateMicLevels(void);
+static void AppPcmdCapture_DeviceStatusKick(uint32_t device_index);
+static void AppPcmdCapture_StopDma(void);
 
 static uint8_t AppPcmdCapture_ClampPercent(uint32_t value)
 {
@@ -106,6 +137,83 @@ static int8_t AppPcmdCapture_LevelToDbfs(uint16_t level)
   }
 
   return -90;
+}
+
+static void AppPcmdCapture_ClearRawAccumulator(void)
+{
+  uint32_t primask = __get_PRIMASK();
+
+  __disable_irq();
+  memset((void *)s_raw_slot_abs_sum, 0, sizeof(s_raw_slot_abs_sum));
+  memset((void *)s_raw_slot_dc_sum, 0, sizeof(s_raw_slot_dc_sum));
+  memset((void *)s_raw_slot_count, 0, sizeof(s_raw_slot_count));
+  memset((void *)s_raw_slot_last_sample, 0, sizeof(s_raw_slot_last_sample));
+  s_raw_rail_sample_count = 0U;
+  s_raw_total_sample_count = 0U;
+  if (primask == 0U)
+  {
+    __enable_irq();
+  }
+}
+
+static uint8_t AppPcmdCapture_IsDeviceStatusExpected(uint32_t device_index,
+                                                     const PCMD3180_StatusSnapshotTypeDef *status)
+{
+  uint8_t expected_pdmclk;
+  uint8_t expected_mask;
+  uint8_t expected_out_mask;
+
+  if ((status == NULL) || (device_index >= APP_PCMD_CAPTURE_DEVICE_COUNT))
+  {
+    return 0U;
+  }
+
+  expected_mask = s_pcmd_configs[device_index].input_channel_mask;
+  expected_out_mask = s_pcmd_configs[device_index].output_channel_mask;
+  expected_pdmclk =
+      (uint8_t)(PCMD3180_PDMCLK_CFG_RESET_MASK |
+                ((uint8_t)s_pcmd_configs[device_index].pdmclk_divider & 0x03U));
+
+  for (uint32_t channel = 0U; channel < PCMD3180_ARRAY_MAX_MICS_PER_DEV; channel++)
+  {
+    const uint8_t expected_slot =
+        (uint8_t)(s_mode_config.devices[device_index].start_slot + channel);
+    if (status->asi_ch_slot[channel] != expected_slot)
+    {
+      return 0U;
+    }
+  }
+
+  if ((status->sleep_cfg != PCMD3180_SLEEP_CFG_WAKE) ||
+      (status->asi_cfg0 != (uint8_t)((((uint8_t)s_pcmd_configs[device_index].slot_width & 0x03U) << 4) |
+                                     ((s_pcmd_configs[device_index].invert_fsync == 0U) ? 0U : 0x08U) |
+                                     ((s_pcmd_configs[device_index].invert_bclk == 0U) ? 0U : 0x04U) |
+                                     0x01U)) ||
+      (status->asi_cfg1 != s_pcmd_configs[device_index].tdm_tx_offset) ||
+      (status->asi_cfg2 != 0U) ||
+      (status->mst_cfg0 != 0U) ||
+      (status->mst_cfg1 != 0U) ||
+      (status->clk_src != 0U) ||
+      (status->pdmclk_cfg != expected_pdmclk) ||
+      (status->pdmin_cfg != s_pcmd_configs[device_index].pdmin_edge_mask) ||
+      (status->gpo_cfg0 != PCMD3180_GPO_CFG_PDMCLK_OUTPUT) ||
+      (status->gpo_cfg1 != PCMD3180_GPO_CFG_PDMCLK_OUTPUT) ||
+      (status->gpo_cfg2 != PCMD3180_GPO_CFG_PDMCLK_OUTPUT) ||
+      (status->gpo_cfg3 != PCMD3180_GPO_CFG_PDMCLK_OUTPUT) ||
+      (status->gpi_cfg0 != PCMD3180_GPI_CFG0_DEFAULT) ||
+      (status->gpi_cfg1 != PCMD3180_GPI_CFG1_DEFAULT) ||
+      (status->in_ch_en != expected_mask) ||
+      (status->asi_out_ch_en != expected_out_mask))
+  {
+    return 0U;
+  }
+
+  if ((status->pwr_cfg & PCMD3180_PWR_PDM_AND_PLL) != PCMD3180_PWR_PDM_AND_PLL)
+  {
+    return 0U;
+  }
+
+  return 1U;
 }
 
 static uint8_t AppPcmdCapture_DbfsToPercent(int8_t dbfs)
@@ -208,6 +316,9 @@ static uint8_t AppPcmdCapture_IsSupportedMode(AppMicArrayMode_t mode)
 static void AppPcmdCapture_ClearRuntime(void)
 {
   memset(&s_snapshot, 0, sizeof(s_snapshot));
+  s_raw_accum_enabled = 0U;
+  s_i2c_force_software_backend = 0U;
+  AppPcmdCapture_ClearRawAccumulator();
   for (uint32_t i = 0U; i < APP_PCMD_CAPTURE_DMA_HALVES; i++)
   {
     s_half_ready_mask[i] = 0U;
@@ -225,6 +336,13 @@ static void AppPcmdCapture_ClearRuntime(void)
   for (uint32_t mic = 0U; mic < APP_MIC_ARRAY_PHYSICAL_MIC_COUNT; mic++)
   {
     s_snapshot.mic_dbfs[mic] = -90;
+  }
+  for (uint32_t index = 0U; index < APP_PCMD_CAPTURE_DEVICE_COUNT; index++)
+  {
+    s_snapshot.device_address_status[index] = (int32_t)PCMD3180_ERROR;
+    s_snapshot.device_probe_status[index] = (int32_t)PCMD3180_ERROR;
+    s_snapshot.device_config_status[index] = (int32_t)PCMD3180_ERROR;
+    s_snapshot.device_status_status[index] = (int32_t)PCMD3180_ERROR;
   }
   s_snapshot.raw_peak_dbfs = -90;
   s_snapshot.raw_avg_dbfs = -90;
@@ -266,8 +384,17 @@ static void AppPcmdCapture_ClearPendingDmaEvents(void)
   s_snapshot.published_fps_x10 = 0U;
   s_snapshot.latest_seq = 0U;
   s_snapshot.latest_frame_valid = 0U;
+  s_snapshot.raw_audio_valid = 0U;
+  s_snapshot.raw_quality_flags = 0U;
+  s_snapshot.raw_peak_dbfs = -90;
+  s_snapshot.raw_avg_dbfs = -90;
+  s_snapshot.raw_active_slot_count = 0U;
+  s_snapshot.raw_rail_sample_count = 0U;
+  s_snapshot.raw_total_sample_count = 0U;
+  s_snapshot.raw_rail_percent_x10 = 0U;
   s_frame_seq = 0U;
   s_latest_frame_index = 0U;
+  AppPcmdCapture_ClearRawAccumulator();
 }
 
 static void AppPcmdCapture_MarkHalfReady(uint8_t bus, uint8_t half)
@@ -321,70 +448,160 @@ static uint8_t AppPcmdCapture_TakeHalf(uint8_t half)
   return ready;
 }
 
-static void AppPcmdCapture_UpdateSlotLevels(uint8_t bus,
-                                            const int16_t *interleaved,
-                                            uint32_t frame_len)
+static void AppPcmdCapture_AccumulateRawLevels(uint8_t bus,
+                                               const int16_t *interleaved,
+                                               uint32_t word_count)
 {
   int32_t dc_sum[APP_PCMD_CAPTURE_SLOTS_PER_BUS] = { 0 };
-  int16_t dc_level[APP_PCMD_CAPTURE_SLOTS_PER_BUS] = { 0 };
   uint32_t ac_sum[APP_PCMD_CAPTURE_SLOTS_PER_BUS] = { 0U };
+  uint16_t count[APP_PCMD_CAPTURE_SLOTS_PER_BUS] = { 0U };
+  int16_t last_sample[APP_PCMD_CAPTURE_SLOTS_PER_BUS] = { 0 };
+  uint32_t rail_count = 0U;
 
-  if ((bus >= APP_PCMD_CAPTURE_BUS_COUNT) || (interleaved == NULL) || (frame_len == 0U))
+  if ((bus >= APP_PCMD_CAPTURE_BUS_COUNT) || (interleaved == NULL) || (word_count == 0U))
   {
     return;
   }
 
-  for (uint32_t frame = 0U; frame < frame_len; frame++)
+  for (uint32_t word = 0U; word < word_count; word++)
+  {
+    const uint32_t slot = word % APP_PCMD_CAPTURE_SLOTS_PER_BUS;
+    const int16_t sample = App_MicArray_DecodePcmdTdmSample(interleaved[word]);
+    const int32_t sample_abs = (sample < 0) ? -(int32_t)sample : (int32_t)sample;
+
+    dc_sum[slot] += sample;
+    count[slot]++;
+    last_sample[slot] = sample;
+    if (sample_abs >= APP_PCMD_CAPTURE_RAIL_ABS_LEVEL)
+    {
+      rail_count++;
+    }
+  }
+
+  for (uint32_t word = 0U; word < word_count; word++)
+  {
+    const uint32_t slot = word % APP_PCMD_CAPTURE_SLOTS_PER_BUS;
+    const int32_t sample = (int32_t)App_MicArray_DecodePcmdTdmSample(interleaved[word]);
+    const int32_t mean = (count[slot] == 0U) ? 0 : (dc_sum[slot] / (int32_t)count[slot]);
+    const int32_t ac_sample = sample - mean;
+    ac_sum[slot] += (uint32_t)((ac_sample < 0) ? -ac_sample : ac_sample);
+  }
+
+  for (uint32_t slot = 0U; slot < APP_PCMD_CAPTURE_SLOTS_PER_BUS; slot++)
+  {
+    if (count[slot] == 0U)
+    {
+      continue;
+    }
+
+    if ((0xFFFFFFFFUL - s_raw_slot_abs_sum[bus][slot]) > ac_sum[slot])
+    {
+      s_raw_slot_abs_sum[bus][slot] += ac_sum[slot];
+    }
+    else
+    {
+      s_raw_slot_abs_sum[bus][slot] = 0xFFFFFFFFUL;
+    }
+
+    s_raw_slot_dc_sum[bus][slot] += dc_sum[slot];
+    if ((0xFFFFFFFFUL - s_raw_slot_count[bus][slot]) > (uint32_t)count[slot])
+    {
+      s_raw_slot_count[bus][slot] += (uint32_t)count[slot];
+    }
+    else
+    {
+      s_raw_slot_count[bus][slot] = 0xFFFFFFFFUL;
+    }
+    s_raw_slot_last_sample[bus][slot] = last_sample[slot];
+  }
+
+  if ((0xFFFFFFFFUL - s_raw_rail_sample_count) > rail_count)
+  {
+    s_raw_rail_sample_count += rail_count;
+  }
+  else
+  {
+    s_raw_rail_sample_count = 0xFFFFFFFFUL;
+  }
+  if ((0xFFFFFFFFUL - s_raw_total_sample_count) > word_count)
+  {
+    s_raw_total_sample_count += word_count;
+  }
+  else
+  {
+    s_raw_total_sample_count = 0xFFFFFFFFUL;
+  }
+}
+
+static void AppPcmdCapture_FlushRawLevels(void)
+{
+  uint32_t abs_sum[APP_PCMD_CAPTURE_BUS_COUNT][APP_PCMD_CAPTURE_SLOTS_PER_BUS];
+  int32_t dc_sum[APP_PCMD_CAPTURE_BUS_COUNT][APP_PCMD_CAPTURE_SLOTS_PER_BUS];
+  uint32_t count[APP_PCMD_CAPTURE_BUS_COUNT][APP_PCMD_CAPTURE_SLOTS_PER_BUS];
+  int16_t last_sample[APP_PCMD_CAPTURE_BUS_COUNT][APP_PCMD_CAPTURE_SLOTS_PER_BUS];
+  uint32_t rail_count;
+  uint32_t total_count;
+  uint32_t primask;
+
+  primask = __get_PRIMASK();
+  __disable_irq();
+  for (uint32_t bus = 0U; bus < APP_PCMD_CAPTURE_BUS_COUNT; bus++)
   {
     for (uint32_t slot = 0U; slot < APP_PCMD_CAPTURE_SLOTS_PER_BUS; slot++)
     {
-      const int16_t sample =
-          App_MicArray_DecodePcmdTdmSample(
-              interleaved[(frame * APP_PCMD_CAPTURE_SLOTS_PER_BUS) + slot]);
-      const int32_t sample_abs = (sample < 0) ? -(int32_t)sample : (int32_t)sample;
-      dc_sum[slot] += sample;
-      s_snapshot.slot_last_sample[bus][slot] = sample;
-      s_snapshot.raw_total_sample_count++;
-      if (sample_abs >= APP_PCMD_CAPTURE_RAIL_ABS_LEVEL)
+      abs_sum[bus][slot] = s_raw_slot_abs_sum[bus][slot];
+      dc_sum[bus][slot] = s_raw_slot_dc_sum[bus][slot];
+      count[bus][slot] = s_raw_slot_count[bus][slot];
+      last_sample[bus][slot] = s_raw_slot_last_sample[bus][slot];
+      s_raw_slot_abs_sum[bus][slot] = 0U;
+      s_raw_slot_dc_sum[bus][slot] = 0;
+      s_raw_slot_count[bus][slot] = 0U;
+    }
+  }
+  rail_count = s_raw_rail_sample_count;
+  total_count = s_raw_total_sample_count;
+  s_raw_rail_sample_count = 0U;
+  s_raw_total_sample_count = 0U;
+  if (primask == 0U)
+  {
+    __enable_irq();
+  }
+
+  if (total_count == 0U)
+  {
+    return;
+  }
+
+  s_snapshot.raw_rail_sample_count = rail_count;
+  s_snapshot.raw_total_sample_count = total_count;
+  for (uint32_t bus = 0U; bus < APP_PCMD_CAPTURE_BUS_COUNT; bus++)
+  {
+    for (uint32_t slot = 0U; slot < APP_PCMD_CAPTURE_SLOTS_PER_BUS; slot++)
+    {
+      uint32_t raw_level = 0U;
+      int16_t dc_level = 0;
+      int8_t dbfs;
+
+      if (count[bus][slot] != 0U)
       {
-        s_snapshot.raw_rail_sample_count++;
+        raw_level = abs_sum[bus][slot] / count[bus][slot];
+        dc_level = (int16_t)(dc_sum[bus][slot] / (int32_t)count[bus][slot]);
       }
+      if (raw_level > 65535U)
+      {
+        raw_level = 65535U;
+      }
+
+      dbfs = AppPcmdCapture_LevelToDbfs((uint16_t)raw_level);
+      s_snapshot.slot_level_raw[bus][slot] = (uint16_t)raw_level;
+      s_snapshot.slot_dc_level[bus][slot] = dc_level;
+      s_snapshot.slot_last_sample[bus][slot] = last_sample[bus][slot];
+      s_snapshot.slot_dbfs[bus][slot] = dbfs;
+      s_snapshot.slot_level[bus][slot] = AppPcmdCapture_DbfsToPercent(dbfs);
     }
   }
 
-  for (uint32_t slot = 0U; slot < APP_PCMD_CAPTURE_SLOTS_PER_BUS; slot++)
-  {
-    dc_level[slot] = (int16_t)(dc_sum[slot] / (int32_t)frame_len);
-  }
-
-  for (uint32_t frame = 0U; frame < frame_len; frame++)
-  {
-    for (uint32_t slot = 0U; slot < APP_PCMD_CAPTURE_SLOTS_PER_BUS; slot++)
-    {
-      const int32_t sample =
-          (int32_t)App_MicArray_DecodePcmdTdmSample(
-              interleaved[(frame * APP_PCMD_CAPTURE_SLOTS_PER_BUS) + slot]);
-      const int32_t ac_sample = sample - (int32_t)dc_level[slot];
-      ac_sum[slot] += (uint32_t)((ac_sample < 0) ? -ac_sample : ac_sample);
-    }
-  }
-
-  for (uint32_t slot = 0U; slot < APP_PCMD_CAPTURE_SLOTS_PER_BUS; slot++)
-  {
-    uint32_t raw_level = ac_sum[slot] / frame_len;
-    int8_t dbfs;
-
-    if (raw_level > 65535U)
-    {
-      raw_level = 65535U;
-    }
-
-    dbfs = AppPcmdCapture_LevelToDbfs((uint16_t)raw_level);
-    s_snapshot.slot_level_raw[bus][slot] = (uint16_t)raw_level;
-    s_snapshot.slot_dc_level[bus][slot] = dc_level[slot];
-    s_snapshot.slot_dbfs[bus][slot] = dbfs;
-    s_snapshot.slot_level[bus][slot] = AppPcmdCapture_DbfsToPercent(dbfs);
-  }
+  AppPcmdCapture_UpdateMicLevels();
 }
 
 static void AppPcmdCapture_UpdateMicLevels(void)
@@ -492,12 +709,6 @@ static void AppPcmdCapture_ProcessHalf(uint8_t half)
   AppAudioFrame_t *frame = &s_frame_ring[frame_index];
   float *samples = s_frame_samples[frame_index];
 
-  s_snapshot.raw_rail_sample_count = 0U;
-  s_snapshot.raw_total_sample_count = 0U;
-  s_snapshot.raw_rail_percent_x10 = 0U;
-  AppPcmdCapture_UpdateSlotLevels(APP_MIC_ARRAY_BUS_A, bus_a, APP_PCMD_CAPTURE_FRAME_LEN);
-  AppPcmdCapture_UpdateSlotLevels(APP_MIC_ARRAY_BUS_B, bus_b, APP_PCMD_CAPTURE_FRAME_LEN);
-
   if (App_AudioFrame_FromTdmI16PlanarF32(frame,
                                         APP_MIC_ARRAY_MODE_WIDE32_48K,
                                         bus_a,
@@ -538,17 +749,23 @@ static void AppPcmdCapture_ReadDeviceStatus(void)
 {
   for (uint32_t index = 0U; index < APP_PCMD_CAPTURE_DEVICE_COUNT; index++)
   {
+    const uint8_t device_mask = (uint8_t)(1U << index);
     PCMD3180_StatusTypeDef status;
 
     status = PCMD3180_ReadStatus(&s_pcmd_handles[index], &s_snapshot.device_status[index]);
     s_snapshot.device_status_status[index] = (int32_t)status;
-    if (status == PCMD3180_OK)
+    if ((status == PCMD3180_OK) &&
+        (AppPcmdCapture_IsDeviceStatusExpected(index, &s_snapshot.device_status[index]) != 0U))
     {
-      s_snapshot.device_status_ok_mask = (uint8_t)(s_snapshot.device_status_ok_mask | (uint8_t)(1U << index));
+      s_snapshot.device_status_ok_mask = (uint8_t)(s_snapshot.device_status_ok_mask | device_mask);
     }
     else
     {
-      s_snapshot.device_status_ok_mask = (uint8_t)(s_snapshot.device_status_ok_mask & (uint8_t)~(1U << index));
+      if (status == PCMD3180_OK)
+      {
+        s_snapshot.device_status_status[index] = (int32_t)PCMD3180_VERIFY_ERROR;
+      }
+      s_snapshot.device_status_ok_mask = (uint8_t)(s_snapshot.device_status_ok_mask & (uint8_t)~device_mask);
     }
   }
 }
@@ -563,41 +780,213 @@ static AppPcmdCaptureStatus_t AppPcmdCapture_ConfigPcmdDevices(void)
 
   for (uint32_t index = 0U; index < APP_PCMD_CAPTURE_DEVICE_COUNT; index++)
   {
-    PCMD3180_StatusTypeDef status = PCMD3180_HAL_ProbeAddress(&s_hal_context,
-                                                               s_pcmd_handles[index].address7);
-    if (status == PCMD3180_OK)
+    const uint8_t device_mask = (uint8_t)(1U << index);
+    PCMD3180_StatusTypeDef address_status;
+    PCMD3180_StatusTypeDef probe_status;
+    PCMD3180_StatusTypeDef config_status;
+    PCMD3180_StatusTypeDef status_status = PCMD3180_ERROR;
+    uint8_t configured = 0U;
+
+    s_snapshot.device_address_status[index] = (int32_t)PCMD3180_ERROR;
+    s_snapshot.device_probe_status[index] = (int32_t)PCMD3180_ERROR;
+    s_snapshot.device_config_status[index] = (int32_t)PCMD3180_ERROR;
+    s_snapshot.device_status_status[index] = (int32_t)PCMD3180_ERROR;
+
+    address_status = PCMD3180_HAL_ProbeAddress(&s_hal_context,
+                                               s_pcmd_handles[index].address7);
+    s_snapshot.device_address_status[index] = (int32_t)address_status;
+    if (address_status == PCMD3180_OK)
     {
       s_snapshot.device_present_mask = (uint8_t)(s_snapshot.device_present_mask | (uint8_t)(1U << index));
     }
-    else
+
+    /*
+     * Keep address/probe reads diagnostic-only, matching the validated PCMD
+     * branch. The TI/H7 bring-up sequence starts with writes after clocks are
+     * stable; a transient read miss must not skip the real configuration pass.
+     */
+    probe_status = PCMD3180_Probe(&s_pcmd_handles[index]);
+    s_snapshot.device_probe_status[index] = (int32_t)probe_status;
+    if (probe_status == PCMD3180_OK)
     {
-      s_snapshot.device_config_status[index] = (int32_t)status;
-      result = APP_PCMD_CAPTURE_PCMD_ERROR;
-      continue;
+      s_snapshot.device_present_mask = (uint8_t)(s_snapshot.device_present_mask | (uint8_t)(1U << index));
     }
 
-    status = PCMD3180_Probe(&s_pcmd_handles[index]);
-    if (status != PCMD3180_OK)
+    for (uint32_t attempt = 0U; attempt < APP_PCMD_CAPTURE_CONFIG_ATTEMPTS; attempt++)
     {
-      s_snapshot.device_config_status[index] = (int32_t)status;
-      result = APP_PCMD_CAPTURE_PCMD_ERROR;
-      continue;
+      config_status = PCMD3180_Configure(&s_pcmd_handles[index], &s_pcmd_configs[index]);
+      s_snapshot.device_config_status[index] = (int32_t)config_status;
+
+      if (config_status == PCMD3180_OK)
+      {
+        PCMD3180_StatusSnapshotTypeDef *status = &s_snapshot.device_status[index];
+
+        memset(status, 0, sizeof(*status));
+        for (uint32_t channel = 0U; channel < PCMD3180_ARRAY_MAX_MICS_PER_DEV; channel++)
+        {
+          status->asi_ch_slot[channel] =
+              (uint8_t)(s_mode_config.devices[index].start_slot + channel);
+        }
+        status->pwr_cfg = PCMD3180_PWR_PDM_AND_PLL |
+                          (uint8_t)((s_pcmd_configs[index].enable_micbias == 0U) ?
+                                    0U : PCMD3180_PWR_MICBIAS);
+        status->sleep_cfg = PCMD3180_SLEEP_CFG_WAKE;
+        status->asi_cfg0 = (uint8_t)((((uint8_t)s_pcmd_configs[index].slot_width & 0x03U) << 4) |
+                                     ((s_pcmd_configs[index].invert_fsync == 0U) ? 0U : 0x08U) |
+                                     ((s_pcmd_configs[index].invert_bclk == 0U) ? 0U : 0x04U) |
+                                     0x01U);
+        status->asi_cfg1 = s_pcmd_configs[index].tdm_tx_offset;
+        status->asi_cfg2 = 0U;
+        status->mst_cfg0 = 0U;
+        status->mst_cfg1 = 0U;
+        status->clk_src = 0U;
+        status->pdmclk_cfg = (uint8_t)(PCMD3180_PDMCLK_CFG_RESET_MASK |
+                                       ((uint8_t)s_pcmd_configs[index].pdmclk_divider & 0x03U));
+        status->pdmin_cfg = s_pcmd_configs[index].pdmin_edge_mask;
+        status->gpo_cfg0 = PCMD3180_GPO_CFG_PDMCLK_OUTPUT;
+        status->gpo_cfg1 = PCMD3180_GPO_CFG_PDMCLK_OUTPUT;
+        status->gpo_cfg2 = PCMD3180_GPO_CFG_PDMCLK_OUTPUT;
+        status->gpo_cfg3 = PCMD3180_GPO_CFG_PDMCLK_OUTPUT;
+        status->gpi_cfg0 = PCMD3180_GPI_CFG0_DEFAULT;
+        status->gpi_cfg1 = PCMD3180_GPI_CFG1_DEFAULT;
+        status->in_ch_en = s_pcmd_configs[index].input_channel_mask;
+        status->asi_out_ch_en = s_pcmd_configs[index].output_channel_mask;
+
+        s_snapshot.device_present_mask = (uint8_t)(s_snapshot.device_present_mask | device_mask);
+        s_snapshot.device_config_ok_mask = (uint8_t)(s_snapshot.device_config_ok_mask | device_mask);
+        s_snapshot.device_status_ok_mask = (uint8_t)(s_snapshot.device_status_ok_mask | device_mask);
+#if (APP_PCMD_CAPTURE_STATUS_READ_ON_START != 0U)
+        status_status = PCMD3180_ReadStatus(&s_pcmd_handles[index],
+                                            &s_snapshot.device_status[index]);
+        if ((status_status == PCMD3180_OK) &&
+            (AppPcmdCapture_IsDeviceStatusExpected(index, &s_snapshot.device_status[index]) == 0U))
+        {
+          status_status = PCMD3180_VERIFY_ERROR;
+        }
+        if (status_status != PCMD3180_OK)
+        {
+          s_snapshot.device_status_ok_mask = (uint8_t)(s_snapshot.device_status_ok_mask & (uint8_t)~device_mask);
+        }
+#else
+        status_status = PCMD3180_OK;
+#endif
+        configured = 1U;
+        break;
+      }
+      else
+      {
+        status_status = config_status;
+      }
+
+      if ((attempt + 1U) < APP_PCMD_CAPTURE_CONFIG_ATTEMPTS)
+      {
+        AppPcmdCapture_DelayMs(APP_PCMD_CAPTURE_CONFIG_RETRY_MS);
+      }
     }
 
-    status = PCMD3180_Configure(&s_pcmd_handles[index], &s_pcmd_configs[index]);
-    s_snapshot.device_config_status[index] = (int32_t)status;
-    if (status == PCMD3180_OK)
+    s_snapshot.device_status_status[index] = (int32_t)status_status;
+    if (configured == 0U)
     {
-      s_snapshot.device_config_ok_mask = (uint8_t)(s_snapshot.device_config_ok_mask | (uint8_t)(1U << index));
-    }
-    else
-    {
+      if (s_snapshot.device_config_status[index] == (int32_t)PCMD3180_OK)
+      {
+        s_snapshot.device_config_status[index] = (int32_t)PCMD3180_VERIFY_ERROR;
+      }
+      s_snapshot.device_config_ok_mask = (uint8_t)(s_snapshot.device_config_ok_mask & (uint8_t)~device_mask);
+      s_snapshot.device_status_ok_mask = (uint8_t)(s_snapshot.device_status_ok_mask & (uint8_t)~device_mask);
       result = APP_PCMD_CAPTURE_PCMD_ERROR;
     }
   }
 
-  AppPcmdCapture_ReadDeviceStatus();
+  if (result == APP_PCMD_CAPTURE_OK)
+  {
+    static const uint8_t activate_order[APP_PCMD_CAPTURE_DEVICE_COUNT] =
+    {
+      1U, 0U, 3U, 2U
+    };
+
+    for (uint32_t order = 0U; order < APP_PCMD_CAPTURE_DEVICE_COUNT; order++)
+    {
+      const uint32_t index = activate_order[order];
+      const uint8_t device_mask = (uint8_t)(1U << index);
+      PCMD3180_StatusTypeDef activate_status =
+          PCMD3180_Activate(&s_pcmd_handles[index], &s_pcmd_configs[index]);
+
+      if (activate_status != PCMD3180_OK)
+      {
+        s_snapshot.device_config_status[index] = (int32_t)activate_status;
+        s_snapshot.device_config_ok_mask = (uint8_t)(s_snapshot.device_config_ok_mask & (uint8_t)~device_mask);
+        s_snapshot.device_status_ok_mask = (uint8_t)(s_snapshot.device_status_ok_mask & (uint8_t)~device_mask);
+        result = APP_PCMD_CAPTURE_PCMD_ERROR;
+      }
+      else
+      {
+        AppPcmdCapture_DeviceStatusKick(index);
+      }
+    }
+  }
+
   return result;
+}
+
+static void AppPcmdCapture_DeviceStatusKick(uint32_t device_index)
+{
+#if (APP_PCMD_CAPTURE_POST_CONFIG_STATUS_KICK != 0U)
+  PCMD3180_StatusSnapshotTypeDef scratch;
+
+  if (device_index < APP_PCMD_CAPTURE_DEVICE_COUNT)
+  {
+    memset(&scratch, 0, sizeof(scratch));
+    (void)PCMD3180_ReadStatus(&s_pcmd_handles[device_index], &scratch);
+  }
+#else
+  (void)device_index;
+#endif
+}
+
+static void AppPcmdCapture_SelectI2CBackend(uint8_t backend)
+{
+  const uint8_t use_software =
+      (backend == APP_PCMD_CAPTURE_I2C_BACKEND_SW) ? 1U : 0U;
+
+  PCMD3180_HAL_SetSoftwareI2CEnabled(&s_hal_context, use_software);
+  s_snapshot.i2c_backend_active = use_software ?
+      APP_PCMD_CAPTURE_I2C_BACKEND_SW :
+      APP_PCMD_CAPTURE_I2C_BACKEND_HAL;
+}
+
+static AppPcmdCaptureStatus_t AppPcmdCapture_ResetAndConfigurePcmd(uint8_t backend)
+{
+  PCMD3180_StatusTypeDef pcmd_status;
+  AppPcmdCaptureStatus_t config_status;
+  const uint8_t use_software =
+      (backend == APP_PCMD_CAPTURE_I2C_BACKEND_SW) ? 1U : 0U;
+
+  AppPcmdCapture_SelectI2CBackend(backend);
+  if (use_software != 0U)
+  {
+    PCMD3180_HAL_PrepareSoftwareI2C(&s_hal_context);
+  }
+
+  pcmd_status = PCMD3180_HardwareReset(&s_pcmd_handles[0],
+                                       APP_PCMD_CAPTURE_RESET_LOW_MS,
+                                       APP_PCMD_CAPTURE_RESET_SETTLE_MS);
+  if (pcmd_status != PCMD3180_OK)
+  {
+    s_snapshot.start_status = (int32_t)pcmd_status;
+    if ((use_software != 0U) && (APP_PCMD_CAPTURE_KEEP_SW_I2C_ACTIVE == 0U))
+    {
+      PCMD3180_HAL_ReleaseSoftwareI2C(&s_hal_context);
+    }
+    return APP_PCMD_CAPTURE_PCMD_ERROR;
+  }
+
+  config_status = AppPcmdCapture_ConfigPcmdDevices();
+  if ((use_software != 0U) && (APP_PCMD_CAPTURE_KEEP_SW_I2C_ACTIVE == 0U))
+  {
+    PCMD3180_HAL_ReleaseSoftwareI2C(&s_hal_context);
+  }
+
+  return config_status;
 }
 
 static void AppPcmdCapture_RecordSaiErrors(void)
@@ -608,8 +997,108 @@ static void AppPcmdCapture_RecordSaiErrors(void)
   s_snapshot.dma_b_error = HAL_DMA_GetError(&handle_GPDMA1_Channel1);
 }
 
+static void AppPcmdCapture_RequestRestart(uint32_t reason)
+{
+  s_snapshot.start_status = (int32_t)reason;
+  s_snapshot.raw_audio_valid = 0U;
+  s_snapshot.latest_frame_valid = 0U;
+  AppPcmdCapture_StopDma();
+  AppPcmdCapture_ClearPendingDmaEvents();
+  s_snapshot.started = 0U;
+  App_BringUpStatus_Fail(APP_BRINGUP_MODULE_PCMD_RAW, (int32_t)reason);
+  App_BringUpStatus_Fail(APP_BRINGUP_MODULE_AUDIO_FRAME, (int32_t)reason);
+}
+
+static void AppPcmdCapture_ArmDiscardHalves(uint8_t discard_halves)
+{
+  uint32_t primask = __get_PRIMASK();
+
+  __disable_irq();
+  s_dma_discard_halves_remaining[APP_MIC_ARRAY_BUS_A] = discard_halves;
+  s_dma_discard_halves_remaining[APP_MIC_ARRAY_BUS_B] = discard_halves;
+  if (primask == 0U)
+  {
+    __enable_irq();
+  }
+}
+
+static HAL_StatusTypeDef AppPcmdCapture_StartSaiBlockB(void)
+{
+  HAL_StatusTypeDef hal_status;
+
+  HAL_NVIC_DisableIRQ(SAI1_B_IRQn);
+  __HAL_SAI_CLEAR_FLAG(&hsai_BlockB1, SAI_FLAG_AFSDET | SAI_FLAG_LFSDET | SAI_FLAG_OVRUDR);
+  __HAL_SAI_DISABLE_IT(&hsai_BlockB1, SAI_IT_AFSDET | SAI_IT_LFSDET);
+  hal_status = HAL_SAI_Receive_DMA(&hsai_BlockB1,
+                                   (uint8_t *)s_bus_b_rx,
+                                   APP_PCMD_CAPTURE_DMA_WORDS);
+  __HAL_SAI_CLEAR_FLAG(&hsai_BlockB1, SAI_FLAG_AFSDET | SAI_FLAG_LFSDET | SAI_FLAG_OVRUDR);
+  __HAL_SAI_DISABLE_IT(&hsai_BlockB1, SAI_IT_AFSDET | SAI_IT_LFSDET);
+  HAL_NVIC_EnableIRQ(SAI1_B_IRQn);
+
+  s_snapshot.dma_b_status = (int32_t)hal_status;
+  if (hal_status != HAL_OK)
+  {
+    AppPcmdCapture_RecordSaiErrors();
+    return hal_status;
+  }
+
+  __HAL_SAI_CLEAR_FLAG(&hsai_BlockB1, SAI_FLAG_AFSDET | SAI_FLAG_LFSDET | SAI_FLAG_OVRUDR);
+  __HAL_SAI_DISABLE_IT(&hsai_BlockB1, SAI_IT_AFSDET | SAI_IT_LFSDET);
+  return HAL_OK;
+}
+
+static HAL_StatusTypeDef AppPcmdCapture_StartSaiBlockA(void)
+{
+  HAL_StatusTypeDef hal_status;
+
+  hal_status = HAL_SAI_Receive_DMA(&hsai_BlockA1,
+                                   (uint8_t *)s_bus_a_rx,
+                                   APP_PCMD_CAPTURE_DMA_WORDS);
+  s_snapshot.dma_a_status = (int32_t)hal_status;
+  if (hal_status != HAL_OK)
+  {
+    AppPcmdCapture_RecordSaiErrors();
+  }
+
+  return hal_status;
+}
+
+static HAL_StatusTypeDef AppPcmdCapture_StartSaiDma(uint8_t discard_halves,
+                                                    uint8_t slave_first)
+{
+  HAL_StatusTypeDef hal_status;
+
+  memset(s_bus_a_rx, 0, sizeof(s_bus_a_rx));
+  memset(s_bus_b_rx, 0, sizeof(s_bus_b_rx));
+
+  AppPcmdCapture_ArmDiscardHalves(discard_halves);
+
+  if (slave_first != 0U)
+  {
+    hal_status = AppPcmdCapture_StartSaiBlockB();
+    if (hal_status != HAL_OK)
+    {
+      return hal_status;
+    }
+    AppPcmdCapture_DelayMs(2U);
+    return AppPcmdCapture_StartSaiBlockA();
+  }
+
+  hal_status = AppPcmdCapture_StartSaiBlockA();
+  if (hal_status != HAL_OK)
+  {
+    return hal_status;
+  }
+  AppPcmdCapture_DelayMs(2U);
+  return AppPcmdCapture_StartSaiBlockB();
+}
+
 static void AppPcmdCapture_StopDma(void)
 {
+  s_raw_accum_enabled = 0U;
+  s_dma_discard_halves_remaining[APP_MIC_ARRAY_BUS_A] = 0U;
+  s_dma_discard_halves_remaining[APP_MIC_ARRAY_BUS_B] = 0U;
   (void)HAL_SAI_DMAStop(&hsai_BlockA1);
   (void)HAL_SAI_DMAStop(&hsai_BlockB1);
 
@@ -642,10 +1131,16 @@ AppPcmdCaptureStatus_t AppPcmdCapture_Init(AppMicArrayMode_t mode)
                                  (APP_PCMD_DIAG_UI_ENABLE != 0U)) ? 1U : 0U;
 
   s_hal_context.hi2c = &hi2c2;
+  s_hal_context.scl_port = GPIOD;
+  s_hal_context.scl_pin = GPIO_PIN_14;
+  s_hal_context.sda_port = GPIOD;
+  s_hal_context.sda_pin = GPIO_PIN_4;
   s_hal_context.shutdown_port = MIC_SHDNZ_GPIO_Port;
   s_hal_context.shutdown_pin = MIC_SHDNZ_Pin;
   s_hal_context.timeout_ms = APP_PCMD_CAPTURE_I2C_TIMEOUT_MS;
   PCMD3180_HAL_BusInit(&s_pcmd_bus, &s_hal_context);
+  s_snapshot.i2c_backend_requested = APP_PCMD_CAPTURE_I2C_BACKEND;
+  s_snapshot.i2c_backend_active = APP_PCMD_CAPTURE_I2C_BACKEND_HAL;
 
   pcmd_status = PCMD3180_GetArrayModeConfig(AppPcmdCapture_ToPcmdMode(mode), &s_mode_config);
   if (pcmd_status != PCMD3180_OK)
@@ -679,6 +1174,7 @@ AppPcmdCaptureStatus_t AppPcmdCapture_Init(AppMicArrayMode_t mode)
 #if (APP_PCMD_SDOUT_BCLK_MARGIN_FIX != 0U)
     s_pcmd_configs[index].invert_bclk = 1U;
 #endif
+    s_pcmd_configs[index].defer_power_up = 1U;
   }
 
   s_snapshot.initialized = 1U;
@@ -689,7 +1185,6 @@ AppPcmdCaptureStatus_t AppPcmdCapture_Init(AppMicArrayMode_t mode)
 AppPcmdCaptureStatus_t AppPcmdCapture_Start(void)
 {
   HAL_StatusTypeDef hal_status;
-  PCMD3180_StatusTypeDef pcmd_status;
   AppPcmdCaptureStatus_t config_status;
 
   if (s_snapshot.initialized == 0U)
@@ -709,8 +1204,7 @@ AppPcmdCaptureStatus_t AppPcmdCapture_Start(void)
   AppPcmdCapture_StopDma();
   AppPcmdCapture_ClearPendingDmaEvents();
 
-  hal_status = HAL_SAI_Receive_DMA(&hsai_BlockA1, (uint8_t *)s_bus_a_rx, APP_PCMD_CAPTURE_DMA_WORDS);
-  s_snapshot.dma_a_status = (int32_t)hal_status;
+  hal_status = AppPcmdCapture_StartSaiDma(0U, 0U);
   if (hal_status != HAL_OK)
   {
     s_snapshot.start_status = APP_PCMD_CAPTURE_HAL_ERROR;
@@ -719,19 +1213,7 @@ AppPcmdCaptureStatus_t AppPcmdCapture_Start(void)
     return APP_PCMD_CAPTURE_HAL_ERROR;
   }
 
-  AppPcmdCapture_DelayMs(2U);
-
-  hal_status = HAL_SAI_Receive_DMA(&hsai_BlockB1, (uint8_t *)s_bus_b_rx, APP_PCMD_CAPTURE_DMA_WORDS);
-  s_snapshot.dma_b_status = (int32_t)hal_status;
-  if (hal_status != HAL_OK)
-  {
-    s_snapshot.start_status = APP_PCMD_CAPTURE_HAL_ERROR;
-    AppPcmdCapture_StopDma();
-    AppPcmdCapture_RecordSaiErrors();
-    return APP_PCMD_CAPTURE_HAL_ERROR;
-  }
-
-  __HAL_SAI_CLEAR_FLAG(&hsai_BlockB1, SAI_FLAG_AFSDET | SAI_FLAG_LFSDET);
+  __HAL_SAI_CLEAR_FLAG(&hsai_BlockB1, SAI_FLAG_AFSDET | SAI_FLAG_LFSDET | SAI_FLAG_OVRUDR);
   __HAL_SAI_DISABLE_IT(&hsai_BlockB1, SAI_IT_AFSDET | SAI_IT_LFSDET);
   AppPcmdCapture_DelayMs(APP_PCMD_CAPTURE_CLOCK_SETTLE_MS);
 
@@ -742,18 +1224,31 @@ AppPcmdCaptureStatus_t AppPcmdCapture_Start(void)
     return APP_PCMD_CAPTURE_BUSY;
   }
 
-  pcmd_status = PCMD3180_HardwareReset(&s_pcmd_handles[0],
-                                       APP_PCMD_CAPTURE_RESET_LOW_MS,
-                                       APP_PCMD_CAPTURE_RESET_SETTLE_MS);
-  if (pcmd_status != PCMD3180_OK)
+  if ((APP_PCMD_CAPTURE_I2C_BACKEND == APP_PCMD_CAPTURE_I2C_BACKEND_SW) ||
+      (s_i2c_force_software_backend != 0U))
   {
-    s_snapshot.start_status = (int32_t)pcmd_status;
-    AppI2C2_Unlock();
-    AppPcmdCapture_StopDma();
-    return APP_PCMD_CAPTURE_PCMD_ERROR;
+    config_status = AppPcmdCapture_ResetAndConfigurePcmd(APP_PCMD_CAPTURE_I2C_BACKEND_SW);
+  }
+  else
+  {
+    config_status = AppPcmdCapture_ResetAndConfigurePcmd(APP_PCMD_CAPTURE_I2C_BACKEND_HAL);
+    if ((config_status != APP_PCMD_CAPTURE_OK) &&
+        (APP_PCMD_CAPTURE_I2C_BACKEND == APP_PCMD_CAPTURE_I2C_BACKEND_AUTO))
+    {
+      s_i2c_force_software_backend = 1U;
+      s_snapshot.i2c_fallback_count++;
+      config_status = AppPcmdCapture_ResetAndConfigurePcmd(APP_PCMD_CAPTURE_I2C_BACKEND_SW);
+    }
+    else if ((config_status == APP_PCMD_CAPTURE_OK) &&
+             (APP_PCMD_CAPTURE_I2C_BACKEND == APP_PCMD_CAPTURE_I2C_BACKEND_AUTO) &&
+             (s_snapshot.device_status_ok_mask != 0x0FU))
+    {
+      s_i2c_force_software_backend = 1U;
+      s_snapshot.i2c_fallback_count++;
+      config_status = AppPcmdCapture_ResetAndConfigurePcmd(APP_PCMD_CAPTURE_I2C_BACKEND_SW);
+    }
   }
 
-  config_status = AppPcmdCapture_ConfigPcmdDevices();
   AppI2C2_Unlock();
   if (config_status != APP_PCMD_CAPTURE_OK)
   {
@@ -763,8 +1258,18 @@ AppPcmdCaptureStatus_t AppPcmdCapture_Start(void)
     return config_status;
   }
 
+  AppPcmdCapture_DelayMs(APP_PCMD_CAPTURE_POST_CONFIG_SETTLE_MS);
+  AppPcmdCapture_StopDma();
   AppPcmdCapture_ClearPendingDmaEvents();
+  hal_status = AppPcmdCapture_StartSaiDma(APP_PCMD_CAPTURE_POST_CONFIG_DISCARD_HALVES, 1U);
+  if (hal_status != HAL_OK)
+  {
+    s_snapshot.start_status = APP_PCMD_CAPTURE_HAL_ERROR;
+    AppPcmdCapture_StopDma();
+    return APP_PCMD_CAPTURE_HAL_ERROR;
+  }
 
+  s_raw_accum_enabled = 1U;
   s_snapshot.started = 1U;
   s_snapshot.start_status = APP_PCMD_CAPTURE_OK;
   App_BringUpStatus_Ready(APP_BRINGUP_MODULE_PCMD_RAW, APP_PCMD_CAPTURE_OK);
@@ -795,6 +1300,8 @@ AppPcmdCaptureStatus_t AppPcmdCapture_Poll(ULONG wait_ticks)
     return APP_PCMD_CAPTURE_THREADX_ERROR;
   }
 
+  AppPcmdCapture_FlushRawLevels();
+
   if (((events & APP_PCMD_CAPTURE_EVENT_HALF0) != 0U) &&
       (AppPcmdCapture_TakeHalf(0U) != 0U))
   {
@@ -820,7 +1327,8 @@ AppPcmdCaptureStatus_t AppPcmdCapture_Poll(ULONG wait_ticks)
 
   if ((s_snapshot.started != 0U) &&
       (diag_enabled != 0U) &&
-      ((now_ms - last_device_status_ms) >= 5000U))
+      (APP_PCMD_CAPTURE_STATUS_POLL_MS != 0U) &&
+      ((now_ms - last_device_status_ms) >= APP_PCMD_CAPTURE_STATUS_POLL_MS))
   {
     last_device_status_ms = now_ms;
     AppPcmdCapture_ReadDeviceStatus();
@@ -851,6 +1359,12 @@ void AppPcmdCapture_ThreadEntry(ULONG thread_input)
     }
 
     (void)AppPcmdCapture_Poll(TX_TIMER_TICKS_PER_SECOND / 10U);
+    if ((s_snapshot.started != 0U) &&
+        ((s_snapshot.raw_quality_flags & APP_PCMD_CAPTURE_RAW_FLAG_RAIL_FAULT) != 0U))
+    {
+      AppPcmdCapture_RequestRestart((uint32_t)s_snapshot.raw_quality_flags);
+      AppPcmdCapture_DelayMs(APP_PCMD_CAPTURE_RETRY_DELAY_MS);
+    }
   }
 }
 
@@ -899,17 +1413,43 @@ uint8_t AppPcmdCapture_GetLatestAudioFrame(AppAudioFrame_t *frame)
   return valid;
 }
 
+static void AppPcmdCapture_OnSaiHalfReady(uint8_t bus,
+                                          uint8_t half,
+                                          const int16_t *samples)
+{
+  if ((bus >= APP_PCMD_CAPTURE_BUS_COUNT) ||
+      (half >= APP_PCMD_CAPTURE_DMA_HALVES) ||
+      (samples == NULL))
+  {
+    return;
+  }
+
+  if (s_dma_discard_halves_remaining[bus] != 0U)
+  {
+    s_dma_discard_halves_remaining[bus]--;
+    return;
+  }
+
+  if (s_raw_accum_enabled != 0U)
+  {
+    AppPcmdCapture_AccumulateRawLevels(bus,
+                                       samples,
+                                       APP_PCMD_CAPTURE_DMA_WORDS_PER_HALF);
+  }
+  AppPcmdCapture_MarkHalfReady(bus, half);
+}
+
 void HAL_SAI_RxHalfCpltCallback(SAI_HandleTypeDef *hsai)
 {
   if (hsai->Instance == SAI1_Block_A)
   {
     s_snapshot.sai_a_half_count++;
-    AppPcmdCapture_MarkHalfReady(APP_MIC_ARRAY_BUS_A, 0U);
+    AppPcmdCapture_OnSaiHalfReady(APP_MIC_ARRAY_BUS_A, 0U, s_bus_a_rx);
   }
   else if (hsai->Instance == SAI1_Block_B)
   {
     s_snapshot.sai_b_half_count++;
-    AppPcmdCapture_MarkHalfReady(APP_MIC_ARRAY_BUS_B, 0U);
+    AppPcmdCapture_OnSaiHalfReady(APP_MIC_ARRAY_BUS_B, 0U, s_bus_b_rx);
   }
 }
 
@@ -918,12 +1458,16 @@ void HAL_SAI_RxCpltCallback(SAI_HandleTypeDef *hsai)
   if (hsai->Instance == SAI1_Block_A)
   {
     s_snapshot.sai_a_full_count++;
-    AppPcmdCapture_MarkHalfReady(APP_MIC_ARRAY_BUS_A, 1U);
+    AppPcmdCapture_OnSaiHalfReady(APP_MIC_ARRAY_BUS_A,
+                                  1U,
+                                  &s_bus_a_rx[APP_PCMD_CAPTURE_DMA_WORDS_PER_HALF]);
   }
   else if (hsai->Instance == SAI1_Block_B)
   {
     s_snapshot.sai_b_full_count++;
-    AppPcmdCapture_MarkHalfReady(APP_MIC_ARRAY_BUS_B, 1U);
+    AppPcmdCapture_OnSaiHalfReady(APP_MIC_ARRAY_BUS_B,
+                                  1U,
+                                  &s_bus_b_rx[APP_PCMD_CAPTURE_DMA_WORDS_PER_HALF]);
   }
 }
 

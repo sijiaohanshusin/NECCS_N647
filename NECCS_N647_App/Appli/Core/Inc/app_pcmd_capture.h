@@ -31,6 +31,10 @@ extern "C" {
 #define APP_PCMD_CAPTURE_RAW_FLAG_RAIL_FAULT (1UL << 4)
 #define APP_PCMD_CAPTURE_RAW_FLAG_HIGH_FLOOR (1UL << 5)
 
+#define APP_PCMD_CAPTURE_I2C_BACKEND_HAL       0U
+#define APP_PCMD_CAPTURE_I2C_BACKEND_SW        1U
+#define APP_PCMD_CAPTURE_I2C_BACKEND_AUTO      2U
+
 typedef enum
 {
   APP_PCMD_CAPTURE_OK = 0,
@@ -58,7 +62,9 @@ typedef struct
   uint8_t device_present_mask;
   uint8_t device_config_ok_mask;
   uint8_t device_status_ok_mask;
-  uint8_t reserved0;
+  uint8_t i2c_backend_requested;
+  uint8_t i2c_backend_active;
+  uint16_t i2c_fallback_count;
   int32_t init_status;
   int32_t start_status;
   int32_t dma_a_status;
@@ -94,6 +100,8 @@ typedef struct
   int8_t slot_dbfs[APP_PCMD_CAPTURE_BUS_COUNT][APP_MIC_ARRAY_WIDE32_SLOTS_PER_BUS];
   uint8_t mic_level[APP_MIC_ARRAY_PHYSICAL_MIC_COUNT];
   int8_t mic_dbfs[APP_MIC_ARRAY_PHYSICAL_MIC_COUNT];
+  int32_t device_address_status[APP_PCMD_CAPTURE_DEVICE_COUNT];
+  int32_t device_probe_status[APP_PCMD_CAPTURE_DEVICE_COUNT];
   int32_t device_config_status[APP_PCMD_CAPTURE_DEVICE_COUNT];
   int32_t device_status_status[APP_PCMD_CAPTURE_DEVICE_COUNT];
   PCMD3180_StatusSnapshotTypeDef device_status[APP_PCMD_CAPTURE_DEVICE_COUNT];

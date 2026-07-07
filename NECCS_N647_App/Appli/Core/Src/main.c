@@ -899,6 +899,14 @@ void MX_XSPI1_Init(void)
 {
 
   /* USER CODE BEGIN XSPI1_Init 0 */
+#ifdef DEBUG
+  __HAL_RCC_XSPI1_FORCE_RESET();
+  __HAL_RCC_XSPI1_RELEASE_RESET();
+  __HAL_RCC_XSPIM_FORCE_RESET();
+  __HAL_RCC_XSPIM_RELEASE_RESET();
+  hxspi1.State = HAL_XSPI_STATE_RESET;
+  hxspi1.ErrorCode = HAL_XSPI_ERROR_NONE;
+#endif
 
   /* USER CODE END XSPI1_Init 0 */
 

@@ -947,6 +947,30 @@ PCMD3180_StatusTypeDef PCMD3180_ReadStatus(PCMD3180_HandleTypeDef *handle,
         return status;
     }
 
+    status = PCMD3180_ReadRegister(handle, PCMD3180_REG_SLEEP_CFG, &status_snapshot->sleep_cfg);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    status = PCMD3180_ReadRegister(handle, PCMD3180_REG_ASI_CFG0, &status_snapshot->asi_cfg0);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    status = PCMD3180_ReadRegister(handle, PCMD3180_REG_ASI_CFG1, &status_snapshot->asi_cfg1);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    status = PCMD3180_ReadRegister(handle, PCMD3180_REG_ASI_CFG2, &status_snapshot->asi_cfg2);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
     status = PCMD3180_ReadRegister(handle, PCMD3180_REG_ASI_STS, &status_snapshot->asi_sts);
     if (status != PCMD3180_OK)
     {
@@ -962,6 +986,24 @@ PCMD3180_StatusTypeDef PCMD3180_ReadStatus(PCMD3180_HandleTypeDef *handle,
         {
             return status;
         }
+    }
+
+    status = PCMD3180_ReadRegister(handle, PCMD3180_REG_MST_CFG0, &status_snapshot->mst_cfg0);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    status = PCMD3180_ReadRegister(handle, PCMD3180_REG_MST_CFG1, &status_snapshot->mst_cfg1);
+    if (status != PCMD3180_OK)
+    {
+        return status;
+    }
+
+    status = PCMD3180_ReadRegister(handle, PCMD3180_REG_CLK_SRC, &status_snapshot->clk_src);
+    if (status != PCMD3180_OK)
+    {
+        return status;
     }
 
     status = PCMD3180_ReadRegister(handle, PCMD3180_REG_PDMCLK_CFG, &status_snapshot->pdmclk_cfg);
