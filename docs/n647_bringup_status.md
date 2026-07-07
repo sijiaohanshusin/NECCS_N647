@@ -6,10 +6,15 @@ the same failures.
 
 ## Current Checkpoint
 
-- Repository checkpoint: `3f084b08 wip: checkpoint n6 pcmd acoustic bringup`.
+- Repository checkpoint: `c830892b fix(pcmd): add software I2C backend and full-status verification`.
 - Hardware reference for PCMD/SAI timing: `7e12d5d fix(pcmd3180): lock SDOUT edge timing`.
 - Current target: `Wide32 @ 48 kHz`, 4 x PCMD3180, SAI1 A/B, 16 slots per bus,
   256 samples per audio frame.
+- PCMD config I2C now uses the software bit-bang backend on `PD14/PD4`
+  (`APP_PCMD_CAPTURE_I2C_BACKEND_SW` default). Board-verified 2026-07-07:
+  `present=0xf cfg=0xf statusok=0xf`, raw audio valid, zero SAI/DMA errors.
+  The old `statusok=0x3` follow-up is closed by this backend change plus the
+  full-register status verification in `PCMD3180_ReadStatus`.
 
 ## Known Bugs
 
@@ -880,3 +885,20 @@ powershell -ExecutionPolicy Bypass -File .\tools\debug\flash_n647_release.ps1 -B
   If a future RAM Debug load fails before `main`, do not move RAM-Debug
   `.touchgfx_resources` back to `EXTRAM`; the proven rule is Release resources
   in XIP ROM, RAM-Debug resources in internal RAM.
+- 2026-07-07 software-I2C PCMD backend board verification (`c830892b`):
+  RAM Debug full path (`g_app_bringup_control_mask=0x1f`, 35 s sample,
+  `SystemCoreClock=600 MHz`, `CCR=0x00030201`) with the software bit-bang I2C
+  backend (`PD14=SCL`, `PD4=SDA`) as the default PCMD config path:
+  - PCMD: `present=0xf cfg=0xf statusok=0xf`, `valid=1 rawvalid=1`,
+    `frames=1972`, `rawpeak=-66 dBFS`, `rawavg=-71 dBFS`, zero SAI/DMA errors,
+    zero rail samples. `i2c_backend req=1 active=1 fallback=0`.
+    `recover_count=89` reflects software-I2C retry/bus-clear activity during
+    config; config still converged on all four devices.
+  - Acoustic STANDARD/B16: `processed=78`, `valid=1`, `theta=-13 phi=13`,
+    `quality=3`, `total=89.6M cycles` (quiet scene; SRP search still the
+    bottleneck).
+  - Camera/display: chip `0x0219`, 336 frames/swaps, overlay draw 305,
+    DMA2D 336 with zero fallback/error. `display err=6` LTDC errors and
+    `camera err=3` were observed in this window and are a follow-up item.
+  - The `main.c` DEBUG-only XSPI1/XSPIM force-reset did not break RAM Debug
+    boot; ELF loaded and hit `main` normally.
