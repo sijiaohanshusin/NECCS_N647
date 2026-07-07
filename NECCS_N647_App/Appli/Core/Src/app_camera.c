@@ -837,9 +837,25 @@ void HAL_DCMIPP_PIPE_FrameEventCallback(DCMIPP_HandleTypeDef *hdcmipp_cb, uint32
 {
   if ((hdcmipp_cb == &hdcmipp) && (Pipe == APP_CAMERA_DCMIPP_PIPE))
   {
-    uint32_t completed_addr = ((g_app_camera_status.frame_count & 1U) == 0U) ?
-                              APP_CAMERA_FRAME0_ADDR :
-                              APP_CAMERA_FRAME1_ADDR;
+    uint32_t active_addr = HAL_DCMIPP_PIPE_GetMemoryAddress(&hdcmipp,
+                                                            APP_CAMERA_DCMIPP_PIPE,
+                                                            DCMIPP_MEMORY_ADDRESS_0);
+    uint32_t completed_addr;
+
+    if (active_addr == APP_CAMERA_FRAME0_ADDR)
+    {
+      completed_addr = APP_CAMERA_FRAME1_ADDR;
+    }
+    else if (active_addr == APP_CAMERA_FRAME1_ADDR)
+    {
+      completed_addr = APP_CAMERA_FRAME0_ADDR;
+    }
+    else
+    {
+      completed_addr = ((g_app_camera_status.frame_count & 1U) == 0U) ?
+                       APP_CAMERA_FRAME0_ADDR :
+                       APP_CAMERA_FRAME1_ADDR;
+    }
 
     g_app_camera_status.completed_frame_addr = completed_addr;
     g_app_camera_completed_addr = completed_addr;

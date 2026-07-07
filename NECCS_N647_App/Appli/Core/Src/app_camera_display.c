@@ -2,6 +2,7 @@
 
 #include "app_camera.h"
 #include "main.h"
+#include <string.h>
 
 #define APP_CAMERA_DISPLAY_FLAG_READY (1UL << 0)
 #define APP_CAMERA_DISPLAY_FLAG_VISIBLE (1UL << 1)
@@ -12,6 +13,9 @@
 #define APP_CAMERA_DISPLAY_HEAT_CELL_COUNT \
   (APP_CAMERA_DISPLAY_HEAT_GRID_SIZE * APP_CAMERA_DISPLAY_HEAT_GRID_SIZE)
 #define APP_CAMERA_DISPLAY_HEAT_MIN_VALUE    9U
+#define APP_CAMERA_DISPLAY_OVERLAY_BRINGUP_ENABLE 1U
+#define APP_CAMERA_DISPLAY_BRINGUP_PEAK_VALUE     224U
+#define APP_CAMERA_DISPLAY_COMPOSE_ENABLE          1U
 
 extern LTDC_HandleTypeDef hltdc;
 
@@ -40,8 +44,12 @@ volatile uint32_t g_app_camera_ui_fb_addr = APP_CAMERA_DISPLAY_UI_FB_ADDR;
 volatile uint32_t g_app_camera_ltdc_auto_disable_count = 0U;
 volatile uint32_t g_app_camera_overlay_update_count = 0U;
 volatile uint32_t g_app_camera_overlay_draw_count = 0U;
+volatile uint32_t g_app_camera_compose_addr = 0U;
+volatile uint32_t g_app_camera_compose_count = 0U;
 
 static AppCameraDisplayAcousticOverlay_t s_acoustic_overlay;
+static uint16_t s_camera_display_compose_buffer[APP_CAMERA_DISPLAY_WIDTH * APP_CAMERA_DISPLAY_HEIGHT]
+  __attribute__((section(".EXTRAM"), aligned(32)));
 
 static int32_t AppCameraDisplay_MaxI32(int32_t a, int32_t b)
 {
@@ -68,6 +76,25 @@ static void AppCameraDisplay_CleanDCache(uint32_t address, uint32_t size)
              ~(APP_CAMERA_DISPLAY_DCACHE_LINE_BYTES - 1U);
 
   SCB_CleanDCache_by_Addr((void *)aligned_addr, (int32_t)(end_addr - aligned_addr));
+  __DSB();
+  __ISB();
+}
+
+static void AppCameraDisplay_InvalidateDCache(uint32_t address, uint32_t size)
+{
+  uint32_t aligned_addr;
+  uint32_t end_addr;
+
+  if ((size == 0U) || ((SCB->CCR & SCB_CCR_DC_Msk) == 0U))
+  {
+    return;
+  }
+
+  aligned_addr = address & ~(APP_CAMERA_DISPLAY_DCACHE_LINE_BYTES - 1U);
+  end_addr = (address + size + APP_CAMERA_DISPLAY_DCACHE_LINE_BYTES - 1U) &
+             ~(APP_CAMERA_DISPLAY_DCACHE_LINE_BYTES - 1U);
+
+  SCB_InvalidateDCache_by_Addr((void *)aligned_addr, (int32_t)(end_addr - aligned_addr));
   __DSB();
   __ISB();
 }
@@ -276,6 +303,57 @@ static uint8_t AppCameraDisplay_OverlayRect(uint8_t value,
   return 1U;
 }
 
+static uint8_t AppCameraDisplay_OverlayCellBlock(uint32_t index,
+                                                 int32_t *x,
+                                                 int32_t *y,
+                                                 int32_t *width,
+                                                 int32_t *height)
+{
+  const int32_t cell_w = (int32_t)(APP_CAMERA_DISPLAY_WIDTH / APP_CAMERA_DISPLAY_HEAT_GRID_SIZE);
+  const int32_t cell_h = (int32_t)(APP_CAMERA_DISPLAY_HEIGHT / APP_CAMERA_DISPLAY_HEAT_GRID_SIZE);
+  const uint32_t row = index / APP_CAMERA_DISPLAY_HEAT_GRID_SIZE;
+  const uint32_t col = index % APP_CAMERA_DISPLAY_HEAT_GRID_SIZE;
+
+  if ((index >= APP_CAMERA_DISPLAY_HEAT_CELL_COUNT) ||
+      (x == 0) ||
+      (y == 0) ||
+      (width == 0) ||
+      (height == 0))
+  {
+    return 0U;
+  }
+
+  *x = ((int32_t)col * cell_w) + 6;
+  *y = ((int32_t)row * cell_h) + 5;
+  *width = cell_w - 12;
+  *height = cell_h - 10;
+  return 1U;
+}
+
+static uint8_t AppCameraDisplay_EffectiveHeatValue(const AppCameraDisplayAcousticOverlay_t *overlay,
+                                                   uint32_t index)
+{
+  uint8_t value;
+
+  if ((overlay == 0) || (index >= APP_CAMERA_DISPLAY_HEAT_CELL_COUNT))
+  {
+    return 0U;
+  }
+
+  value = overlay->heat[index];
+#if APP_CAMERA_DISPLAY_OVERLAY_BRINGUP_ENABLE
+  if ((overlay->enabled != 0U) &&
+      (overlay->valid != 0U) &&
+      (index == (uint32_t)overlay->peak_index) &&
+      (value < APP_CAMERA_DISPLAY_BRINGUP_PEAK_VALUE))
+  {
+    value = APP_CAMERA_DISPLAY_BRINGUP_PEAK_VALUE;
+  }
+#endif
+
+  return value;
+}
+
 static void AppCameraDisplay_DrawAcousticOverlay(uint32_t frame_addr)
 {
   AppCameraDisplayAcousticOverlay_t overlay;
@@ -303,7 +381,9 @@ static void AppCameraDisplay_DrawAcousticOverlay(uint32_t frame_addr)
       int32_t h;
       const uint32_t index = (row * APP_CAMERA_DISPLAY_HEAT_GRID_SIZE) + col;
 
-      if (AppCameraDisplay_OverlayRect(overlay.heat[index], row, col, &x, &y, &w, &h) != 0U)
+      const uint8_t value = AppCameraDisplay_EffectiveHeatValue(&overlay, index);
+
+      if (AppCameraDisplay_OverlayRect(value, row, col, &x, &y, &w, &h) != 0U)
       {
         union_x0 = AppCameraDisplay_MinI32(union_x0, x);
         union_y0 = AppCameraDisplay_MinI32(union_y0, y);
@@ -313,6 +393,25 @@ static void AppCameraDisplay_DrawAcousticOverlay(uint32_t frame_addr)
       }
     }
   }
+
+#if APP_CAMERA_DISPLAY_OVERLAY_BRINGUP_ENABLE
+  if (overlay.peak_index < APP_CAMERA_DISPLAY_HEAT_CELL_COUNT)
+  {
+    int32_t x;
+    int32_t y;
+    int32_t w;
+    int32_t h;
+
+    if (AppCameraDisplay_OverlayCellBlock(overlay.peak_index, &x, &y, &w, &h) != 0U)
+    {
+      union_x0 = AppCameraDisplay_MinI32(union_x0, x);
+      union_y0 = AppCameraDisplay_MinI32(union_y0, y);
+      union_x1 = AppCameraDisplay_MaxI32(union_x1, x + w);
+      union_y1 = AppCameraDisplay_MaxI32(union_y1, y + h);
+      has_rect = 1U;
+    }
+  }
+#endif
 
   if (has_rect == 0U)
   {
@@ -327,7 +426,7 @@ static void AppCameraDisplay_DrawAcousticOverlay(uint32_t frame_addr)
   AppCameraDisplay_FlushCameraRect(frame_addr, union_x0, union_y0, union_x1, union_y1, 1U);
 
   framebuffer = (uint16_t *)frame_addr;
-  alpha_base = (overlay.quality_pct < 20U) ? 20U : overlay.quality_pct;
+  alpha_base = (overlay.quality_pct < 72U) ? 72U : overlay.quality_pct;
   for (uint32_t row = 0U; row < APP_CAMERA_DISPLAY_HEAT_GRID_SIZE; ++row)
   {
     for (uint32_t col = 0U; col < APP_CAMERA_DISPLAY_HEAT_GRID_SIZE; ++col)
@@ -338,14 +437,14 @@ static void AppCameraDisplay_DrawAcousticOverlay(uint32_t frame_addr)
       int32_t h;
       uint8_t alpha;
       const uint32_t index = (row * APP_CAMERA_DISPLAY_HEAT_GRID_SIZE) + col;
-      const uint8_t value = overlay.heat[index];
+      const uint8_t value = AppCameraDisplay_EffectiveHeatValue(&overlay, index);
 
       if (AppCameraDisplay_OverlayRect(value, row, col, &x, &y, &w, &h) == 0U)
       {
         continue;
       }
 
-      alpha = (uint8_t)(48U + (((uint32_t)value * (uint32_t)(80U + alpha_base)) / 510U));
+      alpha = (uint8_t)(96U + (((uint32_t)value * (uint32_t)(96U + alpha_base)) / 510U));
       AppCameraDisplay_DrawBlendRect(framebuffer,
                                      x,
                                      y,
@@ -364,16 +463,38 @@ static void AppCameraDisplay_DrawAcousticOverlay(uint32_t frame_addr)
     int32_t h;
     const uint32_t peak_row = overlay.peak_index / APP_CAMERA_DISPLAY_HEAT_GRID_SIZE;
     const uint32_t peak_col = overlay.peak_index % APP_CAMERA_DISPLAY_HEAT_GRID_SIZE;
+    const uint8_t peak_value = AppCameraDisplay_EffectiveHeatValue(&overlay, overlay.peak_index);
 
-    if (AppCameraDisplay_OverlayRect(overlay.heat[overlay.peak_index], peak_row, peak_col, &x, &y, &w, &h) != 0U)
+    if (AppCameraDisplay_OverlayRect(peak_value, peak_row, peak_col, &x, &y, &w, &h) != 0U)
     {
       const uint16_t white = AppCameraDisplay_Rgb565(245U, 246U, 238U);
-      AppCameraDisplay_DrawSolidRect(framebuffer, x, y, w, 2, white);
-      AppCameraDisplay_DrawSolidRect(framebuffer, x, y + h - 2, w, 2, white);
-      AppCameraDisplay_DrawSolidRect(framebuffer, x, y, 2, h, white);
-      AppCameraDisplay_DrawSolidRect(framebuffer, x + w - 2, y, 2, h, white);
+      AppCameraDisplay_DrawSolidRect(framebuffer, x, y, w, 4, white);
+      AppCameraDisplay_DrawSolidRect(framebuffer, x, y + h - 4, w, 4, white);
+      AppCameraDisplay_DrawSolidRect(framebuffer, x, y, 4, h, white);
+      AppCameraDisplay_DrawSolidRect(framebuffer, x + w - 4, y, 4, h, white);
     }
   }
+
+#if APP_CAMERA_DISPLAY_OVERLAY_BRINGUP_ENABLE
+  if (overlay.peak_index < APP_CAMERA_DISPLAY_HEAT_CELL_COUNT)
+  {
+    int32_t x;
+    int32_t y;
+    int32_t w;
+    int32_t h;
+
+    if (AppCameraDisplay_OverlayCellBlock(overlay.peak_index, &x, &y, &w, &h) != 0U)
+    {
+      const uint16_t peak_fill = AppCameraDisplay_HeatColor(APP_CAMERA_DISPLAY_BRINGUP_PEAK_VALUE);
+      const uint16_t peak_border = AppCameraDisplay_Rgb565(255U, 245U, 170U);
+      AppCameraDisplay_DrawBlendRect(framebuffer, x, y, w, h, peak_fill, 196U);
+      AppCameraDisplay_DrawSolidRect(framebuffer, x, y, w, 5, peak_border);
+      AppCameraDisplay_DrawSolidRect(framebuffer, x, y + h - 5, w, 5, peak_border);
+      AppCameraDisplay_DrawSolidRect(framebuffer, x, y, 5, h, peak_border);
+      AppCameraDisplay_DrawSolidRect(framebuffer, x + w - 5, y, 5, h, peak_border);
+    }
+  }
+#endif
 
   AppCameraDisplay_FlushCameraRect(frame_addr, union_x0, union_y0, union_x1, union_y1, 0U);
   g_app_camera_overlay_draw_count++;
@@ -484,6 +605,29 @@ static int32_t AppCameraDisplay_DisableCameraLayer(void)
   AppCameraDisplay_SnapshotLtdc();
 
   return APP_CAMERA_DISPLAY_OK;
+}
+
+static uint32_t AppCameraDisplay_PrepareDisplayFrame(uint32_t frame_addr)
+{
+#if APP_CAMERA_DISPLAY_COMPOSE_ENABLE
+  const uint32_t compose_addr = (uint32_t)s_camera_display_compose_buffer;
+
+  if (frame_addr == 0U)
+  {
+    return 0U;
+  }
+
+  AppCameraDisplay_InvalidateDCache(frame_addr, APP_CAMERA_DISPLAY_CAMERA_FRAME_BYTES);
+  (void)memcpy((void *)compose_addr,
+               (const void *)frame_addr,
+               APP_CAMERA_DISPLAY_CAMERA_FRAME_BYTES);
+  AppCameraDisplay_CleanDCache(compose_addr, APP_CAMERA_DISPLAY_CAMERA_FRAME_BYTES);
+  g_app_camera_compose_addr = compose_addr;
+  g_app_camera_compose_count++;
+  return compose_addr;
+#else
+  return frame_addr;
+#endif
 }
 
 int32_t AppCameraDisplay_InitLayers(uint32_t initial_camera_addr)
@@ -646,6 +790,8 @@ void AppCameraDisplay_RefreshColorKeyHole(int32_t x,
 
 void AppCameraDisplay_RequestSwap(uint32_t frame_addr)
 {
+  uint32_t display_addr;
+
   if (((g_app_camera_display_flags & APP_CAMERA_DISPLAY_FLAG_READY) == 0U) || (frame_addr == 0U))
   {
     return;
@@ -658,12 +804,18 @@ void AppCameraDisplay_RequestSwap(uint32_t frame_addr)
     AppCameraDisplay_ClearLtdcErrors();
   }
 
-  g_app_camera_pending_display_addr = frame_addr;
-  g_app_camera_display_addr = frame_addr;
+  display_addr = AppCameraDisplay_PrepareDisplayFrame(frame_addr);
+  if (display_addr == 0U)
+  {
+    return;
+  }
+
+  g_app_camera_pending_display_addr = display_addr;
+  g_app_camera_display_addr = display_addr;
   if ((g_app_camera_display_flags & APP_CAMERA_DISPLAY_FLAG_VISIBLE) != 0U)
   {
-    AppCameraDisplay_DrawAcousticOverlay(frame_addr);
-    LTDC_Layer1->CFBAR = frame_addr;
+    AppCameraDisplay_DrawAcousticOverlay(display_addr);
+    LTDC_Layer1->CFBAR = display_addr;
     AppCameraDisplay_ReloadLayer(LTDC_Layer1, LTDC_LxRCR_VBR);
   }
   g_app_camera_ltdc_swap_count++;

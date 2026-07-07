@@ -36,20 +36,26 @@
 - Full product-path RAM Debug now shows camera, PCMD, and SRP running together:
   camera reaches hundreds of LTDC swaps with zero LTDC errors, UI color-key
   holes are correct, PCMD stays valid, and SRP processes real frames. The
-  previous IMAGE black symptom was traced to conservative IMX219 exposure/gain
-  defaults; firmware now uses exposure `0x0d00`, analog gain `0xff`, and digital
-  gain `0x0200`, which RAM Debug verified produces non-black live frames.
-- Acoustic overlay drawing is gated by confidence: the UI still reports valid
-  SRP diagnostics, but the camera overlay is not enabled until
-  `quality_pct >= 10`, so quiet-bench low-confidence frames do not paint a
-  fake heat spot.
+  camera display path must be validated with IMX219 test pattern before changing
+  LTDC/TouchGFX. Default live gain is deliberately low-noise
+  (`exposure=0x0d00`, `analog=0x80`, `digital=0x0100`); dark live frames should
+  be treated as lighting/lens/ISP work, not fixed by maxing sensor gain.
+- Acoustic overlay bring-up currently uses a forced preview mode on the IMAGE
+  page: SRP output is drawn even at low confidence so the camera/overlay path
+  can be verified remotely. Draw the overlay on the independent `.EXTRAM`
+  compose framebuffer, not directly on the DCMIPP `0x90400000/0x90500000`
+  ping-pong buffers; otherwise camera DMA can reuse the displayed buffer and
+  tear the heatmap into horizontal fragments. Tighten the confidence gate again
+  after live-sound/FPS validation.
 - Layered debug can disable heavy modules at the `main()` GDB breakpoint by
-  writing `g_app_bringup_control_mask`: `0x00` UI only, `0x02` UI+camera,
-  `0x06` UI+camera+PCMD, `0x22` UI+camera test pattern, default `0x1f`
-  full product path.
+  writing `g_app_bringup_control_mask`. Keep the POWER bit set for hardware
+  modules in the current state machine: `0x00` UI only, `0x03` POWER+camera,
+  `0x05` POWER+PCMD, `0x07` POWER+camera+PCMD, `0x0d` POWER+PCMD+acoustic,
+  `0x23` POWER+camera test pattern, default `0x1f` full product path. Do not
+  use the old `0x02/0x06/0x22` masks for hardware measurements.
 - Camera black-screen diagnosis now has GDB-readable IMX219 register readbacks
-  and sampled framebuffer stats. Compare normal `0x02` against test-pattern
-  `0x22` before changing LTDC or TouchGFX overlay code again.
+  and sampled framebuffer stats. Compare normal `0x03` against test-pattern
+  `0x23` before changing LTDC or TouchGFX overlay code again.
 - Hardware debug uses the scripted N647 loop first:
 
 ```powershell

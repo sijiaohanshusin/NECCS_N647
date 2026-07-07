@@ -252,7 +252,8 @@ static void AppCameraDisplay_SetAcousticOverlay(const uint8_t* heat,
 
 namespace
 {
-constexpr uint8_t APP_UI_ACOUSTIC_OVERLAY_MIN_QUALITY = 10U;
+constexpr bool APP_UI_ACOUSTIC_OVERLAY_PREVIEW_ENABLE = true;
+constexpr uint8_t APP_UI_ACOUSTIC_OVERLAY_MIN_QUALITY = 1U;
 
 uint8_t clampPercent(uint32_t value)
 {
@@ -362,10 +363,16 @@ void Model::tick()
     snapshot.uiFpsX10 = (acoustic.fps_x10 != 0U) ? acoustic.fps_x10 : 200U;
     memcpy(snapshot.heat, acoustic.heat, sizeof(snapshot.heat));
     memcpy(snapshot.perfLoad, acoustic.perf_load, sizeof(snapshot.perfLoad));
+    const bool acousticOverlayHasFrame =
+        (acoustic.output_seq != 0U) || (acoustic.processed_frames != 0U);
+    const bool acousticOverlayPreview =
+        APP_UI_ACOUSTIC_OVERLAY_PREVIEW_ENABLE &&
+        ((acoustic.running != 0U) || acousticOverlayHasFrame);
     const bool acousticOverlayEnabled =
         (snapshot.activeScreen == APP_UI_SCREEN_IMAGE) &&
-        (acoustic.valid != 0U) &&
-        (acoustic.quality_pct >= APP_UI_ACOUSTIC_OVERLAY_MIN_QUALITY);
+        (((acoustic.valid != 0U) &&
+          (acoustic.quality_pct >= APP_UI_ACOUSTIC_OVERLAY_MIN_QUALITY)) ||
+         acousticOverlayPreview);
     AppCameraDisplay_SetAcousticOverlay(snapshot.heat,
                                         sizeof(snapshot.heat),
                                         snapshot.peakIndex,

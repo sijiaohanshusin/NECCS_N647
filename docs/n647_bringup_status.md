@@ -454,3 +454,123 @@ powershell -ExecutionPolicy Bypass -File .\tools\debug\flash_n647_release.ps1 -B
   generated makefile duplicate-recipe warnings for CMSIS-DSP/PCMD objects; this
   is build-metadata noise already present in the current project, not a new
   functional failure.
+- 2026-07-07 framebuffer compositor correction: LTDC layer1 is a `640x480`
+  camera window at `(192,60)`, not a `1024x600` screen-sized buffer. Correctly
+  composited dumps remove the earlier false color-block artifact and show the UI
+  layer stable. Therefore any remaining IMAGE issue must be checked against the
+  real `640x480` camera buffer first.
+- 2026-07-07 full product live-camera recheck before the gain change:
+  `_debug_logs/main_screen_full_composite_20260707.png` showed stable UI with
+  the camera area full of random colored noise. GDB counters were healthy enough
+  for display plumbing (`~166` frames/swaps, `0` LTDC errors, overlay draw `0`),
+  while the dumped RGB565 camera frame covered `0x0000..0xffff` with `2981`
+  unique values in the first `4096` pixels. This was not a TouchGFX/LTDC black
+  screen.
+- 2026-07-07 full product IMX219 test-pattern check:
+  `_debug_logs/main_screen_test_pattern_full_composite_20260707.png` produced
+  clean vertical color bars with only `16` unique RGB565 values across the test
+  frame. This proves the IMX219 MIPI output, DCMIPP RAW10-to-RGB565 path, LTDC
+  layer mapping, and UI color-key hole are fundamentally correct.
+- 2026-07-07 current live-image conclusion: the previous `0xff` analog gain plus
+  `0x0200` digital gain can turn a dark/covered remote bench into bright random
+  sensor noise. Firmware default was changed to keep the long exposure
+  (`0x0d00`) but reduce live gain to analog `0x80` and digital `0x0100`.
+  RAM Debug with the rebuilt ELF read back `0x0d00/0x80/0x0100`, reached
+  `167` camera frames/swaps with `0` LTDC errors, and the camera frame became a
+  stable dark image (`min=0x0862`, `max=0x1882`, `avg=0x106b`,
+  `unique_all=9`). The bench is still optically dark, but the rainbow-noise
+  failure mode is removed; future work should use lighting/lens/ISP/AE, not
+  max-gain amplification, to obtain usable live imagery.
+- 2026-07-07 GDB-only analog-gain probe at `0xc0` with digital gain kept at
+  `0x0100` ran for `382` camera frames/swaps and still produced the same stable
+  dark floor (`0x1082`-dominant samples). This does not justify raising the
+  firmware default above `0x80` in the current dark remote setup.
+- 2026-07-07 acoustic overlay bring-up preview
+  `_debug_logs/main_screen_overlay_preview_composite_20260707.png`: after H7
+  relay power-cycle, Debug build, and full product RAM Debug, the IMAGE page
+  showed a visible acoustic heat block over the camera window. GDB diagnostics:
+  `ready_mask=0x7f7`, `failed_mask=0`, camera frames/swaps `391/391`,
+  LTDC errors `0`, layer1 CFBAR `0x90655180`, layer2 CFBAR `0x90072000`,
+  DCMIPP buffers `0x90400000/0x90500000`, compose buffer `0x90655180`,
+  `g_app_camera_compose_count=391`, overlay updates `1042`, overlay draws
+  `355`.
+- 2026-07-07 overlay root cause/fix: drawing the heatmap directly onto the
+  DCMIPP ping-pong buffers made the result unstable because the camera pipeline
+  could reuse the displayed buffer and overwrite the overlay, leaving horizontal
+  fragments or no obvious overlay. `AppCameraDisplay_RequestSwap()` now copies
+  the completed camera frame into an independent `.EXTRAM` compose framebuffer,
+  draws the acoustic overlay there, cleans cache for that buffer, and points
+  LTDC layer1 at the compose buffer. The raw completed camera buffer no longer
+  contains overlay colors; the LTDC compose dump does.
+- 2026-07-07 current overlay behavior is intentionally a bring-up preview, not
+  final confidence policy. `app_acoustic_service.c` and `Model.cpp` temporarily
+  force a low-confidence preview overlay so the camera/overlay path can be
+  verified in the quiet remote bench. Before product validation, restore/fade
+  the confidence gate, calibrate yaw/pitch/FOV against a real sound source, and
+  then optimize the copy/draw path for FPS.
+- 2026-07-07 first Release performance probe
+  `_debug_logs/perf_probe_release_build_20260707_retry.log`: Release build
+  completed successfully with the current product-like compiler profile
+  (`-Os`, `-mcpu=cortex-m55`, hard-float, `ARM_MATH_AUTOVECTORIZE`). The Release
+  ELF is XIP-linked, not RAM-linked: `.isr_vector` at `0x70100400`, `.text` at
+  `0x70100750`, `.data` at `0x34000000`, and `.EXTRAM` at `0x90600000`.
+- 2026-07-07 Release bundle programming passed
+  `_debug_logs/perf_probe_flash_release_20260707.log`: CubeProgrammer wrote and
+  verified `_flash_images/n647_boot_bundle.hex` successfully. External-loader
+  readback in `_debug_logs/perf_probe_release_flash_readback_20260707.log`
+  showed a valid FSBL header at `0x70000000` (`324D5453`) and a valid App vector
+  at `0x70100400` (`SP=0x34200000`, `PC=0x7010A125`).
+- 2026-07-07 Release runtime sampling was blocked by boot mode, not by build or
+  flashing. After CubeProgrammer reset and after a real H7 relay power-cycle,
+  `probe_n647_state.ps1` still found the core in BootROM (`PC=0x18003514` then
+  `PC=0x1800598c`), not in the `0x7010....` XIP App region. A GDB-side attempt
+  to inspect the XIP memory map while halted in BootROM timed out, so it is not
+  a safe path for performance sampling.
+- 2026-07-07 no Release FPS table was produced for the `0x02`, `0x06`, or
+  `0x1f` scenarios because the optimized Release App never ran. Do not use the
+  previous Debug/O0 acoustic numbers (`~280..445 ms/frame`) as optimization
+  ranking data; they remain functional-chain evidence only. To complete the
+  first performance probe, either boot the board with the external-Flash strap
+  (`BOOT0=GND`, `BOOT1=GND`) or add a separate RAM-linked optimized diagnostic
+  configuration in a later, explicitly code-changing step.
+- 2026-07-07 online boot-mode check for the remote Release blocker: ST's N6 boot
+  material describes a DEV_BOOT path when BOOT1 is high and the project skill
+  records the board rule as debug/development `BOOT0=GND, BOOT1=3.3V` versus
+  external-Flash boot `BOOT0=GND, BOOT1=GND`. Useful references:
+  [ST UM3234 boot ROM user manual](https://www.st.com/resource/en/user_manual/um3234-how-to-proceed-with-boot-rom-on-stm32n6-mcus-stmicroelectronics.pdf)
+  and ST community notes on
+  [STM32N6 boot ROM](https://community.st.com/stm32-mcus-60/stm32n6-boot-rom-explained-145756)
+  /
+  [running after flashing without changing BOOT1](https://community.st.com/stm32-mcus-products-25/how-to-run-program-on-stm32n6-after-flashing-without-changing-boot-1-jumper-153278).
+- 2026-07-07 first optimized RAM performance probe completed with temporary
+  `PerfRam` ELF (`Debug` RAM link, generated makefiles changed to `-Os`) because
+  Release/XIP cannot be remotely booted with the current BOOT1 strap. This probe
+  is closer to product than Debug/O0: I/D cache was on (`SCB->CCR=0x30201`),
+  DWT was on (`DWT_CTRL=0x80000001`), `SystemCoreClock=600000000`, ThreadX and
+  peripherals ran normally, and each scene started after an H7 relay power
+  cycle. Probe helper/logs are under `_debug_logs/perfram_mask_*`.
+
+  | Scene | Duration | Camera FPS | PCMD FPS by count | Acoustic FPS by count | SRP ms from cycles | SRP split | Notes |
+  | --- | ---: | ---: | ---: | ---: | ---: | --- | --- |
+  | `0x03` POWER+camera | 20 s | 7.4 | off | off | n/a | n/a | Camera works but reports `last_error=-5`, HAL `0x10` (`PIPE1_OVR`); LTDC errors `0`. |
+  | `0x05` POWER+PCMD | 15 s | off | 176.3 (`published_fps_x10=18750`) | off | n/a | n/a | PCMD healthy: masks `0xf`, SAI/DMA errors `0`, quiet `peak/avg=-84/-88 dBFS`. |
+  | `0x07` POWER+camera+PCMD | 20 s | 7.5 | 36.9 | off | n/a | n/a | Camera/compose path alone already drags PCMD scheduling down; PCMD hardware still has `0` SAI/DMA errors. |
+  | `0x0d` POWER+PCMD+acoustic | 20 s | off | 181.7 | 2.55 | 367.7 ms | coarse 56.8%, fine 36.1%, FFT+GCC 5.4% | SRP bottleneck is search/steering, not PCMD or FFT/GCC. |
+  | `0x1f` full path | 20 s | 7.5 | 21.3 | 0.10 | 1738.0 ms | coarse 61.0%, fine 34.6%, FFT+GCC 3.8% | Camera/overlay/EXTRAM pressure makes SRP much worse; overlay drew `114` times, camera HAL `0x10`, PCMD errors still `0`. |
+
+- 2026-07-07 performance conclusion: PCMD3180 + SAI is not the bottleneck and
+  the hardware link is not suspect. The two real bottlenecks are:
+  1. SRP search/steering (`coarse + fine`) dominates acoustic runtime even when
+     camera is off. Next algorithm work should reduce evaluated grid/pair/bin
+     work and move repeated steering work into LUTs/internal RAM/MVE-friendly
+     loops before considering NPU.
+  2. Camera compose/color-key/overlay path plus EXTRAM/AXI traffic reduces both
+     camera FPS and PCMD publish rate. Before optimizing SRP to 20 FPS in the
+     full product path, stabilize camera to its expected 15 FPS and remove
+     CPU-heavy full-window color-key/compose work, likely via DMA2D/dirty-region
+     or a less expensive LTDC/overlay strategy.
+- 2026-07-07 measurement caveats: `0x02/0x06/0x22` are invalid for current
+  hardware measurements because they omit the POWER bit. Use `0x03/0x07/0x23`
+  instead. `pcmd_published_fps_x10` can remain `0` under heavy camera load even
+  while `published_frames` advances, so count/duration is the more reliable
+  comparison metric in overloaded scenes.
