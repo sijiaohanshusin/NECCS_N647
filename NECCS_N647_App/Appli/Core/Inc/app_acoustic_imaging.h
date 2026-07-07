@@ -32,6 +32,7 @@ extern "C" {
 #define APP_ACOUSTIC_IMAGING_CORE16_BALANCED_PAIRS     120U
 #define APP_ACOUSTIC_IMAGING_CORE16_QUALITY_PAIRS      120U
 #define APP_ACOUSTIC_IMAGING_PAIR_COUNT_MAX            APP_ACOUSTIC_IMAGING_WIDE32_QUALITY_PAIRS
+#define APP_ACOUSTIC_IMAGING_BIN_COUNT_MAX             128U
 #define APP_ACOUSTIC_IMAGING_VIS_CANDIDATE_MAX         3U
 #define APP_ACOUSTIC_IMAGING_ALL_CHANNELS_MASK         0xFFFFFFFFUL
 #define APP_ACOUSTIC_IMAGING_DEFAULT_TEMP_C            20.0f
@@ -58,6 +59,13 @@ typedef enum
 
 typedef enum
 {
+  APP_ACOUSTIC_IMAGING_MODE_FAST = 0,
+  APP_ACOUSTIC_IMAGING_MODE_STANDARD = 1,
+  APP_ACOUSTIC_IMAGING_MODE_HIGH_QUALITY = 2
+} AppAcousticImagingRunMode_t;
+
+typedef enum
+{
   APP_ACOUSTIC_IMAGING_ALGO_WIDE32_FAST_SRP = 0,
   APP_ACOUSTIC_IMAGING_ALGO_WIDE32_GENERAL_SRP = 1,
   APP_ACOUSTIC_IMAGING_ALGO_WIDE32_QUALITY_SRP = 2,
@@ -71,19 +79,32 @@ typedef enum
   APP_ACOUSTIC_IMAGING_PAIR_SELECT_SHORT_BASELINE = 1
 } AppAcousticImagingPairSelect_t;
 
+typedef enum
+{
+  APP_ACOUSTIC_IMAGING_BIN_POLICY_PROFILE_DEFAULT = 0,
+  APP_ACOUSTIC_IMAGING_BIN_POLICY_STANDARD_B12 = 1,
+  APP_ACOUSTIC_IMAGING_BIN_POLICY_STANDARD_B16 = 2,
+  APP_ACOUSTIC_IMAGING_BIN_POLICY_STANDARD_B24 = 3,
+  APP_ACOUSTIC_IMAGING_BIN_POLICY_QUALITY_B40 = 4
+} AppAcousticImagingBinPolicy_t;
+
 typedef struct
 {
   AppAcousticImagingAlgorithm_t algorithm;
   AppMicArrayMode_t mic_mode;
   AppAcousticImagingProfile_t profile;
+  AppAcousticImagingRunMode_t run_mode;
   AppAcousticImagingPairSelect_t pair_select;
+  AppAcousticImagingBinPolicy_t bin_policy;
   uint32_t sample_rate_hz;
   uint32_t channel_count;
   uint32_t frame_len;
   uint32_t nfft;
   uint16_t active_bin_start;
   uint16_t active_bin_end;
+  uint16_t active_bins[APP_ACOUSTIC_IMAGING_BIN_COUNT_MAX];
   uint16_t pair_count;
+  uint16_t active_bin_count;
   uint8_t coarse_grid_size;
   int16_t coarse_angle_min_deg;
   int16_t coarse_angle_max_deg;
@@ -149,11 +170,24 @@ AppAcousticImagingStatus_t App_AcousticImaging_GetDefaultConfig(AppMicArrayMode_
 AppAcousticImagingStatus_t App_AcousticImaging_GetDefaultAlgorithmConfig(AppAcousticImagingAlgorithm_t algorithm,
                                                                          AppAcousticImagingConfig_t *config);
 
+AppAcousticImagingStatus_t App_AcousticImaging_GetDefaultRunModeConfig(AppAcousticImagingRunMode_t mode,
+                                                                       AppAcousticImagingConfig_t *config);
+
 AppAcousticImagingStatus_t App_AcousticImaging_ValidateConfig(const AppAcousticImagingConfig_t *config);
 
 const char *App_AcousticImaging_ProfileName(AppAcousticImagingProfile_t profile);
 
+const char *App_AcousticImaging_RunModeName(AppAcousticImagingRunMode_t mode);
+
 const char *App_AcousticImaging_AlgorithmName(AppAcousticImagingAlgorithm_t algorithm);
+
+const char *App_AcousticImaging_BinPolicyName(AppAcousticImagingBinPolicy_t policy);
+
+AppAcousticImagingBinPolicy_t App_AcousticImaging_ResolveBinPolicy(AppAcousticImagingProfile_t profile,
+                                                                    AppAcousticImagingBinPolicy_t policy);
+
+AppAcousticImagingStatus_t App_AcousticImaging_SetBinPolicy(AppAcousticImagingConfig_t *config,
+                                                            AppAcousticImagingBinPolicy_t policy);
 
 AppAcousticImagingStatus_t App_AcousticImaging_SetTemperature(AppAcousticImagingConfig_t *config,
                                                               float temperature_c);

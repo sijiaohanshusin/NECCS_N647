@@ -31,8 +31,12 @@ typedef struct
   uint8_t running;
   uint8_t valid;
   uint8_t auto_degraded;
+  AppAcousticImagingRunMode_t active_mode;
+  AppAcousticImagingRunMode_t requested_mode;
   AppAcousticImagingProfile_t active_profile;
   AppAcousticImagingProfile_t requested_profile;
+  AppAcousticImagingBinPolicy_t active_bin_policy;
+  AppAcousticImagingBinPolicy_t requested_bin_policy;
   AppAcousticSrpBackend_t backend;
   int32_t last_status;
   int32_t service_status;
@@ -45,6 +49,7 @@ typedef struct
   uint32_t active_channel_mask;
   uint32_t pair_count;
   uint32_t grid_count;
+  uint16_t active_bin_count;
   uint16_t srp_ms_x100;
   uint16_t fps_x10;
   int16_t theta_deg;
@@ -57,6 +62,8 @@ typedef struct
   AppAcousticSrpPerf_t perf;
 } AppAcousticServiceSnapshot_t;
 
+extern volatile uint32_t g_app_acoustic_service_disable_auto_degrade;
+
 AppAcousticImagingStatus_t AppAcousticService_Init(void);
 
 void AppAcousticService_ThreadEntry(ULONG thread_input);
@@ -64,6 +71,10 @@ void AppAcousticService_ThreadEntry(ULONG thread_input);
 void AppAcousticService_GetSnapshot(AppAcousticServiceSnapshot_t *snapshot);
 
 AppAcousticImagingStatus_t AppAcousticService_SetProfile(AppAcousticImagingProfile_t profile);
+
+AppAcousticImagingStatus_t AppAcousticService_SetMode(AppAcousticImagingRunMode_t mode);
+
+AppAcousticImagingStatus_t AppAcousticService_SetBinPolicy(AppAcousticImagingBinPolicy_t policy);
 
 #ifdef __cplusplus
 }

@@ -27,8 +27,14 @@ static AppAcousticServiceSnapshot_t s_snapshot __attribute__((aligned(32)));
 static float s_service_samples[APP_ACOUSTIC_SERVICE_SAMPLE_COUNT]
     __attribute__((section(".EXTRAM"), aligned(32)));
 
+volatile uint32_t g_app_acoustic_service_disable_auto_degrade;
+
+static volatile AppAcousticImagingRunMode_t s_requested_mode = APP_ACOUSTIC_IMAGING_MODE_STANDARD;
 static volatile AppAcousticImagingProfile_t s_requested_profile = APP_ACOUSTIC_IMAGING_PROFILE_BALANCED;
+static volatile AppAcousticImagingBinPolicy_t s_requested_bin_policy =
+    APP_ACOUSTIC_IMAGING_BIN_POLICY_PROFILE_DEFAULT;
 static volatile uint8_t s_profile_change_pending;
+static AppAcousticImagingRunMode_t s_active_mode = APP_ACOUSTIC_IMAGING_MODE_STANDARD;
 static AppAcousticImagingProfile_t s_active_profile = APP_ACOUSTIC_IMAGING_PROFILE_BALANCED;
 static uint8_t s_have_input_seq;
 static uint32_t s_last_input_seq;
@@ -124,6 +130,50 @@ static uint8_t AppAcousticService_ProfileIsValid(AppAcousticImagingProfile_t pro
           (profile == APP_ACOUSTIC_IMAGING_PROFILE_QUALITY)) ? 1U : 0U;
 }
 
+static uint8_t AppAcousticService_ModeIsValid(AppAcousticImagingRunMode_t mode)
+{
+  return ((mode == APP_ACOUSTIC_IMAGING_MODE_FAST) ||
+          (mode == APP_ACOUSTIC_IMAGING_MODE_STANDARD) ||
+          (mode == APP_ACOUSTIC_IMAGING_MODE_HIGH_QUALITY)) ? 1U : 0U;
+}
+
+static AppAcousticImagingRunMode_t AppAcousticService_ModeFromProfile(AppAcousticImagingProfile_t profile)
+{
+  switch (profile)
+  {
+  case APP_ACOUSTIC_IMAGING_PROFILE_FAST:
+    return APP_ACOUSTIC_IMAGING_MODE_FAST;
+  case APP_ACOUSTIC_IMAGING_PROFILE_QUALITY:
+    return APP_ACOUSTIC_IMAGING_MODE_HIGH_QUALITY;
+  case APP_ACOUSTIC_IMAGING_PROFILE_BALANCED:
+  default:
+    return APP_ACOUSTIC_IMAGING_MODE_STANDARD;
+  }
+}
+
+static AppAcousticImagingProfile_t AppAcousticService_ProfileFromMode(AppAcousticImagingRunMode_t mode)
+{
+  switch (mode)
+  {
+  case APP_ACOUSTIC_IMAGING_MODE_FAST:
+    return APP_ACOUSTIC_IMAGING_PROFILE_FAST;
+  case APP_ACOUSTIC_IMAGING_MODE_HIGH_QUALITY:
+    return APP_ACOUSTIC_IMAGING_PROFILE_QUALITY;
+  case APP_ACOUSTIC_IMAGING_MODE_STANDARD:
+  default:
+    return APP_ACOUSTIC_IMAGING_PROFILE_BALANCED;
+  }
+}
+
+static uint8_t AppAcousticService_BinPolicyIsValid(AppAcousticImagingBinPolicy_t policy)
+{
+  return ((policy == APP_ACOUSTIC_IMAGING_BIN_POLICY_PROFILE_DEFAULT) ||
+          (policy == APP_ACOUSTIC_IMAGING_BIN_POLICY_STANDARD_B12) ||
+          (policy == APP_ACOUSTIC_IMAGING_BIN_POLICY_STANDARD_B16) ||
+          (policy == APP_ACOUSTIC_IMAGING_BIN_POLICY_STANDARD_B24) ||
+          (policy == APP_ACOUSTIC_IMAGING_BIN_POLICY_QUALITY_B40)) ? 1U : 0U;
+}
+
 static uint8_t AppAcousticService_TickReached(ULONG now, ULONG target)
 {
   return (((LONG)(now - target)) >= 0) ? 1U : 0U;
@@ -165,14 +215,13 @@ static void AppAcousticService_LoadSnapshot(AppAcousticServiceSnapshot_t *snapsh
   }
 }
 
-static AppAcousticImagingStatus_t AppAcousticService_InitRuntime(AppAcousticImagingProfile_t profile)
+static AppAcousticImagingStatus_t AppAcousticService_InitRuntime(AppAcousticImagingRunMode_t mode,
+                                                                 AppAcousticImagingBinPolicy_t bin_policy)
 {
   AppAcousticImagingConfig_t config;
   AppAcousticImagingStatus_t status;
 
-  status = App_AcousticImaging_GetDefaultConfig(APP_MIC_ARRAY_MODE_WIDE32_48K,
-                                                profile,
-                                                &config);
+  status = App_AcousticImaging_GetDefaultRunModeConfig(mode, &config);
   if (status != APP_ACOUSTIC_IMAGING_OK)
   {
     memset(&s_srp_ctx, 0, sizeof(s_srp_ctx));
@@ -183,10 +232,19 @@ static AppAcousticImagingStatus_t AppAcousticService_InitRuntime(AppAcousticImag
   config.ui_min_fps = APP_ACOUSTIC_SERVICE_MIN_FPS;
   config.adaptive_profile_enable = 1U;
 
+  status = App_AcousticImaging_SetBinPolicy(&config, bin_policy);
+  if (status != APP_ACOUSTIC_IMAGING_OK)
+  {
+    memset(&s_srp_ctx, 0, sizeof(s_srp_ctx));
+    return status;
+  }
+
   status = App_AcousticSrp_Init(&s_srp_ctx, &config, APP_ACOUSTIC_BACKEND_F32_CMSIS);
   if (status == APP_ACOUSTIC_IMAGING_OK)
   {
-    s_active_profile = profile;
+    s_active_mode = mode;
+    s_active_profile = config.profile;
+    s_requested_profile = config.profile;
     s_over_budget_count = 0U;
     s_error_count = 0U;
     s_profile_change_pending = 0U;
@@ -425,11 +483,14 @@ static void AppAcousticService_FillVisSnapshot(AppAcousticServiceSnapshot_t *sna
   candidate = (vis_frame->candidate_count > 0U) ? &vis_frame->candidate[0] : NULL;
   snapshot->valid = vis_frame->valid;
   snapshot->output_seq = vis_frame->frame_seq;
+  snapshot->active_mode = ctx->config.run_mode;
   snapshot->active_profile = ctx->config.profile;
+  snapshot->active_bin_policy = ctx->config.bin_policy;
   snapshot->backend = ctx->backend;
   snapshot->active_channel_mask = ctx->active_channel_mask;
   snapshot->pair_count = ctx->pair_count;
   snapshot->grid_count = ctx->grid_count;
+  snapshot->active_bin_count = (uint16_t)ctx->active_bin_count;
   snapshot->quality_pct = AppAcousticService_PercentFromFloat(vis_frame->quality);
   snapshot->contrast_pct = AppAcousticService_PercentFromFloat(vis_frame->contrast);
   if (candidate != NULL)
@@ -456,6 +517,13 @@ static void AppAcousticService_UpdateDegrade(AppAcousticServiceSnapshot_t *snaps
     return;
   }
 
+  if (g_app_acoustic_service_disable_auto_degrade != 0U)
+  {
+    s_over_budget_count = 0U;
+    s_error_count = 0U;
+    return;
+  }
+
   min_budget_ms = 1000U / APP_ACOUSTIC_SERVICE_MIN_FPS;
 
   if (status == APP_ACOUSTIC_IMAGING_OK)
@@ -475,11 +543,13 @@ static void AppAcousticService_UpdateDegrade(AppAcousticServiceSnapshot_t *snaps
     s_error_count++;
   }
 
-  if ((s_active_profile != APP_ACOUSTIC_IMAGING_PROFILE_FAST) &&
+  if ((s_active_mode != APP_ACOUSTIC_IMAGING_MODE_FAST) &&
       ((s_over_budget_count >= APP_ACOUSTIC_SERVICE_DEGRADE_LIMIT) ||
        (s_error_count >= APP_ACOUSTIC_SERVICE_DEGRADE_LIMIT)))
   {
+    s_requested_mode = APP_ACOUSTIC_IMAGING_MODE_FAST;
     s_requested_profile = APP_ACOUSTIC_IMAGING_PROFILE_FAST;
+    s_requested_bin_policy = APP_ACOUSTIC_IMAGING_BIN_POLICY_PROFILE_DEFAULT;
     s_profile_change_pending = 1U;
     snapshot->auto_degraded = 1U;
     snapshot->degraded_count++;
@@ -490,28 +560,39 @@ AppAcousticImagingStatus_t AppAcousticService_Init(void)
 {
   AppAcousticServiceSnapshot_t snapshot;
   AppAcousticImagingStatus_t status;
-  AppAcousticImagingProfile_t profile = s_requested_profile;
+  AppAcousticImagingRunMode_t mode = s_requested_mode;
 
-  if (AppAcousticService_ProfileIsValid(profile) == 0U)
+  if (AppAcousticService_ModeIsValid(mode) == 0U)
   {
-    profile = APP_ACOUSTIC_IMAGING_PROFILE_BALANCED;
-    s_requested_profile = profile;
+    mode = APP_ACOUSTIC_IMAGING_MODE_STANDARD;
+    s_requested_mode = mode;
+  }
+  if (AppAcousticService_BinPolicyIsValid(s_requested_bin_policy) == 0U)
+  {
+    s_requested_bin_policy = APP_ACOUSTIC_IMAGING_BIN_POLICY_PROFILE_DEFAULT;
   }
 
   memset(&snapshot, 0, sizeof(snapshot));
-  snapshot.requested_profile = profile;
-  snapshot.active_profile = profile;
+  snapshot.requested_mode = mode;
+  snapshot.active_mode = mode;
+  snapshot.requested_profile = s_requested_profile;
+  snapshot.active_profile = s_requested_profile;
+  snapshot.requested_bin_policy = s_requested_bin_policy;
   snapshot.backend = APP_ACOUSTIC_BACKEND_F32_CMSIS;
   snapshot.service_status = APP_ACOUSTIC_SERVICE_STATUS_WAIT_FRAME;
   snapshot.peak_index = 40U;
 
-  status = AppAcousticService_InitRuntime(profile);
+  status = AppAcousticService_InitRuntime(mode, s_requested_bin_policy);
   snapshot.initialized = (status == APP_ACOUSTIC_IMAGING_OK) ? 1U : 0U;
   snapshot.last_status = (int32_t)status;
+  snapshot.active_mode = s_active_mode;
+  snapshot.requested_profile = s_requested_profile;
   snapshot.active_profile = s_active_profile;
+  snapshot.active_bin_policy = s_srp_ctx.config.bin_policy;
   snapshot.active_channel_mask = s_srp_ctx.active_channel_mask;
   snapshot.pair_count = s_srp_ctx.pair_count;
   snapshot.grid_count = s_srp_ctx.grid_count;
+  snapshot.active_bin_count = (uint16_t)s_srp_ctx.active_bin_count;
   AppAcousticService_PublishSnapshot(&snapshot);
 
   return status;
@@ -551,22 +632,40 @@ void AppAcousticService_ThreadEntry(ULONG thread_input)
 
     AppAcousticService_LoadSnapshot(&snapshot);
     snapshot.running = 1U;
+    if (AppAcousticService_ModeIsValid(s_requested_mode) == 0U)
+    {
+      s_requested_mode = APP_ACOUSTIC_IMAGING_MODE_STANDARD;
+      s_profile_change_pending = 1U;
+    }
+    s_requested_profile = AppAcousticService_ProfileFromMode(s_requested_mode);
+    if (AppAcousticService_BinPolicyIsValid(s_requested_bin_policy) == 0U)
+    {
+      s_requested_bin_policy = APP_ACOUSTIC_IMAGING_BIN_POLICY_PROFILE_DEFAULT;
+      s_profile_change_pending = 1U;
+    }
+    snapshot.requested_mode = s_requested_mode;
     snapshot.requested_profile = s_requested_profile;
+    snapshot.requested_bin_policy = s_requested_bin_policy;
 
     if ((s_profile_change_pending != 0U) ||
         (s_srp_ctx.initialized == 0U) ||
-        (s_active_profile != s_requested_profile))
+        (s_active_mode != s_requested_mode) ||
+        (s_srp_ctx.config.bin_policy !=
+         App_AcousticImaging_ResolveBinPolicy(s_requested_profile, s_requested_bin_policy)))
     {
-      status = AppAcousticService_InitRuntime(s_requested_profile);
+      status = AppAcousticService_InitRuntime(s_requested_mode, s_requested_bin_policy);
       snapshot.initialized = (status == APP_ACOUSTIC_IMAGING_OK) ? 1U : 0U;
       snapshot.last_status = (int32_t)status;
       snapshot.service_status = (status == APP_ACOUSTIC_IMAGING_OK) ?
                                 APP_ACOUSTIC_SERVICE_STATUS_WAIT_FRAME :
                                 (int32_t)status;
+      snapshot.active_mode = s_active_mode;
       snapshot.active_profile = s_active_profile;
+      snapshot.active_bin_policy = s_srp_ctx.config.bin_policy;
       snapshot.active_channel_mask = s_srp_ctx.active_channel_mask;
       snapshot.pair_count = s_srp_ctx.pair_count;
       snapshot.grid_count = s_srp_ctx.grid_count;
+      snapshot.active_bin_count = (uint16_t)s_srp_ctx.active_bin_count;
       AppAcousticService_PublishSnapshot(&snapshot);
       if (status != APP_ACOUSTIC_IMAGING_OK)
       {
@@ -655,7 +754,37 @@ AppAcousticImagingStatus_t AppAcousticService_SetProfile(AppAcousticImagingProfi
     return APP_ACOUSTIC_IMAGING_INVALID_ARGUMENT;
   }
 
+  s_requested_mode = AppAcousticService_ModeFromProfile(profile);
   s_requested_profile = profile;
+  s_requested_bin_policy = APP_ACOUSTIC_IMAGING_BIN_POLICY_PROFILE_DEFAULT;
+  s_profile_change_pending = 1U;
+
+  return APP_ACOUSTIC_IMAGING_OK;
+}
+
+AppAcousticImagingStatus_t AppAcousticService_SetMode(AppAcousticImagingRunMode_t mode)
+{
+  if (AppAcousticService_ModeIsValid(mode) == 0U)
+  {
+    return APP_ACOUSTIC_IMAGING_INVALID_ARGUMENT;
+  }
+
+  s_requested_mode = mode;
+  s_requested_profile = AppAcousticService_ProfileFromMode(mode);
+  s_requested_bin_policy = APP_ACOUSTIC_IMAGING_BIN_POLICY_PROFILE_DEFAULT;
+  s_profile_change_pending = 1U;
+
+  return APP_ACOUSTIC_IMAGING_OK;
+}
+
+AppAcousticImagingStatus_t AppAcousticService_SetBinPolicy(AppAcousticImagingBinPolicy_t policy)
+{
+  if (AppAcousticService_BinPolicyIsValid(policy) == 0U)
+  {
+    return APP_ACOUSTIC_IMAGING_INVALID_ARGUMENT;
+  }
+
+  s_requested_bin_policy = policy;
   s_profile_change_pending = 1U;
 
   return APP_ACOUSTIC_IMAGING_OK;

@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import csv
 import math
 from pathlib import Path
@@ -20,6 +20,11 @@ PROFILE_FAST = "fast"
 PROFILE_BALANCED = "balanced"
 PROFILE_QUALITY = "quality"
 PROFILE_OFFLINE_ALL = "offline_all"
+
+BIN_POLICY_STANDARD_B12 = "standard_b12"
+BIN_POLICY_STANDARD_B16 = "standard_b16"
+BIN_POLICY_STANDARD_B24 = "standard_b24"
+BIN_POLICY_QUALITY_B40 = "quality_b40"
 
 ALGORITHM_WIDE32_FAST_SRP = "wide32_fast_srp"
 ALGORITHM_WIDE32_GENERAL_SRP = "wide32_general_srp"
@@ -51,13 +56,16 @@ class ImagingConfig:
     active_bin_start: int
     active_bin_end: int
     pair_count: int
+    bin_indices: tuple[int, ...] | None = None
     fine_top_k: int = 3
     fine_grid_size: int = 4
     fine_span_deg: float = 10.0
 
     @property
-    def active_bins(self) -> range:
-        return range(self.active_bin_start, self.active_bin_end + 1)
+    def active_bins(self) -> tuple[int, ...]:
+        if self.bin_indices is not None:
+            return self.bin_indices
+        return tuple(range(self.active_bin_start, self.active_bin_end + 1))
 
 
 @dataclass(frozen=True)
@@ -177,6 +185,66 @@ def build_config(mode: str, profile: str) -> ImagingConfig:
         )
 
     raise ValueError(f"unsupported mode/profile: {mode}/{profile}")
+
+
+def bin_mask_for_policy(policy: str) -> tuple[int, ...]:
+    if policy == BIN_POLICY_STANDARD_B12:
+        return (7, 8, 9, 10, 12, 14, 16, 17, 26, 27, 40, 41)
+    if policy == BIN_POLICY_STANDARD_B16:
+        return (6, 7, 8, 9, 10, 12, 14, 16, 17, 20, 23, 26, 27, 38, 40, 41)
+    if policy == BIN_POLICY_STANDARD_B24:
+        return (
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            12,
+            14,
+            16,
+            17,
+            19,
+            20,
+            23,
+            24,
+            26,
+            27,
+            36,
+            38,
+            39,
+            40,
+            41,
+            42,
+        )
+    if policy == BIN_POLICY_QUALITY_B40:
+        return tuple(range(3, 43))
+    raise ValueError(f"unsupported bin policy: {policy}")
+
+
+def with_bin_policy(config: ImagingConfig, policy: str) -> ImagingConfig:
+    bins = bin_mask_for_policy(policy)
+    return replace(
+        config,
+        active_bin_start=min(bins),
+        active_bin_end=max(bins),
+        bin_indices=bins,
+    )
+
+
+def with_bin_indices(config: ImagingConfig, bins: tuple[int, ...]) -> ImagingConfig:
+    if not bins:
+        raise ValueError("bin list must not be empty")
+    if tuple(sorted(set(bins))) != bins:
+        raise ValueError("bin list must be sorted and unique")
+    return replace(
+        config,
+        active_bin_start=min(bins),
+        active_bin_end=max(bins),
+        bin_indices=bins,
+    )
 
 
 def build_algorithm_config(algorithm: str) -> ImagingConfig:
@@ -314,6 +382,54 @@ def select_algorithm_pairs(mics: list[Mic], config: ImagingConfig, algorithm: st
 
 def coarse_grid() -> list[tuple[float, float]]:
     return [(theta, phi) for theta in COARSE_ANGLES_DEG for phi in COARSE_ANGLES_DEG]
+
+
+def _coarse_idx_is_neighbor(a: int, b: int) -> bool:
+    ai, ap = divmod(a, len(COARSE_ANGLES_DEG))
+    bi, bp = divmod(b, len(COARSE_ANGLES_DEG))
+    return abs(ai - bi) <= 1 and abs(ap - bp) <= 1
+
+
+def _find_top_coarse_nms(scores: list[float], top_k: int) -> list[int]:
+    used = [False] * len(scores)
+    top: list[int] = []
+
+    for _ in range(top_k):
+        best_idx = -1
+        best_score = -1.0e30
+
+        for idx, score in enumerate(scores):
+            if used[idx]:
+                continue
+            if any(_coarse_idx_is_neighbor(idx, prior) for prior in top):
+                continue
+            if score > best_score:
+                best_idx = idx
+                best_score = score
+
+        if best_idx < 0:
+            for idx, score in enumerate(scores):
+                if not used[idx] and score > best_score:
+                    best_idx = idx
+                    best_score = score
+
+        if best_idx < 0:
+            break
+        used[best_idx] = True
+        top.append(best_idx)
+
+    return top
+
+
+def fine_grid_around(theta_deg: float, phi_deg: float, config: ImagingConfig) -> list[tuple[float, float]]:
+    step = (2.0 * config.fine_span_deg) / float(config.fine_grid_size)
+    points: list[tuple[float, float]] = []
+    for ti in range(config.fine_grid_size):
+        theta = theta_deg + (-config.fine_span_deg + ((float(ti) + 0.5) * step))
+        for pi in range(config.fine_grid_size):
+            phi = phi_deg + (-config.fine_span_deg + ((float(pi) + 0.5) * step))
+            points.append((theta, phi))
+    return points
 
 
 def tdoa_seconds(pair: Pair, theta_deg: float, phi_deg: float) -> float:
@@ -472,6 +588,15 @@ def build_observed_features(
     return features
 
 
+def score_direction(features: list[tuple[int, float, float, float, float]], pairs: list[Pair], theta: float, phi: float) -> float:
+    score = 0.0
+    for pair_index, freq, obs_re, obs_im, weight in features:
+        tau_test = tdoa_seconds(pairs[pair_index], theta, phi)
+        phase = 2.0 * math.pi * freq * tau_test
+        score += weight * ((obs_re * math.cos(phase)) + (obs_im * math.sin(phase)))
+    return score
+
+
 def estimate_direction(
     config: ImagingConfig,
     mics: list[Mic],
@@ -486,14 +611,21 @@ def estimate_direction(
     best_score = -1.0e30
     second_score = -1.0e30
     total_weight = sum(feature[4] for feature in features)
+    evaluated: list[tuple[float, float, float]] = []
+    coarse_points = coarse_grid()
+    coarse_scores: list[float] = []
 
-    for test_theta, test_phi in coarse_grid():
-        score = 0.0
-        for pair_index, freq, obs_re, obs_im, weight in features:
-            tau_test = tdoa_seconds(pairs[pair_index], test_theta, test_phi)
-            phase = 2.0 * math.pi * freq * tau_test
-            score += weight * ((obs_re * math.cos(phase)) + (obs_im * math.sin(phase)))
+    for test_theta, test_phi in coarse_points:
+        score = score_direction(features, pairs, test_theta, test_phi)
+        coarse_scores.append(score)
+        evaluated.append((test_theta, test_phi, score))
 
+    for coarse_idx in _find_top_coarse_nms(coarse_scores, config.fine_top_k):
+        center_theta, center_phi = coarse_points[coarse_idx]
+        for test_theta, test_phi in fine_grid_around(center_theta, center_phi, config):
+            evaluated.append((test_theta, test_phi, score_direction(features, pairs, test_theta, test_phi)))
+
+    for test_theta, test_phi, score in evaluated:
         if score > best_score:
             second_score = best_score
             best_score = score

@@ -19,10 +19,20 @@
 
 typedef struct
 {
+  float sin_start;
+  float cos_start;
+  float sin_delta;
+  float cos_delta;
+} AppAcousticSrpPhaseStep_t;
+
+typedef struct
+{
   AppAcousticImagingPair_t pairs[APP_ACOUSTIC_SRP_MAX_PAIRS];
   float coarse_theta[APP_ACOUSTIC_IMAGING_COARSE_TOTAL];
   float coarse_phi[APP_ACOUSTIC_IMAGING_COARSE_TOTAL];
   float coarse_tdoa[APP_ACOUSTIC_IMAGING_COARSE_TOTAL * APP_ACOUSTIC_SRP_MAX_PAIRS];
+  AppAcousticSrpPhaseStep_t coarse_phase[APP_ACOUSTIC_IMAGING_COARSE_TOTAL * APP_ACOUSTIC_SRP_MAX_PAIRS];
+  AppAcousticSrpPhaseStep_t fine_phase[APP_ACOUSTIC_IMAGING_FINE_TOTAL * APP_ACOUSTIC_SRP_MAX_PAIRS];
   float window[APP_ACOUSTIC_SRP_MAX_NFFT];
   float time[APP_ACOUSTIC_SRP_MAX_CHANNELS * APP_ACOUSTIC_SRP_MAX_NFFT];
   float freq[APP_ACOUSTIC_SRP_MAX_CHANNELS * APP_ACOUSTIC_SRP_MAX_NFFT];
@@ -36,11 +46,16 @@ typedef struct
   float scratch_conj[APP_ACOUSTIC_SRP_MAX_ACTIVE_BINS * 2U];
   float scratch_cross[APP_ACOUSTIC_SRP_MAX_ACTIVE_BINS * 2U];
   float scratch_mag[APP_ACOUSTIC_SRP_MAX_ACTIVE_BINS];
-  float selftest_planar[APP_ACOUSTIC_SRP_MAX_CHANNELS * APP_ACOUSTIC_SRP_MAX_FRAME_LEN];
   arm_rfft_fast_instance_f32 rfft;
 } AppAcousticSrpWorkspace_t;
 
-static AppAcousticSrpWorkspace_t s_srp_workspace __attribute__((section(".EXTRAM"), aligned(32)));
+typedef struct
+{
+  float selftest_planar[APP_ACOUSTIC_SRP_MAX_CHANNELS * APP_ACOUSTIC_SRP_MAX_FRAME_LEN];
+} AppAcousticSrpSlowWorkspace_t;
+
+static AppAcousticSrpWorkspace_t s_srp_workspace __attribute__((section(".SRP_FAST"), aligned(32)));
+static AppAcousticSrpSlowWorkspace_t s_srp_slow_workspace __attribute__((section(".EXTRAM"), aligned(32)));
 
 static float App_AcousticSrp_AbsF32(float value)
 {
@@ -105,6 +120,24 @@ static void App_AcousticSrp_EnableCycleCounter(void)
 #endif
 }
 
+static uint8_t App_AcousticSrp_ConfigUsesContiguousBins(const AppAcousticImagingConfig_t *config)
+{
+  if ((config == NULL) || (config->active_bin_count == 0U))
+  {
+    return 0U;
+  }
+
+  for (uint32_t i = 0U; i < config->active_bin_count; i++)
+  {
+    if (config->active_bins[i] != (uint16_t)(config->active_bin_start + i))
+    {
+      return 0U;
+    }
+  }
+
+  return 1U;
+}
+
 static AppAcousticImagingStatus_t App_AcousticSrp_ValidateRuntimeConfig(const AppAcousticImagingConfig_t *config,
                                                                         AppAcousticSrpBackend_t backend)
 {
@@ -125,7 +158,7 @@ static AppAcousticImagingStatus_t App_AcousticSrp_ValidateRuntimeConfig(const Ap
     return status;
   }
 
-  active_bins = ((uint32_t)config->active_bin_end - (uint32_t)config->active_bin_start) + 1U;
+  active_bins = config->active_bin_count;
   if ((config->mic_mode != APP_MIC_ARRAY_MODE_WIDE32_48K) ||
       (config->channel_count > APP_ACOUSTIC_SRP_MAX_CHANNELS) ||
       (config->frame_len != APP_ACOUSTIC_SRP_MAX_FRAME_LEN) ||
@@ -135,7 +168,8 @@ static AppAcousticImagingStatus_t App_AcousticSrp_ValidateRuntimeConfig(const Ap
       ((backend == APP_ACOUSTIC_BACKEND_NPU_HEATMAP) &&
        ((config->profile != APP_ACOUSTIC_IMAGING_PROFILE_BALANCED) ||
         (config->pair_count != APP_ACOUSTIC_IMAGING_WIDE32_BALANCED_PAIRS) ||
-        (active_bins != APP_ACOUSTIC_SRP_MAX_ACTIVE_BINS))))
+        (active_bins != APP_ACOUSTIC_SRP_MAX_ACTIVE_BINS) ||
+        (App_AcousticSrp_ConfigUsesContiguousBins(config) == 0U))))
   {
     return APP_ACOUSTIC_IMAGING_UNSUPPORTED_MODE;
   }
@@ -212,7 +246,7 @@ static void App_AcousticSrp_RebuildWeights(AppAcousticSrpContext_t *ctx)
 
       if (pair_active != 0U)
       {
-        float frequency_hz = delta_f_hz * (float)(ctx->config.active_bin_start + bin);
+        float frequency_hz = delta_f_hz * (float)ctx->config.active_bins[bin];
         weight = App_AcousticSrp_FrequencyPairWeight(&workspace->pairs[pair],
                                                      frequency_hz,
                                                      ctx->config.speed_of_sound_mps,
@@ -222,6 +256,59 @@ static void App_AcousticSrp_RebuildWeights(AppAcousticSrpContext_t *ctx)
       workspace->srp_weight[(pair * ctx->active_bin_count) + bin] = weight;
       ctx->weight_sum += weight;
     }
+  }
+}
+
+static void App_AcousticSrp_StartPhaseFromDelta(uint32_t start_bin,
+                                                float sin_delta,
+                                                float cos_delta,
+                                                float *sin_start,
+                                                float *cos_start)
+{
+  float sin_acc = 0.0f;
+  float cos_acc = 1.0f;
+
+  for (uint32_t bin = 0U; bin < start_bin; bin++)
+  {
+    float next_sin = (sin_acc * cos_delta) + (cos_acc * sin_delta);
+    float next_cos = (cos_acc * cos_delta) - (sin_acc * sin_delta);
+
+    sin_acc = next_sin;
+    cos_acc = next_cos;
+  }
+
+  *sin_start = sin_acc;
+  *cos_start = cos_acc;
+}
+
+static void App_AcousticSrp_BuildPhaseSteps(const AppAcousticSrpContext_t *ctx,
+                                            const float *tau_seconds,
+                                            AppAcousticSrpPhaseStep_t *phase)
+{
+  const float delta_f_hz = (float)ctx->config.sample_rate_hz / (float)ctx->config.nfft;
+
+  for (uint32_t pair = 0U; pair < ctx->pair_count; pair++)
+  {
+    float d_phi_deg = 360.0f * delta_f_hz * tau_seconds[pair];
+
+    arm_sin_cos_f32(d_phi_deg, &phase[pair].sin_delta, &phase[pair].cos_delta);
+    App_AcousticSrp_StartPhaseFromDelta(ctx->config.active_bins[0],
+                                        phase[pair].sin_delta,
+                                        phase[pair].cos_delta,
+                                        &phase[pair].sin_start,
+                                        &phase[pair].cos_start);
+  }
+}
+
+static void App_AcousticSrp_RebuildCoarsePhase(AppAcousticSrpContext_t *ctx)
+{
+  AppAcousticSrpWorkspace_t *workspace = &s_srp_workspace;
+
+  for (uint32_t grid = 0U; grid < APP_ACOUSTIC_IMAGING_COARSE_TOTAL; grid++)
+  {
+    App_AcousticSrp_BuildPhaseSteps(ctx,
+                                    &workspace->coarse_tdoa[grid * ctx->pair_count],
+                                    &workspace->coarse_phase[grid * APP_ACOUSTIC_SRP_MAX_PAIRS]);
   }
 }
 
@@ -401,44 +488,117 @@ static float App_AcousticSrp_SecondMaxExcludingNeighbor(const AppAcousticSrpWork
   return second_max;
 }
 
-static float App_AcousticSrp_AccumulatePoint(const AppAcousticSrpContext_t *ctx,
-                                             const float *tau_seconds)
+static float App_AcousticSrp_AccumulatePhasePointContiguous(const AppAcousticSrpContext_t *ctx,
+                                                            const AppAcousticSrpPhaseStep_t *phase)
 {
   const AppAcousticSrpWorkspace_t *workspace = &s_srp_workspace;
-  const float delta_f_hz = (float)ctx->config.sample_rate_hz / (float)ctx->config.nfft;
   float power = 0.0f;
 
   for (uint32_t pair = 0U; pair < ctx->pair_count; pair++)
   {
     const float *gcc = &workspace->gcc[pair * ctx->active_bin_count * 2U];
-    float d_phi_deg = 360.0f * delta_f_hz * tau_seconds[pair];
-    float sin_d;
-    float cos_d;
-    float sin_phi;
-    float cos_phi;
+    const float *weight = &workspace->srp_weight[pair * ctx->active_bin_count];
+    float sin_d = phase[pair].sin_delta;
+    float cos_d = phase[pair].cos_delta;
+    float sin_phi = phase[pair].sin_start;
+    float cos_phi = phase[pair].cos_start;
     float pair_sum = 0.0f;
+    uint32_t bin = ctx->active_bin_count;
 
-    arm_sin_cos_f32(d_phi_deg, &sin_d, &cos_d);
-    arm_sin_cos_f32(d_phi_deg * (float)ctx->config.active_bin_start, &sin_phi, &cos_phi);
+#define APP_ACOUSTIC_SRP_ACCUMULATE_BIN()                                      \
+    do                                                                         \
+    {                                                                          \
+      float c_new;                                                             \
+      float s_new;                                                             \
+      pair_sum += (*weight++) * ((gcc[0] * cos_phi) + (gcc[1] * sin_phi));     \
+      gcc += 2U;                                                               \
+      c_new = (cos_phi * cos_d) - (sin_phi * sin_d);                           \
+      s_new = (sin_phi * cos_d) + (cos_phi * sin_d);                           \
+      cos_phi = c_new;                                                         \
+      sin_phi = s_new;                                                         \
+    } while (0)
+
+    while (bin >= 4U)
+    {
+      APP_ACOUSTIC_SRP_ACCUMULATE_BIN();
+      APP_ACOUSTIC_SRP_ACCUMULATE_BIN();
+      APP_ACOUSTIC_SRP_ACCUMULATE_BIN();
+      APP_ACOUSTIC_SRP_ACCUMULATE_BIN();
+      bin -= 4U;
+    }
+
+    while (bin > 0U)
+    {
+      APP_ACOUSTIC_SRP_ACCUMULATE_BIN();
+      bin--;
+    }
+
+#undef APP_ACOUSTIC_SRP_ACCUMULATE_BIN
+
+    power += pair_sum;
+  }
+
+  return power;
+}
+
+static void App_AcousticSrp_AdvancePhase(float *sin_phi,
+                                         float *cos_phi,
+                                         float sin_d,
+                                         float cos_d,
+                                         uint16_t step_count)
+{
+  for (uint32_t step = 0U; step < step_count; step++)
+  {
+    float c_new = ((*cos_phi) * cos_d) - ((*sin_phi) * sin_d);
+    float s_new = ((*sin_phi) * cos_d) + ((*cos_phi) * sin_d);
+
+    *cos_phi = c_new;
+    *sin_phi = s_new;
+  }
+}
+
+static float App_AcousticSrp_AccumulatePhasePointSparse(const AppAcousticSrpContext_t *ctx,
+                                                        const AppAcousticSrpPhaseStep_t *phase)
+{
+  const AppAcousticSrpWorkspace_t *workspace = &s_srp_workspace;
+  float power = 0.0f;
+
+  for (uint32_t pair = 0U; pair < ctx->pair_count; pair++)
+  {
+    const float *gcc = &workspace->gcc[pair * ctx->active_bin_count * 2U];
+    const float *weight = &workspace->srp_weight[pair * ctx->active_bin_count];
+    float sin_d = phase[pair].sin_delta;
+    float cos_d = phase[pair].cos_delta;
+    float sin_phi = phase[pair].sin_start;
+    float cos_phi = phase[pair].cos_start;
+    float pair_sum = 0.0f;
 
     for (uint32_t bin = 0U; bin < ctx->active_bin_count; bin++)
     {
-      float c_new;
-      float s_new;
-      float weight = workspace->srp_weight[(pair * ctx->active_bin_count) + bin];
+      pair_sum += weight[bin] * ((gcc[2U * bin] * cos_phi) + (gcc[(2U * bin) + 1U] * sin_phi));
 
-      pair_sum += weight * ((gcc[2U * bin] * cos_phi) + (gcc[(2U * bin) + 1U] * sin_phi));
-
-      c_new = (cos_phi * cos_d) - (sin_phi * sin_d);
-      s_new = (sin_phi * cos_d) + (cos_phi * sin_d);
-      cos_phi = c_new;
-      sin_phi = s_new;
+      if ((bin + 1U) < ctx->active_bin_count)
+      {
+        uint16_t gap = (uint16_t)(ctx->config.active_bins[bin + 1U] - ctx->config.active_bins[bin]);
+        App_AcousticSrp_AdvancePhase(&sin_phi, &cos_phi, sin_d, cos_d, gap);
+      }
     }
 
     power += pair_sum;
   }
 
   return power;
+}
+
+static float App_AcousticSrp_AccumulatePhasePoint(const AppAcousticSrpContext_t *ctx,
+                                                  const AppAcousticSrpPhaseStep_t *phase)
+{
+  if (ctx->active_bins_contiguous != 0U)
+  {
+    return App_AcousticSrp_AccumulatePhasePointContiguous(ctx, phase);
+  }
+
+  return App_AcousticSrp_AccumulatePhasePointSparse(ctx, phase);
 }
 
 static AppAcousticImagingStatus_t App_AcousticSrp_Preprocess(AppAcousticSrpContext_t *ctx,
@@ -520,8 +680,6 @@ static void App_AcousticSrp_ComputeGccPhat(const AppAcousticSrpContext_t *ctx)
   {
     uint32_t mic_a = workspace->pairs[pair].mic_a;
     uint32_t mic_b = workspace->pairs[pair].mic_b;
-    const float *xi = &workspace->freq[(mic_a * ctx->config.nfft) + (2U * ctx->config.active_bin_start)];
-    const float *xj = &workspace->freq[(mic_b * ctx->config.nfft) + (2U * ctx->config.active_bin_start)];
     float *out = &workspace->gcc[pair * ctx->active_bin_count * 2U];
 
     if (App_AcousticSrp_PairHasWeight(ctx, pair) == 0U)
@@ -530,16 +688,45 @@ static void App_AcousticSrp_ComputeGccPhat(const AppAcousticSrpContext_t *ctx)
       continue;
     }
 
-    arm_cmplx_conj_f32(xj, workspace->scratch_conj, ctx->active_bin_count);
-    arm_cmplx_mult_cmplx_f32(xi, workspace->scratch_conj, workspace->scratch_cross, ctx->active_bin_count);
-    arm_cmplx_mag_f32(workspace->scratch_cross, workspace->scratch_mag, ctx->active_bin_count);
-
-    for (uint32_t bin = 0U; bin < ctx->active_bin_count; bin++)
+    if (ctx->active_bins_contiguous != 0U)
     {
-      float inv_mag = 1.0f / (workspace->scratch_mag[bin] + APP_ACOUSTIC_SRP_PHAT_EPSILON);
+      const float *xi = &workspace->freq[(mic_a * ctx->config.nfft) + (2U * ctx->config.active_bin_start)];
+      const float *xj = &workspace->freq[(mic_b * ctx->config.nfft) + (2U * ctx->config.active_bin_start)];
 
-      out[2U * bin] = workspace->scratch_cross[2U * bin] * inv_mag;
-      out[(2U * bin) + 1U] = workspace->scratch_cross[(2U * bin) + 1U] * inv_mag;
+      arm_cmplx_conj_f32(xj, workspace->scratch_conj, ctx->active_bin_count);
+      arm_cmplx_mult_cmplx_f32(xi, workspace->scratch_conj, workspace->scratch_cross, ctx->active_bin_count);
+      arm_cmplx_mag_f32(workspace->scratch_cross, workspace->scratch_mag, ctx->active_bin_count);
+
+      for (uint32_t bin = 0U; bin < ctx->active_bin_count; bin++)
+      {
+        float inv_mag = 1.0f / (workspace->scratch_mag[bin] + APP_ACOUSTIC_SRP_PHAT_EPSILON);
+
+        out[2U * bin] = workspace->scratch_cross[2U * bin] * inv_mag;
+        out[(2U * bin) + 1U] = workspace->scratch_cross[(2U * bin) + 1U] * inv_mag;
+      }
+    }
+    else
+    {
+      const float *freq_a = &workspace->freq[mic_a * ctx->config.nfft];
+      const float *freq_b = &workspace->freq[mic_b * ctx->config.nfft];
+
+      for (uint32_t bin = 0U; bin < ctx->active_bin_count; bin++)
+      {
+        uint32_t fft_index = 2U * (uint32_t)ctx->config.active_bins[bin];
+        float ar = freq_a[fft_index];
+        float ai = freq_a[fft_index + 1U];
+        float br = freq_b[fft_index];
+        float bi = freq_b[fft_index + 1U];
+        float cross_re = (ar * br) + (ai * bi);
+        float cross_im = (ai * br) - (ar * bi);
+        float mag;
+        float inv_mag;
+
+        arm_sqrt_f32((cross_re * cross_re) + (cross_im * cross_im), &mag);
+        inv_mag = 1.0f / (mag + APP_ACOUSTIC_SRP_PHAT_EPSILON);
+        out[2U * bin] = cross_re * inv_mag;
+        out[(2U * bin) + 1U] = cross_im * inv_mag;
+      }
     }
   }
 }
@@ -551,7 +738,7 @@ static void App_AcousticSrp_RunCoarseSearch(const AppAcousticSrpContext_t *ctx)
   for (uint32_t grid = 0U; grid < APP_ACOUSTIC_IMAGING_COARSE_TOTAL; grid++)
   {
     workspace->srp_power[grid] =
-        App_AcousticSrp_AccumulatePoint(ctx, &workspace->coarse_tdoa[grid * ctx->pair_count]);
+        App_AcousticSrp_AccumulatePhasePoint(ctx, &workspace->coarse_phase[grid * APP_ACOUSTIC_SRP_MAX_PAIRS]);
   }
 }
 
@@ -599,8 +786,12 @@ static void App_AcousticSrp_RunFineSearch(const AppAcousticSrpContext_t *ctx,
                (workspace->pairs[pair].dy_m * sin_phi)) * inv_c;
         }
 
+        App_AcousticSrp_BuildPhaseSteps(ctx,
+                                        workspace->tau,
+                                        &workspace->fine_phase[fine_idx * APP_ACOUSTIC_SRP_MAX_PAIRS]);
         workspace->srp_power[APP_ACOUSTIC_IMAGING_COARSE_TOTAL + fine_idx] =
-            App_AcousticSrp_AccumulatePoint(ctx, workspace->tau);
+            App_AcousticSrp_AccumulatePhasePoint(ctx,
+                                                 &workspace->fine_phase[fine_idx * APP_ACOUSTIC_SRP_MAX_PAIRS]);
       }
     }
   }
@@ -840,11 +1031,13 @@ AppAcousticImagingStatus_t App_AcousticSrp_Init(AppAcousticSrpContext_t *ctx,
   ctx->config = *config;
   ctx->backend = backend;
   ctx->pair_count = pair_count;
-  ctx->active_bin_count = ((uint32_t)config->active_bin_end - (uint32_t)config->active_bin_start) + 1U;
+  ctx->active_bin_count = config->active_bin_count;
+  ctx->active_bins_contiguous = App_AcousticSrp_ConfigUsesContiguousBins(config);
   ctx->grid_count = APP_ACOUSTIC_SRP_RUNTIME_GRID_TOTAL;
   ctx->active_channel_mask = config->channel_mask & ~config->bad_channel_mask;
   ctx->smoothing_valid = 0U;
   App_AcousticSrp_RebuildWeights(ctx);
+  App_AcousticSrp_RebuildCoarsePhase(ctx);
   if (ctx->weight_sum <= 0.0f)
   {
     return APP_ACOUSTIC_IMAGING_INVALID_ARGUMENT;
@@ -1021,7 +1214,6 @@ static AppAcousticImagingStatus_t App_AcousticSrp_RunOneSyntheticCheck(AppAcoust
                                                                        AppAcousticImagingProfile_t profile,
                                                                        AppAcousticImagingVisFrame_t *vis_frame)
 {
-  AppAcousticSrpWorkspace_t *workspace = &s_srp_workspace;
   AppAcousticImagingConfig_t config;
   AppAudioFrame_t frame;
   AppAcousticImagingStatus_t status;
@@ -1056,7 +1248,7 @@ static AppAcousticImagingStatus_t App_AcousticSrp_RunOneSyntheticCheck(AppAcoust
                                                0.5f,
                                                0.0f,
                                                0U,
-                                               workspace->selftest_planar,
+                                               s_srp_slow_workspace.selftest_planar,
                                                APP_ACOUSTIC_SRP_MAX_FRAME_LEN,
                                                &frame);
   if (status != APP_ACOUSTIC_IMAGING_OK)
@@ -1120,7 +1312,6 @@ AppAcousticImagingStatus_t App_AcousticSrp_RunSyntheticBenchmark(AppAcousticSrpC
                                                                  uint32_t cpu_hz,
                                                                  AppAcousticSrpBenchmarkResult_t *result)
 {
-  AppAcousticSrpWorkspace_t *workspace = &s_srp_workspace;
   AppAudioFrame_t frame;
   AppAcousticImagingVisFrame_t vis_frame;
   AppAcousticImagingStatus_t status;
@@ -1157,7 +1348,7 @@ AppAcousticImagingStatus_t App_AcousticSrp_RunSyntheticBenchmark(AppAcousticSrpC
                                                  0.5f,
                                                  0.04f,
                                                  seq,
-                                                 workspace->selftest_planar,
+                                                 s_srp_slow_workspace.selftest_planar,
                                                  APP_ACOUSTIC_SRP_MAX_FRAME_LEN,
                                                  &frame);
     if (status == APP_ACOUSTIC_IMAGING_OK)

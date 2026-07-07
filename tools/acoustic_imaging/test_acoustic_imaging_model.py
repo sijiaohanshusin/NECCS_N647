@@ -8,6 +8,10 @@ from acoustic_imaging_model import (
     ALGORITHM_WIDE32_HF_HINT,
     AcousticScenario,
     AcousticSource,
+    BIN_POLICY_QUALITY_B40,
+    BIN_POLICY_STANDARD_B12,
+    BIN_POLICY_STANDARD_B16,
+    BIN_POLICY_STANDARD_B24,
     MODE_CORE16,
     MODE_WIDE32,
     PROFILE_BALANCED,
@@ -15,6 +19,7 @@ from acoustic_imaging_model import (
     PROFILE_QUALITY,
     angular_error_deg,
     active_frequencies_hz,
+    bin_mask_for_policy,
     build_algorithm_config,
     build_config,
     build_tdoa_lut,
@@ -26,6 +31,7 @@ from acoustic_imaging_model import (
     select_mode_mics,
     summarize_pair_set,
     tdoa_seconds,
+    with_bin_policy,
 )
 
 
@@ -105,6 +111,29 @@ class AcousticImagingModelTest(unittest.TestCase):
         general_mean = sum(pair.baseline_m for pair in general_pairs) / len(general_pairs)
         hf_mean = sum(pair.baseline_m for pair in hf_pairs) / len(hf_pairs)
         self.assertLess(hf_mean, general_mean * 0.55)
+
+    def test_wide32_bin_policies_are_sorted_and_sized(self):
+        expected_counts = {
+            BIN_POLICY_STANDARD_B12: 12,
+            BIN_POLICY_STANDARD_B16: 16,
+            BIN_POLICY_STANDARD_B24: 24,
+            BIN_POLICY_QUALITY_B40: 40,
+        }
+
+        for policy, count in expected_counts.items():
+            bins = bin_mask_for_policy(policy)
+            self.assertEqual(len(bins), count)
+            self.assertEqual(tuple(sorted(set(bins))), bins)
+            self.assertGreaterEqual(min(bins), 3)
+            self.assertLessEqual(max(bins), 42)
+
+    def test_with_bin_policy_changes_active_frequencies(self):
+        config = build_config(MODE_WIDE32, PROFILE_BALANCED)
+        b16_config = with_bin_policy(config, BIN_POLICY_STANDARD_B16)
+        self.assertEqual(len(b16_config.active_bins), 16)
+        self.assertEqual(len(active_frequencies_hz(b16_config)), 16)
+        self.assertEqual(b16_config.active_bins[0], 6)
+        self.assertEqual(b16_config.active_bins[-1], 41)
 
     def test_wide32_general_robust_direction_estimate(self):
         rng = random.Random(647)

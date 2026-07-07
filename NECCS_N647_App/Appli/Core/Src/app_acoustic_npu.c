@@ -60,7 +60,6 @@ static int8_t App_AcousticNpu_QuantizePhat(float value)
 static AppAcousticImagingStatus_t App_AcousticNpu_ValidateConfig(const AppAcousticImagingConfig_t *config)
 {
   AppAcousticImagingStatus_t status;
-  uint32_t active_bins;
 
   status = App_AcousticImaging_ValidateConfig(config);
   if (status != APP_ACOUSTIC_IMAGING_OK)
@@ -68,13 +67,22 @@ static AppAcousticImagingStatus_t App_AcousticNpu_ValidateConfig(const AppAcoust
     return status;
   }
 
-  active_bins = ((uint32_t)config->active_bin_end - (uint32_t)config->active_bin_start) + 1U;
   if ((config->mic_mode != APP_MIC_ARRAY_MODE_WIDE32_48K) ||
       (config->profile != APP_ACOUSTIC_IMAGING_PROFILE_BALANCED) ||
       (config->pair_count != APP_ACOUSTIC_IMAGING_WIDE32_BALANCED_PAIRS) ||
-      (active_bins != 40U))
+      (config->active_bin_count != 40U) ||
+      (config->active_bin_start != 3U) ||
+      (config->active_bin_end != 42U))
   {
     return APP_ACOUSTIC_IMAGING_UNSUPPORTED_MODE;
+  }
+
+  for (uint32_t i = 0U; i < config->active_bin_count; i++)
+  {
+    if (config->active_bins[i] != (uint16_t)(3U + i))
+    {
+      return APP_ACOUSTIC_IMAGING_UNSUPPORTED_MODE;
+    }
   }
 
   return APP_ACOUSTIC_IMAGING_OK;

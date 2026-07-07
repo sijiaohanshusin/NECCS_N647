@@ -26,6 +26,13 @@ static uint8_t App_AcousticImaging_IsValidProfile(AppAcousticImagingProfile_t pr
           (profile == APP_ACOUSTIC_IMAGING_PROFILE_QUALITY)) ? 1U : 0U;
 }
 
+static uint8_t App_AcousticImaging_IsValidRunMode(AppAcousticImagingRunMode_t mode)
+{
+  return ((mode == APP_ACOUSTIC_IMAGING_MODE_FAST) ||
+          (mode == APP_ACOUSTIC_IMAGING_MODE_STANDARD) ||
+          (mode == APP_ACOUSTIC_IMAGING_MODE_HIGH_QUALITY)) ? 1U : 0U;
+}
+
 static uint8_t App_AcousticImaging_IsValidAlgorithm(AppAcousticImagingAlgorithm_t algorithm)
 {
   return ((algorithm == APP_ACOUSTIC_IMAGING_ALGO_WIDE32_FAST_SRP) ||
@@ -39,6 +46,80 @@ static uint8_t App_AcousticImaging_IsValidPairSelect(AppAcousticImagingPairSelec
 {
   return ((pair_select == APP_ACOUSTIC_IMAGING_PAIR_SELECT_LONG_BASELINE) ||
           (pair_select == APP_ACOUSTIC_IMAGING_PAIR_SELECT_SHORT_BASELINE)) ? 1U : 0U;
+}
+
+static uint8_t App_AcousticImaging_IsValidBinPolicy(AppAcousticImagingBinPolicy_t policy)
+{
+  return ((policy == APP_ACOUSTIC_IMAGING_BIN_POLICY_PROFILE_DEFAULT) ||
+          (policy == APP_ACOUSTIC_IMAGING_BIN_POLICY_STANDARD_B12) ||
+          (policy == APP_ACOUSTIC_IMAGING_BIN_POLICY_STANDARD_B16) ||
+          (policy == APP_ACOUSTIC_IMAGING_BIN_POLICY_STANDARD_B24) ||
+          (policy == APP_ACOUSTIC_IMAGING_BIN_POLICY_QUALITY_B40)) ? 1U : 0U;
+}
+
+static void App_AcousticImaging_ClearBins(AppAcousticImagingConfig_t *config)
+{
+  if (config == NULL)
+  {
+    return;
+  }
+
+  config->active_bin_count = 0U;
+  for (uint32_t i = 0U; i < APP_ACOUSTIC_IMAGING_BIN_COUNT_MAX; i++)
+  {
+    config->active_bins[i] = 0U;
+  }
+}
+
+static AppAcousticImagingStatus_t App_AcousticImaging_SetContinuousBins(AppAcousticImagingConfig_t *config,
+                                                                        uint16_t bin_start,
+                                                                        uint16_t bin_end)
+{
+  uint32_t bin_count;
+
+  if ((config == NULL) || (bin_end < bin_start))
+  {
+    return APP_ACOUSTIC_IMAGING_INVALID_ARGUMENT;
+  }
+
+  bin_count = ((uint32_t)bin_end - (uint32_t)bin_start) + 1U;
+  if (bin_count > APP_ACOUSTIC_IMAGING_BIN_COUNT_MAX)
+  {
+    return APP_ACOUSTIC_IMAGING_CAPACITY_TOO_SMALL;
+  }
+
+  App_AcousticImaging_ClearBins(config);
+  config->active_bin_start = bin_start;
+  config->active_bin_end = bin_end;
+  config->active_bin_count = (uint16_t)bin_count;
+  for (uint32_t i = 0U; i < bin_count; i++)
+  {
+    config->active_bins[i] = (uint16_t)(bin_start + i);
+  }
+
+  return APP_ACOUSTIC_IMAGING_OK;
+}
+
+static AppAcousticImagingStatus_t App_AcousticImaging_SetSparseBins(AppAcousticImagingConfig_t *config,
+                                                                    const uint16_t *bins,
+                                                                    uint16_t bin_count)
+{
+  if ((config == NULL) || (bins == NULL) || (bin_count == 0U) ||
+      (bin_count > APP_ACOUSTIC_IMAGING_BIN_COUNT_MAX))
+  {
+    return APP_ACOUSTIC_IMAGING_INVALID_ARGUMENT;
+  }
+
+  App_AcousticImaging_ClearBins(config);
+  config->active_bin_count = bin_count;
+  config->active_bin_start = bins[0];
+  config->active_bin_end = bins[bin_count - 1U];
+  for (uint32_t i = 0U; i < bin_count; i++)
+  {
+    config->active_bins[i] = bins[i];
+  }
+
+  return APP_ACOUSTIC_IMAGING_OK;
 }
 
 static uint32_t App_AcousticImaging_ChannelMaskForCount(uint32_t channel_count)
@@ -384,6 +465,7 @@ AppAcousticImagingStatus_t App_AcousticImaging_GetDefaultConfig(AppMicArrayMode_
                                                                 AppAcousticImagingConfig_t *config)
 {
   uint16_t pair_count;
+  AppAcousticImagingStatus_t status;
 
   if ((config == NULL) ||
       (App_MicArray_ValidateMode(mode) == 0U) ||
@@ -400,15 +482,18 @@ AppAcousticImagingStatus_t App_AcousticImaging_GetDefaultConfig(AppMicArrayMode_
 
   config->mic_mode = mode;
   config->profile = profile;
+  config->run_mode = APP_ACOUSTIC_IMAGING_MODE_STANDARD;
   config->algorithm = APP_ACOUSTIC_IMAGING_ALGO_WIDE32_GENERAL_SRP;
   if (mode == APP_MIC_ARRAY_MODE_WIDE32_48K)
   {
     if (profile == APP_ACOUSTIC_IMAGING_PROFILE_FAST)
     {
+      config->run_mode = APP_ACOUSTIC_IMAGING_MODE_FAST;
       config->algorithm = APP_ACOUSTIC_IMAGING_ALGO_WIDE32_FAST_SRP;
     }
     else if (profile == APP_ACOUSTIC_IMAGING_PROFILE_QUALITY)
     {
+      config->run_mode = APP_ACOUSTIC_IMAGING_MODE_HIGH_QUALITY;
       config->algorithm = APP_ACOUSTIC_IMAGING_ALGO_WIDE32_QUALITY_SRP;
     }
   }
@@ -450,6 +535,13 @@ AppAcousticImagingStatus_t App_AcousticImaging_GetDefaultConfig(AppMicArrayMode_
     config->nfft = 512U;
     config->active_bin_start = 11U;
     config->active_bin_end = 107U;
+  }
+
+  status = App_AcousticImaging_SetBinPolicy(config,
+                                            APP_ACOUSTIC_IMAGING_BIN_POLICY_PROFILE_DEFAULT);
+  if (status != APP_ACOUSTIC_IMAGING_OK)
+  {
+    return status;
   }
 
   return App_AcousticImaging_ValidateConfig(config);
@@ -494,8 +586,14 @@ AppAcousticImagingStatus_t App_AcousticImaging_GetDefaultAlgorithmConfig(AppAcou
     {
       config->algorithm = APP_ACOUSTIC_IMAGING_ALGO_WIDE32_HF_HINT;
       config->pair_select = APP_ACOUSTIC_IMAGING_PAIR_SELECT_SHORT_BASELINE;
-      config->active_bin_start = APP_ACOUSTIC_IMAGING_HF_HINT_BIN_START;
-      config->active_bin_end = APP_ACOUSTIC_IMAGING_HF_HINT_BIN_END;
+      status = App_AcousticImaging_SetContinuousBins(config,
+                                                     APP_ACOUSTIC_IMAGING_HF_HINT_BIN_START,
+                                                     APP_ACOUSTIC_IMAGING_HF_HINT_BIN_END);
+      if (status != APP_ACOUSTIC_IMAGING_OK)
+      {
+        break;
+      }
+      config->bin_policy = APP_ACOUSTIC_IMAGING_BIN_POLICY_PROFILE_DEFAULT;
       config->smoothing_alpha = 0.20f;
       config->quality_min = 0.05f;
       status = App_AcousticImaging_ValidateConfig(config);
@@ -521,6 +619,56 @@ AppAcousticImagingStatus_t App_AcousticImaging_GetDefaultAlgorithmConfig(AppAcou
   return status;
 }
 
+AppAcousticImagingStatus_t App_AcousticImaging_GetDefaultRunModeConfig(AppAcousticImagingRunMode_t mode,
+                                                                       AppAcousticImagingConfig_t *config)
+{
+  AppAcousticImagingStatus_t status;
+  AppAcousticImagingProfile_t profile;
+  AppAcousticImagingBinPolicy_t bin_policy;
+
+  if ((config == NULL) || (App_AcousticImaging_IsValidRunMode(mode) == 0U))
+  {
+    return APP_ACOUSTIC_IMAGING_INVALID_ARGUMENT;
+  }
+
+  switch (mode)
+  {
+  case APP_ACOUSTIC_IMAGING_MODE_FAST:
+    profile = APP_ACOUSTIC_IMAGING_PROFILE_FAST;
+    bin_policy = APP_ACOUSTIC_IMAGING_BIN_POLICY_STANDARD_B12;
+    break;
+
+  case APP_ACOUSTIC_IMAGING_MODE_HIGH_QUALITY:
+    profile = APP_ACOUSTIC_IMAGING_PROFILE_QUALITY;
+    bin_policy = APP_ACOUSTIC_IMAGING_BIN_POLICY_QUALITY_B40;
+    break;
+
+  case APP_ACOUSTIC_IMAGING_MODE_STANDARD:
+  default:
+    profile = APP_ACOUSTIC_IMAGING_PROFILE_BALANCED;
+    bin_policy = APP_ACOUSTIC_IMAGING_BIN_POLICY_STANDARD_B16;
+    break;
+  }
+
+  status = App_AcousticImaging_GetDefaultConfig(APP_MIC_ARRAY_MODE_WIDE32_48K,
+                                                profile,
+                                                config);
+  if (status != APP_ACOUSTIC_IMAGING_OK)
+  {
+    return status;
+  }
+
+  config->run_mode = mode;
+  status = App_AcousticImaging_SetBinPolicy(config, bin_policy);
+  if (status != APP_ACOUSTIC_IMAGING_OK)
+  {
+    return status;
+  }
+
+  config->run_mode = mode;
+  return App_AcousticImaging_ValidateConfig(config);
+}
+
 AppAcousticImagingStatus_t App_AcousticImaging_ValidateConfig(const AppAcousticImagingConfig_t *config)
 {
   uint32_t max_pairs;
@@ -530,7 +678,9 @@ AppAcousticImagingStatus_t App_AcousticImaging_ValidateConfig(const AppAcousticI
       (App_MicArray_ValidateMode(config->mic_mode) == 0U) ||
       (App_AcousticImaging_IsValidAlgorithm(config->algorithm) == 0U) ||
       (App_AcousticImaging_IsValidProfile(config->profile) == 0U) ||
+      (App_AcousticImaging_IsValidRunMode(config->run_mode) == 0U) ||
       (App_AcousticImaging_IsValidPairSelect(config->pair_select) == 0U) ||
+      (App_AcousticImaging_IsValidBinPolicy(config->bin_policy) == 0U) ||
       (config->sample_rate_hz != App_MicArray_GetModeSampleRateHz(config->mic_mode)) ||
       (config->channel_count != App_MicArray_GetModeMicCount(config->mic_mode)) ||
       (config->channel_count == 0U) ||
@@ -538,6 +688,8 @@ AppAcousticImagingStatus_t App_AcousticImaging_ValidateConfig(const AppAcousticI
       (config->nfft < config->frame_len) ||
       (config->active_bin_end >= (config->nfft / 2U)) ||
       (config->active_bin_end < config->active_bin_start) ||
+      (config->active_bin_count == 0U) ||
+      (config->active_bin_count > APP_ACOUSTIC_IMAGING_BIN_COUNT_MAX) ||
       (config->coarse_grid_size != APP_ACOUSTIC_IMAGING_COARSE_GRID_SIZE) ||
       (config->coarse_angle_min_deg != -60) ||
       (config->coarse_angle_max_deg != 60) ||
@@ -571,6 +723,23 @@ AppAcousticImagingStatus_t App_AcousticImaging_ValidateConfig(const AppAcousticI
     return APP_ACOUSTIC_IMAGING_INVALID_ARGUMENT;
   }
 
+  for (uint32_t i = 0U; i < config->active_bin_count; i++)
+  {
+    uint16_t bin = config->active_bins[i];
+
+    if ((bin < config->active_bin_start) ||
+        (bin > config->active_bin_end) ||
+        (bin >= (config->nfft / 2U)))
+    {
+      return APP_ACOUSTIC_IMAGING_INVALID_ARGUMENT;
+    }
+
+    if ((i > 0U) && (bin <= config->active_bins[i - 1U]))
+    {
+      return APP_ACOUSTIC_IMAGING_INVALID_ARGUMENT;
+    }
+  }
+
   valid_channel_mask = App_AcousticImaging_ChannelMaskForCount(config->channel_count);
   if (((config->channel_mask & valid_channel_mask) == 0U) ||
       ((config->channel_mask & ~valid_channel_mask) != 0U) ||
@@ -597,6 +766,21 @@ const char *App_AcousticImaging_ProfileName(AppAcousticImagingProfile_t profile)
   }
 }
 
+const char *App_AcousticImaging_RunModeName(AppAcousticImagingRunMode_t mode)
+{
+  switch (mode)
+  {
+  case APP_ACOUSTIC_IMAGING_MODE_FAST:
+    return "FAST";
+  case APP_ACOUSTIC_IMAGING_MODE_STANDARD:
+    return "STANDARD";
+  case APP_ACOUSTIC_IMAGING_MODE_HIGH_QUALITY:
+    return "HIGH_QUALITY";
+  default:
+    return "UNKNOWN";
+  }
+}
+
 const char *App_AcousticImaging_AlgorithmName(AppAcousticImagingAlgorithm_t algorithm)
 {
   switch (algorithm)
@@ -614,6 +798,122 @@ const char *App_AcousticImaging_AlgorithmName(AppAcousticImagingAlgorithm_t algo
   default:
     return "UNKNOWN";
   }
+}
+
+const char *App_AcousticImaging_BinPolicyName(AppAcousticImagingBinPolicy_t policy)
+{
+  switch (policy)
+  {
+  case APP_ACOUSTIC_IMAGING_BIN_POLICY_PROFILE_DEFAULT:
+    return "PROFILE_DEFAULT";
+  case APP_ACOUSTIC_IMAGING_BIN_POLICY_STANDARD_B12:
+    return "STANDARD_B12";
+  case APP_ACOUSTIC_IMAGING_BIN_POLICY_STANDARD_B16:
+    return "STANDARD_B16";
+  case APP_ACOUSTIC_IMAGING_BIN_POLICY_STANDARD_B24:
+    return "STANDARD_B24";
+  case APP_ACOUSTIC_IMAGING_BIN_POLICY_QUALITY_B40:
+    return "QUALITY_B40";
+  default:
+    return "UNKNOWN";
+  }
+}
+
+AppAcousticImagingBinPolicy_t App_AcousticImaging_ResolveBinPolicy(AppAcousticImagingProfile_t profile,
+                                                                    AppAcousticImagingBinPolicy_t policy)
+{
+  if (policy != APP_ACOUSTIC_IMAGING_BIN_POLICY_PROFILE_DEFAULT)
+  {
+    return policy;
+  }
+
+  switch (profile)
+  {
+  case APP_ACOUSTIC_IMAGING_PROFILE_FAST:
+    return APP_ACOUSTIC_IMAGING_BIN_POLICY_STANDARD_B12;
+  case APP_ACOUSTIC_IMAGING_PROFILE_QUALITY:
+    return APP_ACOUSTIC_IMAGING_BIN_POLICY_QUALITY_B40;
+  case APP_ACOUSTIC_IMAGING_PROFILE_BALANCED:
+  default:
+    return APP_ACOUSTIC_IMAGING_BIN_POLICY_STANDARD_B16;
+  }
+}
+
+AppAcousticImagingStatus_t App_AcousticImaging_SetBinPolicy(AppAcousticImagingConfig_t *config,
+                                                            AppAcousticImagingBinPolicy_t policy)
+{
+  static const uint16_t standard_b12[] =
+  {
+    7U, 8U, 9U, 10U, 12U, 14U, 16U, 17U, 26U, 27U, 40U, 41U
+  };
+  static const uint16_t standard_b16[] =
+  {
+    6U, 7U, 8U, 9U, 10U, 12U, 14U, 16U,
+    17U, 20U, 23U, 26U, 27U, 38U, 40U, 41U
+  };
+  static const uint16_t standard_b24[] =
+  {
+    3U, 4U, 5U, 6U, 7U, 8U, 9U, 10U,
+    12U, 14U, 16U, 17U, 19U, 20U, 23U, 24U,
+    26U, 27U, 36U, 38U, 39U, 40U, 41U, 42U
+  };
+  AppAcousticImagingStatus_t status;
+
+  if ((config == NULL) ||
+      (App_AcousticImaging_IsValidProfile(config->profile) == 0U) ||
+      (App_AcousticImaging_IsValidBinPolicy(policy) == 0U))
+  {
+    return APP_ACOUSTIC_IMAGING_INVALID_ARGUMENT;
+  }
+
+  if (config->mic_mode != APP_MIC_ARRAY_MODE_WIDE32_48K)
+  {
+    config->bin_policy = APP_ACOUSTIC_IMAGING_BIN_POLICY_PROFILE_DEFAULT;
+    status = App_AcousticImaging_SetContinuousBins(config,
+                                                  config->active_bin_start,
+                                                  config->active_bin_end);
+  }
+  else
+  {
+    policy = App_AcousticImaging_ResolveBinPolicy(config->profile, policy);
+    config->bin_policy = policy;
+
+    switch (policy)
+    {
+    case APP_ACOUSTIC_IMAGING_BIN_POLICY_STANDARD_B12:
+      status = App_AcousticImaging_SetSparseBins(config,
+                                                 standard_b12,
+                                                 (uint16_t)(sizeof(standard_b12) / sizeof(standard_b12[0])));
+      break;
+
+    case APP_ACOUSTIC_IMAGING_BIN_POLICY_STANDARD_B16:
+      status = App_AcousticImaging_SetSparseBins(config,
+                                                 standard_b16,
+                                                 (uint16_t)(sizeof(standard_b16) / sizeof(standard_b16[0])));
+      break;
+
+    case APP_ACOUSTIC_IMAGING_BIN_POLICY_STANDARD_B24:
+      status = App_AcousticImaging_SetSparseBins(config,
+                                                 standard_b24,
+                                                 (uint16_t)(sizeof(standard_b24) / sizeof(standard_b24[0])));
+      break;
+
+    case APP_ACOUSTIC_IMAGING_BIN_POLICY_QUALITY_B40:
+      status = App_AcousticImaging_SetContinuousBins(config, 3U, 42U);
+      break;
+
+    default:
+      status = APP_ACOUSTIC_IMAGING_INVALID_ARGUMENT;
+      break;
+    }
+  }
+
+  if (status != APP_ACOUSTIC_IMAGING_OK)
+  {
+    return status;
+  }
+
+  return App_AcousticImaging_ValidateConfig(config);
 }
 
 AppAcousticImagingStatus_t App_AcousticImaging_SetTemperature(AppAcousticImagingConfig_t *config,

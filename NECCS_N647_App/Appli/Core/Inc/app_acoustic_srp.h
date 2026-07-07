@@ -69,6 +69,7 @@ typedef struct
   uint32_t processed_frames;
   uint32_t active_channel_mask;
   float weight_sum;
+  uint8_t active_bins_contiguous;
   uint8_t smoothing_valid;
   uint8_t initialized;
 } AppAcousticSrpContext_t;

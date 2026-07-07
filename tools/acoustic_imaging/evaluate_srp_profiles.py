@@ -132,7 +132,7 @@ def build_wide32_scenarios(channel_count: int, random_trials: int, rng: random.R
 
 
 def estimate_work_units(config, pair_count: int) -> int:
-    active_bins = config.active_bin_end - config.active_bin_start + 1
+    active_bins = len(config.active_bins)
     search_points = 81 + (config.fine_top_k * config.fine_grid_size * config.fine_grid_size)
     return pair_count * active_bins * search_points
 
@@ -175,7 +175,7 @@ def evaluate_algorithm(algorithm: str, all_mics, scenarios: list[AcousticScenari
         "profile": config.profile,
         "pair_count": len(pairs),
         "coverage_min": int(summary["coverage_min"]),
-        "active_bins": config.active_bin_end - config.active_bin_start + 1,
+        "active_bins": len(config.active_bins),
         "work_units": estimate_work_units(config, len(pairs)),
         "p50_error_deg": percentile(errors, 50.0),
         "p90_error_deg": percentile(errors, 90.0),
