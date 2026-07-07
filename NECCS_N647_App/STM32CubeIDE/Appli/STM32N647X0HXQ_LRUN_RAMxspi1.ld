@@ -38,8 +38,8 @@ ENTRY(Reset_Handler)
 _estack = ORIGIN(RAM) + LENGTH(RAM); /* end of "RAM" Ram type memory */
 _sstack = _estack - _Min_Stack_Size;
 
-_Min_Heap_Size = 0x200; /* required amount of heap */
-_Min_Stack_Size = 0x800; /* required amount of stack */
+_Min_Heap_Size = 0x200;  /* required amount of heap */
+_Min_Stack_Size = 0x1000; /* MSP: main() + nested ISRs (SAI/GPDMA/LTDC/GPU2D) */
 
 /* Memories definition */
 MEMORY
@@ -204,17 +204,6 @@ SECTIONS
     __bss_end__ = _ebss;
   } >RAM :data
 
-  /* User_heap_stack section, used to check that there is enough "RAM" Ram  type memory left */
-  ._user_heap_stack :
-  {
-    . = ALIGN(8);
-    PROVIDE ( end = . );
-    PROVIDE ( _end = . );
-    . = . + _Min_Heap_Size;
-    . = . + _Min_Stack_Size;
-    . = ALIGN(8);
-  } >RAM :data
-
   /*
    * RAM Debug is loaded by GDB before the application initializes external RAM.
    * Keep TouchGFX read-only assets in internal RAM for this linker script so
@@ -230,6 +219,22 @@ SECTIONS
     KEEP(*(TextFlashSection))
     . = ALIGN(32);
   } >RAM :text
+
+  /*
+   * User_heap_stack: MUST stay the last RAM section. The MSP runs down from
+   * _estack (top of RAM), so this reserve only protects the stack if nothing
+   * is placed above it. With it last, the linker overflow check guarantees
+   * at least _Min_Stack_Size of true MSP headroom below _estack.
+   */
+  ._user_heap_stack :
+  {
+    . = ALIGN(8);
+    PROVIDE ( end = . );
+    PROVIDE ( _end = . );
+    . = . + _Min_Heap_Size;
+    . = . + _Min_Stack_Size;
+    . = ALIGN(8);
+  } >RAM :data
 
   /* External RAM */
   .EXTRAM (NOLOAD) :

@@ -572,14 +572,14 @@ void TemplateView::setupBootPage()
     for (uint32_t i = 0U; i < BootRingCount; ++i)
     {
         bootRing[i].setBitmap(touchgfx::Bitmap(BITMAP_BOOT_RING_ID));
-        bootRing[i].setScalingAlgorithm(touchgfx::ScalableImage::NEAREST_NEIGHBOR);
+        bootRing[i].setScalingAlgorithm(touchgfx::ScalableImage::BILINEAR_INTERPOLATION);
         bootRing[i].setPosition(452, 130, 120, 120);
         bootRing[i].setAlpha(0U);
         add(bootRing[i]);
     }
 
     bootEmblem.setBitmap(touchgfx::Bitmap(BITMAP_BOOT_EMBLEM_ID));
-    bootEmblem.setPosition(428, 112, 168, 154);
+    bootEmblem.setPosition(440, 124, 144, 132);
     bootEmblem.setAlpha(0U);
     add(bootEmblem);
 
@@ -1133,6 +1133,9 @@ void TemplateView::refreshImagePage(const AppUiSnapshot& snapshot)
     quickLabel[1].setText(recording ? "停止" : "录像");
     quickLabel[1].setColors(recording ? ColorRed : ColorText, ColorBg, false);
 
+    static const char* paletteNames[3] = {"铁红", "彩虹", "对比"};
+    quickLabel[3].setText(paletteNames[(snapshot.heatPalette < 3U) ? snapshot.heatPalette : 0U]);
+
     quickLabel[4].setText(profileName(activeProfile));
 }
 
@@ -1373,7 +1376,7 @@ void TemplateView::onQuickPressed(const touchgfx::AbstractButton& source)
     }
     else if (&source == &quickTouch[3])
     {
-        /* palette cycling arrives with the heatmap v2 pass */
+        presenter->cycleHeatPalette();
     }
     else if (&source == &quickTouch[4])
     {

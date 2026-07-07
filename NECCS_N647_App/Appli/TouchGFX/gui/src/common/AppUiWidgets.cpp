@@ -425,29 +425,6 @@ touchgfx::Rect AppRgb565Preview::getSolidRect() const
 
 namespace
 {
-uint16_t toRgb565(touchgfx::colortype color)
-{
-    const uint8_t r = touchgfx::Color::getRed(color);
-    const uint8_t g = touchgfx::Color::getGreen(color);
-    const uint8_t b = touchgfx::Color::getBlue(color);
-    return static_cast<uint16_t>(((r & 0xF8U) << 8) | ((g & 0xFCU) << 3) | (b >> 3));
-}
-
-uint16_t blendRgb565(uint16_t background, uint16_t foreground, uint8_t alpha)
-{
-    const uint32_t inverse = 255U - alpha;
-    const uint32_t bgR = (background >> 11) & 0x1FU;
-    const uint32_t bgG = (background >> 5) & 0x3FU;
-    const uint32_t bgB = background & 0x1FU;
-    const uint32_t fgR = (foreground >> 11) & 0x1FU;
-    const uint32_t fgG = (foreground >> 5) & 0x3FU;
-    const uint32_t fgB = foreground & 0x1FU;
-    const uint32_t r = ((bgR * inverse) + (fgR * alpha)) / 255U;
-    const uint32_t g = ((bgG * inverse) + (fgG * alpha)) / 255U;
-    const uint32_t b = ((bgB * inverse) + (fgB * alpha)) / 255U;
-    return static_cast<uint16_t>((r << 11) | (g << 5) | b);
-}
-
 int32_t isqrt32(int32_t value)
 {
     if (value <= 0)

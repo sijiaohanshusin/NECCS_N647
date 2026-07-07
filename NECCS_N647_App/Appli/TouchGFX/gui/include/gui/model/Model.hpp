@@ -187,8 +187,11 @@ struct AppUiSnapshot
     uint8_t touchIc;
     uint8_t qualityPct;
     uint8_t contrastPct;
-    uint8_t peakIndex;
-    uint8_t heat[81];
+    uint8_t candCount;
+    int16_t candTheta[3];
+    int16_t candPhi[3];
+    uint8_t candStrength[3];
+    uint8_t heatPalette;
     uint8_t micLevel[32];
     int8_t micDbfs[32];
     int8_t pcmdRawPeakDbfs;
@@ -233,6 +236,7 @@ public:
 
     void setActiveScreen(uint8_t screen);
     void setActiveProfile(uint8_t profile);
+    void cycleHeatPalette();
     void requestScreenshot();
     void toggleRecording();
     void refreshMedia();

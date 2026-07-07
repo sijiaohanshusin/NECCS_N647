@@ -5,7 +5,8 @@ Outputs (into Appli/TouchGFX/assets/images/):
   boot_emblem.png  emblem-only artwork for the boot screen (wordmark is
                    rendered with fonts instead, for crispness and RAM budget)
   brand_mark.png   emblem-only small mark for the status bar
-  boot_ring.png    soft glowing ring, scaled by GPU2D for the sonar pulse
+  boot_ring.png    soft glowing ring; the boot page scales it with GPU2D to
+                   animate the expanding sonar pulse
 """
 import argparse
 import math
@@ -60,7 +61,7 @@ def main():
     mark.save(mark_path)
     print("brand_mark: %dx%d -> %s" % (mark.width, mark.height, mark_path))
 
-    # Sonar pulse ring: soft annulus, scaled at runtime.
+    # Sonar pulse ring: soft annulus, scaled at runtime by GPU2D.
     size = 120
     ring = Image.new("RGBA", (size, size), (61, 126, 255, 0))
     px = ring.load()

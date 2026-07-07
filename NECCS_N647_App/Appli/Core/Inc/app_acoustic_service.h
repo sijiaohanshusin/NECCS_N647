@@ -14,9 +14,15 @@ extern "C" {
 #include "app_acoustic_srp.h"
 #include "tx_api.h"
 
-#define APP_ACOUSTIC_SERVICE_HEAT_COUNT        APP_ACOUSTIC_IMAGING_COARSE_TOTAL
 #define APP_ACOUSTIC_SERVICE_CAMERA_HFOV_DEG  77.0f
 #define APP_ACOUSTIC_SERVICE_CAMERA_VFOV_DEG  61.1f
+
+/* Continuous heat field resampled from the SRP grid (camera aspect 4:3). */
+#define APP_ACOUSTIC_SERVICE_FIELD_W          48U
+#define APP_ACOUSTIC_SERVICE_FIELD_H          36U
+#define APP_ACOUSTIC_SERVICE_FIELD_COUNT \
+  (APP_ACOUSTIC_SERVICE_FIELD_W * APP_ACOUSTIC_SERVICE_FIELD_H)
+#define APP_ACOUSTIC_SERVICE_CAND_MAX         3U
 
 typedef enum
 {
@@ -56,8 +62,11 @@ typedef struct
   int16_t phi_deg;
   uint8_t quality_pct;
   uint8_t contrast_pct;
-  uint8_t peak_index;
-  uint8_t heat[APP_ACOUSTIC_SERVICE_HEAT_COUNT];
+  uint8_t cand_count;
+  int16_t cand_theta[APP_ACOUSTIC_SERVICE_CAND_MAX];
+  int16_t cand_phi[APP_ACOUSTIC_SERVICE_CAND_MAX];
+  uint8_t cand_strength[APP_ACOUSTIC_SERVICE_CAND_MAX];
+  uint8_t field[APP_ACOUSTIC_SERVICE_FIELD_COUNT];
   uint8_t perf_load[5];
   AppAcousticSrpPerf_t perf;
 } AppAcousticServiceSnapshot_t;

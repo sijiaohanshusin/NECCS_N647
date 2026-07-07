@@ -45,6 +45,7 @@ public:
 
     void selectScreen(uint8_t screen);
     void selectProfile(uint8_t profile);
+    void cycleHeatPalette();
     void requestScreenshot();
     void toggleRecording();
     void refreshMedia();

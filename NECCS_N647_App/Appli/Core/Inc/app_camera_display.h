@@ -33,6 +33,21 @@ extern "C" {
 #define APP_CAMERA_DISPLAY_COLOR_KEY_RGB888   0x00FF00FFUL
 #define APP_CAMERA_DISPLAY_COLOR_KEY_RGB565   0xF81FU
 
+/* Acoustic heat field pushed by the UI Model (camera-aspect, 48x36). */
+#define APP_CAMERA_DISPLAY_FIELD_W            48U
+#define APP_CAMERA_DISPLAY_FIELD_H            36U
+#define APP_CAMERA_DISPLAY_FIELD_COUNT \
+  (APP_CAMERA_DISPLAY_FIELD_W * APP_CAMERA_DISPLAY_FIELD_H)
+#define APP_CAMERA_DISPLAY_MARKER_MAX         3U
+
+/* Source marker in camera-frame pixel coordinates. */
+typedef struct
+{
+  uint16_t x;
+  uint16_t y;
+  uint8_t strength;
+} AppCameraDisplayMarker_t;
+
 typedef struct
 {
   uint32_t flags;
@@ -72,17 +87,21 @@ extern volatile uint32_t g_app_camera_ui_fb_addr;
 extern volatile uint32_t g_app_camera_ltdc_auto_disable_count;
 extern volatile uint32_t g_app_camera_overlay_update_count;
 extern volatile uint32_t g_app_camera_overlay_draw_count;
+extern volatile uint32_t g_app_camera_overlay_draw_cycles;
 extern volatile uint32_t g_app_camera_dma2d_copy_count;
 extern volatile uint32_t g_app_camera_dma2d_fallback_count;
 extern volatile uint32_t g_app_camera_dma2d_error_code;
 
 int32_t AppCameraDisplay_InitLayers(uint32_t initial_camera_addr);
 void AppCameraDisplay_SetVisible(uint8_t visible);
-void AppCameraDisplay_SetAcousticOverlay(const uint8_t *heat,
-                                         uint32_t count,
-                                         uint8_t peak_index,
-                                         uint8_t quality_pct,
-                                         uint8_t enabled);
+void AppCameraDisplay_SetAcousticField(const uint8_t *field,
+                                       uint32_t count,
+                                       const AppCameraDisplayMarker_t *markers,
+                                       uint8_t marker_count,
+                                       uint8_t quality_pct,
+                                       uint8_t enabled);
+void AppCameraDisplay_SetHeatPalette(uint8_t palette);
+uint8_t AppCameraDisplay_GetHeatPalette(void);
 void AppCameraDisplay_RequestSwap(uint32_t frame_addr);
 void AppCameraDisplay_RefreshColorKeyHole(int32_t x,
                                           int32_t y,

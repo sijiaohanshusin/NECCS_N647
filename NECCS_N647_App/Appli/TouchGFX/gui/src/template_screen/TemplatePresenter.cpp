@@ -37,6 +37,11 @@ void TemplatePresenter::selectProfile(uint8_t profile)
     model->setActiveProfile(profile);
 }
 
+void TemplatePresenter::cycleHeatPalette()
+{
+    model->cycleHeatPalette();
+}
+
 void TemplatePresenter::requestScreenshot()
 {
     model->requestScreenshot();

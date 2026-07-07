@@ -187,6 +187,13 @@ typedef enum
     APP_ACOUSTIC_IMAGING_PROFILE_QUALITY = 2
 } AppAcousticImagingProfile_t;
 
+#define APP_ACOUSTIC_SERVICE_FIELD_W 48U
+#define APP_ACOUSTIC_SERVICE_FIELD_H 36U
+#define APP_ACOUSTIC_SERVICE_FIELD_COUNT (APP_ACOUSTIC_SERVICE_FIELD_W * APP_ACOUSTIC_SERVICE_FIELD_H)
+#define APP_ACOUSTIC_SERVICE_CAND_MAX 3U
+#define APP_ACOUSTIC_SERVICE_CAMERA_HFOV_DEG 77.0f
+#define APP_ACOUSTIC_SERVICE_CAMERA_VFOV_DEG 61.1f
+
 typedef struct
 {
     uint8_t initialized;
@@ -210,8 +217,11 @@ typedef struct
     int16_t phi_deg;
     uint8_t quality_pct;
     uint8_t contrast_pct;
-    uint8_t peak_index;
-    uint8_t heat[81];
+    uint8_t cand_count;
+    int16_t cand_theta[APP_ACOUSTIC_SERVICE_CAND_MAX];
+    int16_t cand_phi[APP_ACOUSTIC_SERVICE_CAND_MAX];
+    uint8_t cand_strength[APP_ACOUSTIC_SERVICE_CAND_MAX];
+    uint8_t field[APP_ACOUSTIC_SERVICE_FIELD_COUNT];
     uint8_t perf_load[5];
 } AppAcousticServiceSnapshot_t;
 
@@ -229,17 +239,36 @@ static int32_t AppAcousticService_SetProfile(AppAcousticImagingProfile_t profile
     return 0;
 }
 
-static void AppCameraDisplay_SetAcousticOverlay(const uint8_t* heat,
-                                                uint32_t count,
-                                                uint8_t peakIndex,
-                                                uint8_t qualityPct,
-                                                uint8_t enabled)
+typedef struct
 {
-    (void)heat;
+    uint16_t x;
+    uint16_t y;
+    uint8_t strength;
+} AppCameraDisplayMarker_t;
+
+static void AppCameraDisplay_SetAcousticField(const uint8_t* field,
+                                              uint32_t count,
+                                              const AppCameraDisplayMarker_t* markers,
+                                              uint8_t markerCount,
+                                              uint8_t qualityPct,
+                                              uint8_t enabled)
+{
+    (void)field;
     (void)count;
-    (void)peakIndex;
+    (void)markers;
+    (void)markerCount;
     (void)qualityPct;
     (void)enabled;
+}
+
+static void AppCameraDisplay_SetHeatPalette(uint8_t palette)
+{
+    (void)palette;
+}
+
+static uint8_t AppCameraDisplay_GetHeatPalette(void)
+{
+    return 0U;
 }
 
 static void AppCameraDisplay_SetVisible(uint8_t visible)
@@ -352,7 +381,9 @@ void copyFileName(char* destination, const char* source, uint32_t length)
  * camera-display overlay policy. */
 void pollAcoustic(AppUiSnapshot& snapshot)
 {
-    AppAcousticServiceSnapshot_t acoustic;
+    /* ~1.9 KB with the heat field; static keeps it off the 4 KB TouchGFX
+     * thread stack (Model::tick only ever runs on that one thread). */
+    static AppAcousticServiceSnapshot_t acoustic;
     memset(&acoustic, 0, sizeof(acoustic));
     AppAcousticService_GetSnapshot(&acoustic);
     snapshot.acousticFlags = 0U;
@@ -388,7 +419,6 @@ void pollAcoustic(AppUiSnapshot& snapshot)
     snapshot.phiDeg = acoustic.phi_deg;
     snapshot.qualityPct = acoustic.quality_pct;
     snapshot.contrastPct = acoustic.contrast_pct;
-    snapshot.peakIndex = acoustic.peak_index;
     snapshot.srpMsX100 = acoustic.srp_ms_x100;
     snapshot.uiFpsX10 = acoustic.fps_x10;
     snapshot.srpPreprocessCycles = acoustic.perf.preprocess_cycles;
@@ -397,8 +427,16 @@ void pollAcoustic(AppUiSnapshot& snapshot)
     snapshot.srpCoarseCycles = acoustic.perf.coarse_cycles;
     snapshot.srpFineCycles = acoustic.perf.fine_cycles;
     snapshot.srpTotalCycles = acoustic.perf.total_cycles;
-    memcpy(snapshot.heat, acoustic.heat, sizeof(snapshot.heat));
     memcpy(snapshot.perfLoad, acoustic.perf_load, sizeof(snapshot.perfLoad));
+
+    snapshot.candCount = (acoustic.cand_count <= 3U) ? acoustic.cand_count : 3U;
+    for (uint32_t i = 0U; i < 3U; ++i)
+    {
+        snapshot.candTheta[i] = (i < snapshot.candCount) ? acoustic.cand_theta[i] : 0;
+        snapshot.candPhi[i] = (i < snapshot.candCount) ? acoustic.cand_phi[i] : 0;
+        snapshot.candStrength[i] = (i < snapshot.candCount) ? acoustic.cand_strength[i] : 0U;
+    }
+    snapshot.heatPalette = AppCameraDisplay_GetHeatPalette();
 
     const bool acousticOverlayHasFrame =
         (acoustic.output_seq != 0U) || (acoustic.processed_frames != 0U);
@@ -410,11 +448,36 @@ void pollAcoustic(AppUiSnapshot& snapshot)
         (((acoustic.valid != 0U) &&
           (acoustic.quality_pct >= APP_UI_ACOUSTIC_OVERLAY_MIN_QUALITY)) ||
          acousticOverlayPreview);
-    AppCameraDisplay_SetAcousticOverlay(snapshot.heat,
-                                        sizeof(snapshot.heat),
-                                        snapshot.peakIndex,
-                                        snapshot.qualityPct,
-                                        acousticOverlayEnabled ? 1U : 0U);
+
+    /* Candidate markers mapped from angles into camera-frame pixels. */
+    AppCameraDisplayMarker_t markers[3];
+    uint8_t markerCount = 0U;
+    for (uint32_t i = 0U; i < snapshot.candCount; ++i)
+    {
+        const float theta = static_cast<float>(acoustic.cand_theta[i]);
+        const float phi = static_cast<float>(acoustic.cand_phi[i]);
+        const float halfH = APP_ACOUSTIC_SERVICE_CAMERA_HFOV_DEG * 0.5f;
+        const float halfV = APP_ACOUSTIC_SERVICE_CAMERA_VFOV_DEG * 0.5f;
+
+        if ((theta < -halfH) || (theta > halfH) || (phi < -halfV) || (phi > halfV))
+        {
+            continue;
+        }
+
+        const float px = ((theta + halfH) * 640.0f) / APP_ACOUSTIC_SERVICE_CAMERA_HFOV_DEG;
+        const float py = ((halfV - phi) * 480.0f) / APP_ACOUSTIC_SERVICE_CAMERA_VFOV_DEG;
+        markers[markerCount].x = static_cast<uint16_t>((px < 0.0f) ? 0.0f : ((px > 639.0f) ? 639.0f : px));
+        markers[markerCount].y = static_cast<uint16_t>((py < 0.0f) ? 0.0f : ((py > 479.0f) ? 479.0f : py));
+        markers[markerCount].strength = acoustic.cand_strength[i];
+        ++markerCount;
+    }
+
+    AppCameraDisplay_SetAcousticField(acoustic.field,
+                                      sizeof(acoustic.field),
+                                      markers,
+                                      markerCount,
+                                      snapshot.qualityPct,
+                                      acousticOverlayEnabled ? 1U : 0U);
 }
 
 void pollPcmd(AppUiSnapshot& snapshot)
@@ -694,5 +757,16 @@ void Model::setActiveProfile(uint8_t profile)
         {
             modelListener->uiSnapshotUpdated(snapshot);
         }
+    }
+}
+
+void Model::cycleHeatPalette()
+{
+    const uint8_t next = static_cast<uint8_t>((AppCameraDisplay_GetHeatPalette() + 1U) % 3U);
+    AppCameraDisplay_SetHeatPalette(next);
+    snapshot.heatPalette = next;
+    if (modelListener != 0)
+    {
+        modelListener->uiSnapshotUpdated(snapshot);
     }
 }
