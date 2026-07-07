@@ -302,26 +302,11 @@ void copyFileName(char* destination, const char* source, uint32_t length)
     strncpy(destination, source, length - 1U);
     destination[length - 1U] = '\0';
 }
-}
 
-Model::Model()
-    : modelListener(0),
-      tickCount(0U)
+/* Poll the acoustic service, mirror it into the UI snapshot and drive the
+ * camera-display overlay policy. */
+void pollAcoustic(AppUiSnapshot& snapshot)
 {
-    memset(&snapshot, 0, sizeof(snapshot));
-    snapshot.activeScreen = APP_UI_SCREEN_IMAGE;
-    snapshot.activeProfile = APP_UI_PROFILE_BALANCED;
-    snapshot.uiFpsX10 = 200U;
-    snapshot.srpMsX100 = 640U;
-    copyFileName(snapshot.mediaLastFile, "", sizeof(snapshot.mediaLastFile));
-    copyFileName(snapshot.mediaSelectedFile, "", sizeof(snapshot.mediaSelectedFile));
-}
-
-void Model::tick()
-{
-    ++tickCount;
-    snapshot.frameSeq = tickCount;
-
     AppAcousticServiceSnapshot_t acoustic;
     memset(&acoustic, 0, sizeof(acoustic));
     AppAcousticService_GetSnapshot(&acoustic);
@@ -369,6 +354,7 @@ void Model::tick()
     snapshot.srpTotalCycles = acoustic.perf.total_cycles;
     memcpy(snapshot.heat, acoustic.heat, sizeof(snapshot.heat));
     memcpy(snapshot.perfLoad, acoustic.perf_load, sizeof(snapshot.perfLoad));
+
     const bool acousticOverlayHasFrame =
         (acoustic.output_seq != 0U) || (acoustic.processed_frames != 0U);
     const bool acousticOverlayPreview =
@@ -384,6 +370,10 @@ void Model::tick()
                                         snapshot.peakIndex,
                                         snapshot.qualityPct,
                                         acousticOverlayEnabled ? 1U : 0U);
+}
+
+void pollPcmd(AppUiSnapshot& snapshot)
+{
     memset(snapshot.micLevel, 0, sizeof(snapshot.micLevel));
     memset(snapshot.micDbfs, -90, sizeof(snapshot.micDbfs));
 
@@ -441,7 +431,10 @@ void Model::tick()
     snapshot.pcmdRawActiveSlotCount = pcmd.raw_active_slot_count;
     snapshot.pcmdRawPeakDbfs = pcmd.raw_peak_dbfs;
     snapshot.pcmdRawAvgDbfs = pcmd.raw_avg_dbfs;
+}
 
+void pollCameraDisplay(AppUiSnapshot& snapshot)
+{
     AppCameraDisplayStatus_t display;
     memset(&display, 0, sizeof(display));
     AppCameraDisplay_GetStatus(&display);
@@ -450,7 +443,10 @@ void Model::tick()
     snapshot.cameraDma2dCopyCount = display.dma2d_copy_count;
     snapshot.cameraDisplayErrorCount = display.error_count;
     snapshot.cameraDma2dErrorCode = display.dma2d_error_code;
+}
 
+void pollTouch(AppUiSnapshot& snapshot)
+{
     AppTouchSnapshot_t touch;
     memset(&touch, 0, sizeof(touch));
     AppTouch_GetSnapshot(&touch);
@@ -461,7 +457,10 @@ void Model::tick()
     snapshot.touchY = touch.y;
     snapshot.touchRawX = touch.raw_x;
     snapshot.touchRawY = touch.raw_y;
+}
 
+void pollPower(AppUiSnapshot& snapshot)
+{
     AppPowerSnapshot_t power;
     memset(&power, 0, sizeof(power));
     AppPower_GetSnapshot(&power);
@@ -473,7 +472,10 @@ void Model::tick()
     snapshot.powerPinState = power.pin_state;
     snapshot.batteryPct = power.battery_percent;
     snapshot.powerState = power.state;
+}
 
+void pollMedia(AppUiSnapshot& snapshot)
+{
     AppMediaStatus_t media;
     memset(&media, 0, sizeof(media));
     AppMedia_GetStatus(&media);
@@ -501,6 +503,33 @@ void Model::tick()
     snapshot.mediaPreviewHeight = static_cast<uint16_t>(preview.height);
     snapshot.mediaPreviewFrameIndex = preview.frame_index;
     snapshot.mediaPreviewFrameCount = preview.frame_count;
+}
+}
+
+Model::Model()
+    : modelListener(0),
+      tickCount(0U)
+{
+    memset(&snapshot, 0, sizeof(snapshot));
+    snapshot.activeScreen = APP_UI_SCREEN_IMAGE;
+    snapshot.activeProfile = APP_UI_PROFILE_BALANCED;
+    snapshot.uiFpsX10 = 200U;
+    snapshot.srpMsX100 = 640U;
+    copyFileName(snapshot.mediaLastFile, "", sizeof(snapshot.mediaLastFile));
+    copyFileName(snapshot.mediaSelectedFile, "", sizeof(snapshot.mediaSelectedFile));
+}
+
+void Model::tick()
+{
+    ++tickCount;
+    snapshot.frameSeq = tickCount;
+
+    pollAcoustic(snapshot);
+    pollPcmd(snapshot);
+    pollCameraDisplay(snapshot);
+    pollTouch(snapshot);
+    pollPower(snapshot);
+    pollMedia(snapshot);
 
     if ((modelListener != 0) && ((tickCount % 3U) == 0U))
     {

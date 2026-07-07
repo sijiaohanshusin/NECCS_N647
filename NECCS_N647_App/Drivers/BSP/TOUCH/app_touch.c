@@ -180,10 +180,14 @@ static uint8_t i2c_status_ok(HAL_StatusTypeDef status)
   return (status == HAL_OK) ? 1U : 0U;
 }
 
-static uint8_t touch_i2c_mem_write8(uint8_t address7,
-                                    uint8_t reg,
-                                    const uint8_t *data,
-                                    uint32_t len)
+/* Shared I2C2 memory transfer under the AppI2C2 lock; covers the four
+ * former write8/read8/write16/read16 variants. */
+static uint8_t touch_i2c_mem_xfer(uint8_t is_read,
+                                  uint8_t address7,
+                                  uint16_t reg,
+                                  uint16_t memadd_size,
+                                  uint8_t *data,
+                                  uint32_t len)
 {
   HAL_StatusTypeDef status;
 
@@ -199,16 +203,37 @@ static uint8_t touch_i2c_mem_write8(uint8_t address7,
     return 0U;
   }
 
-  status = HAL_I2C_Mem_Write(&hi2c2,
-                             (uint16_t)(address7 << 1),
-                             reg,
-                             I2C_MEMADD_SIZE_8BIT,
-                             (uint8_t *)data,
-                             (uint16_t)len,
-                             APP_TOUCH_I2C_TIMEOUT_MS);
+  if (is_read != 0U)
+  {
+    status = HAL_I2C_Mem_Read(&hi2c2,
+                              (uint16_t)(address7 << 1),
+                              reg,
+                              memadd_size,
+                              data,
+                              (uint16_t)len,
+                              APP_TOUCH_I2C_TIMEOUT_MS);
+  }
+  else
+  {
+    status = HAL_I2C_Mem_Write(&hi2c2,
+                               (uint16_t)(address7 << 1),
+                               reg,
+                               memadd_size,
+                               data,
+                               (uint16_t)len,
+                               APP_TOUCH_I2C_TIMEOUT_MS);
+  }
   AppI2C2_Unlock();
 
   return i2c_status_ok(status);
+}
+
+static uint8_t touch_i2c_mem_write8(uint8_t address7,
+                                    uint8_t reg,
+                                    const uint8_t *data,
+                                    uint32_t len)
+{
+  return touch_i2c_mem_xfer(0U, address7, reg, I2C_MEMADD_SIZE_8BIT, (uint8_t *)data, len);
 }
 
 static uint8_t touch_i2c_mem_read8(uint8_t address7,
@@ -216,30 +241,7 @@ static uint8_t touch_i2c_mem_read8(uint8_t address7,
                                    uint8_t *data,
                                    uint32_t len)
 {
-  HAL_StatusTypeDef status;
-
-  if ((data == NULL) || (len == 0U) || (len > 0xFFFFU))
-  {
-    g_touch.last_error = APP_TOUCH_ERR_BAD_ARGUMENT;
-    return 0U;
-  }
-
-  if (AppI2C2_Lock(APP_TOUCH_I2C_TIMEOUT_MS) == 0U)
-  {
-    g_touch.last_hal_status = (uint32_t)HAL_BUSY;
-    return 0U;
-  }
-
-  status = HAL_I2C_Mem_Read(&hi2c2,
-                            (uint16_t)(address7 << 1),
-                            reg,
-                            I2C_MEMADD_SIZE_8BIT,
-                            data,
-                            (uint16_t)len,
-                            APP_TOUCH_I2C_TIMEOUT_MS);
-  AppI2C2_Unlock();
-
-  return i2c_status_ok(status);
+  return touch_i2c_mem_xfer(1U, address7, reg, I2C_MEMADD_SIZE_8BIT, data, len);
 }
 
 static uint8_t touch_i2c_mem_write16(uint8_t address7,
@@ -247,30 +249,7 @@ static uint8_t touch_i2c_mem_write16(uint8_t address7,
                                      const uint8_t *data,
                                      uint32_t len)
 {
-  HAL_StatusTypeDef status;
-
-  if ((data == NULL) || (len == 0U) || (len > 0xFFFFU))
-  {
-    g_touch.last_error = APP_TOUCH_ERR_BAD_ARGUMENT;
-    return 0U;
-  }
-
-  if (AppI2C2_Lock(APP_TOUCH_I2C_TIMEOUT_MS) == 0U)
-  {
-    g_touch.last_hal_status = (uint32_t)HAL_BUSY;
-    return 0U;
-  }
-
-  status = HAL_I2C_Mem_Write(&hi2c2,
-                             (uint16_t)(address7 << 1),
-                             reg,
-                             I2C_MEMADD_SIZE_16BIT,
-                             (uint8_t *)data,
-                             (uint16_t)len,
-                             APP_TOUCH_I2C_TIMEOUT_MS);
-  AppI2C2_Unlock();
-
-  return i2c_status_ok(status);
+  return touch_i2c_mem_xfer(0U, address7, reg, I2C_MEMADD_SIZE_16BIT, (uint8_t *)data, len);
 }
 
 static uint8_t touch_i2c_mem_read16(uint8_t address7,
@@ -278,30 +257,7 @@ static uint8_t touch_i2c_mem_read16(uint8_t address7,
                                     uint8_t *data,
                                     uint32_t len)
 {
-  HAL_StatusTypeDef status;
-
-  if ((data == NULL) || (len == 0U) || (len > 0xFFFFU))
-  {
-    g_touch.last_error = APP_TOUCH_ERR_BAD_ARGUMENT;
-    return 0U;
-  }
-
-  if (AppI2C2_Lock(APP_TOUCH_I2C_TIMEOUT_MS) == 0U)
-  {
-    g_touch.last_hal_status = (uint32_t)HAL_BUSY;
-    return 0U;
-  }
-
-  status = HAL_I2C_Mem_Read(&hi2c2,
-                            (uint16_t)(address7 << 1),
-                            reg,
-                            I2C_MEMADD_SIZE_16BIT,
-                            data,
-                            (uint16_t)len,
-                            APP_TOUCH_I2C_TIMEOUT_MS);
-  AppI2C2_Unlock();
-
-  return i2c_status_ok(status);
+  return touch_i2c_mem_xfer(1U, address7, reg, I2C_MEMADD_SIZE_16BIT, data, len);
 }
 
 static uint8_t ft_write_reg(uint8_t reg, const uint8_t *data, uint32_t len)
