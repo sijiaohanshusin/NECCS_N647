@@ -172,6 +172,15 @@ SECTIONS
     __enoncacheable = .;  /* create symbol for end of section */
   } > RAM :data
 
+  .SRP_FAST (NOLOAD) :
+  {
+    . = ALIGN(32);
+    __ssrp_fast = .;
+    *(.SRP_FAST)
+    . = ALIGN(32);
+    __esrp_fast = .;
+  } > RAM :data
+
   .gnu.sgstubs :
   {
     . = ALIGN(4);
@@ -205,6 +214,22 @@ SECTIONS
     . = . + _Min_Stack_Size;
     . = ALIGN(8);
   } >RAM :data
+
+  /*
+   * RAM Debug is loaded by GDB before the application initializes external RAM.
+   * Keep TouchGFX read-only assets in internal RAM for this linker script so
+   * the debug load remains deterministic. The Release linker maps the same
+   * section to XIP ROM, which is the product memory placement.
+   */
+  .touchgfx_resources :
+  {
+    . = ALIGN(32);
+    KEEP(*(ExtFlashSection))
+    KEEP(*(FontFlashSection))
+    KEEP(*(FontSearchFlashSection))
+    KEEP(*(TextFlashSection))
+    . = ALIGN(32);
+  } >RAM :text
 
   /* External RAM */
   .EXTRAM (NOLOAD) :

@@ -164,6 +164,15 @@ SECTIONS
     __enoncacheable = .;  /* create symbol for end of section */
   } > RAM
 
+  .SRP_FAST (NOLOAD) :
+  {
+    . = ALIGN(32);
+    __ssrp_fast = .;
+    *(.SRP_FAST)
+    . = ALIGN(32);
+    __esrp_fast = .;
+  } > RAM
+
   .gnu.sgstubs :
   {
     . = ALIGN(4);
@@ -197,6 +206,16 @@ SECTIONS
     . = . + _Min_Stack_Size;
     . = ALIGN(8);
   } >RAM
+
+  .touchgfx_resources :
+  {
+    . = ALIGN(32);
+    KEEP(*(ExtFlashSection))
+    KEEP(*(FontFlashSection))
+    KEEP(*(FontSearchFlashSection))
+    KEEP(*(TextFlashSection))
+    . = ALIGN(32);
+  } >ROM
 
   /* External RAM */
   .EXTRAM (NOLOAD) :
