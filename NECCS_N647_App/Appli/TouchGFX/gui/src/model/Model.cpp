@@ -16,15 +16,8 @@
 #include <string.h>
 
 #if defined(STM32N647xx)
-extern "C"
-{
-#include "app_power.h"
-#include "app_media.h"
-#include "app_acoustic_service.h"
-#include "app_camera_display.h"
-#include "app_pcmd_capture.h"
-#include "TOUCH/app_touch.h"
-}
+/* The UI reaches the application layer exclusively through this facade. */
+#include "app_ui_bridge.h"
 #else
 typedef struct
 {
