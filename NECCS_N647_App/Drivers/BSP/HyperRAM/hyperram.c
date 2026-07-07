@@ -86,41 +86,6 @@ Error:
     return HyperRAM_ERROR;
 }
 
-HyperRAM_StatusTypeDef HyperRAM_DisableMemoryMappedMode(HyperRAM_ObjectTypeDef *HyperRAMObject)
-{
-    __DSB();
-    if (HAL_XSPI_Abort(HyperRAMObject->XSPIHandle) != HAL_OK)
-    {
-        goto Error;
-    }
-
-    return HyperRAM_OK;
-
-Error:
-    return HyperRAM_ERROR;
-}
-
-HyperRAM_StatusTypeDef HyperRAM_GetMemoryMappedAddress(HyperRAM_ObjectTypeDef *HyperRAMObject, uint32_t *BaseAddress)
-{
-    if (HyperRAMObject->XSPIHandle->Instance == XSPI1)
-    {
-        *BaseAddress = XSPI1_BASE;
-    }
-    else if (HyperRAMObject->XSPIHandle->Instance == XSPI2)
-    {
-        *BaseAddress = XSPI2_BASE;
-    }
-    else
-    {
-        goto Error;
-    }
-
-    return HyperRAM_OK;
-
-Error:
-    return HyperRAM_ERROR;
-}
-
 static HyperRAM_StatusTypeDef HyperRAM_ReadRegister(HyperRAM_ObjectTypeDef *HyperRAMObject, uint32_t Address, uint16_t *Data)
 {
     XSPI_HyperbusCmdTypeDef Cmd = HyperRAMObject->BaseCommand;

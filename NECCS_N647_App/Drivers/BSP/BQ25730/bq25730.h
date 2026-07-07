@@ -125,13 +125,6 @@ typedef struct
 
 typedef struct
 {
-    uint16_t charger_status;
-    uint16_t prochot_status;
-    uint32_t pin_state;
-} BQ25730_StatusSnapshotTypeDef;
-
-typedef struct
-{
     uint8_t vbat;
     uint8_t vsys;
     uint8_t ichg;
@@ -179,15 +172,6 @@ BQ25730_StatusTypeDef BQ25730_SetChargeCurrentMa(BQ25730_HandleTypeDef *handle,
 BQ25730_StatusTypeDef BQ25730_SetChargeVoltageMv(BQ25730_HandleTypeDef *handle,
                                                  uint32_t voltage_mv);
 
-BQ25730_StatusTypeDef BQ25730_SetInputCurrentLimitMa(BQ25730_HandleTypeDef *handle,
-                                                     uint32_t current_ma);
-
-BQ25730_StatusTypeDef BQ25730_SetOtgVoltageMv(BQ25730_HandleTypeDef *handle,
-                                              uint32_t voltage_mv);
-
-BQ25730_StatusTypeDef BQ25730_SetOtgCurrentMa(BQ25730_HandleTypeDef *handle,
-                                             uint32_t current_ma);
-
 BQ25730_StatusTypeDef BQ25730_SetOtgEnabled(BQ25730_HandleTypeDef *handle,
                                             uint8_t enabled);
 
@@ -211,9 +195,6 @@ BQ25730_StatusTypeDef BQ25730_ReadProchotStatus(BQ25730_HandleTypeDef *handle,
 
 BQ25730_StatusTypeDef BQ25730_ReadPins(BQ25730_HandleTypeDef *handle,
                                        uint32_t *pin_state);
-
-BQ25730_StatusTypeDef BQ25730_ReadStatusSnapshot(BQ25730_HandleTypeDef *handle,
-                                                 BQ25730_StatusSnapshotTypeDef *snapshot);
 
 #ifdef __cplusplus
 }

@@ -19,7 +19,4 @@ typedef struct
 
 HyperRAM_StatusTypeDef HyperRAM_Init(HyperRAM_ObjectTypeDef *HyperRAMObject, XSPI_HandleTypeDef *hxspi);
 HyperRAM_StatusTypeDef HyperRAM_EnableMemoryMappedMode(HyperRAM_ObjectTypeDef *HyperRAMObject);
-HyperRAM_StatusTypeDef HyperRAM_DisableMemoryMappedMode(HyperRAM_ObjectTypeDef *HyperRAMObject);
-HyperRAM_StatusTypeDef HyperRAM_GetMemoryMappedAddress(HyperRAM_ObjectTypeDef *HyperRAMObject, uint32_t *BaseAddress);
-
 #endif

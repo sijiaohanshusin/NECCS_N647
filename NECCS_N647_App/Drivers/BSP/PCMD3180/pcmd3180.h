@@ -279,11 +279,6 @@ PCMD3180_StatusTypeDef PCMD3180_Configure(PCMD3180_HandleTypeDef *handle,
 PCMD3180_StatusTypeDef PCMD3180_Activate(PCMD3180_HandleTypeDef *handle,
                                          const PCMD3180_ConfigTypeDef *config);
 
-PCMD3180_StatusTypeDef PCMD3180_ConfigureArrayMode(PCMD3180_HandleTypeDef *handles,
-                                                   const uint8_t *addresses,
-                                                   const PCMD3180_BusTypeDef *bus,
-                                                   PCMD3180_ArrayModeTypeDef mode);
-
 PCMD3180_StatusTypeDef PCMD3180_SelectPage(PCMD3180_HandleTypeDef *handle,
                                            uint8_t page);
 
@@ -297,8 +292,6 @@ PCMD3180_StatusTypeDef PCMD3180_ReadRegister(PCMD3180_HandleTypeDef *handle,
 
 PCMD3180_StatusTypeDef PCMD3180_ReadStatus(PCMD3180_HandleTypeDef *handle,
                                            PCMD3180_StatusSnapshotTypeDef *status);
-
-uint8_t PCMD3180_CountEnabledChannels(uint8_t channel_mask);
 
 uint8_t PCMD3180_GetSlotWidthBits(PCMD3180_SlotWidthTypeDef slot_width);
 

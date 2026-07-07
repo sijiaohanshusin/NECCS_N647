@@ -1,37 +1,20 @@
 /**
- ****************************************************************************************************
- * @file        rgblcd.c
- * @author      正点原子团队(ALIENTEK)
- * @version     V1.0
- * @date        2025-01-13
- * @brief       RGB LCD驱动代码
- * @license     Copyright (c) 2020-2032, 广州市星翼电子科技有限公司
- ****************************************************************************************************
- * @attention
- * 
- * 实验平台:正点原子 N647开发板
- * 在线视频:www.yuanzige.com
- * 技术论坛:www.openedv.com
- * 公司网址:www.alientek.com
- * 购买地址:openedv.taobao.com
- * 
- ****************************************************************************************************
- */
+  ******************************************************************************
+  * @file    rgblcd.c
+  * @brief   RGB LCD panel bring-up: panel detect, LTDC timing/clock, backlight.
+  *          Derived from the ALIENTEK N647 reference driver; the legacy
+  *          drawing/text API was removed because all rendering goes through
+  *          TouchGFX and the camera display path.
+  ******************************************************************************
+  */
 
 #include "rgblcd.h"
-#include "rgblcdfont.h"
 #include <stdint.h>
 
-/* LTDC句柄 */
 extern LTDC_HandleTypeDef hltdc;
-
-/* DMA2D句柄 */
 extern DMA2D_HandleTypeDef hdma2d;
 
-/* 绘制LCD时的背景色 */
-uint32_t g_back_color = 0xFFFF;
-
-/* RGB LCD重要参数 */
+/* RGB LCD panel parameters */
 _rgblcd_dev rgblcddev;
 
 #define RGBLCD_PANEL_ATK_MD0700R_1024600  0x7016U
@@ -49,17 +32,16 @@ volatile uint32_t g_rgblcd_ltdc_clock_divider = 0;
 volatile uint32_t g_rgblcd_ltdc_actual_clock = 0;
 volatile uint32_t g_rgblcd_ltdc_clk_status = 0;
 
-/* LTDC帧缓冲区 */
+/* Initial LTDC layer-0 framebuffer; TouchGFX takes over the layer afterwards. */
 uint16_t g_ltdc_lcd_framebuf[1280 * 800] __attribute__((section(".EXTRAM")));
 
-/* 函数声明 */
 static uint16_t rgblcd_panelid_read(void);
 static void rgblcd_use_default_panel(void);
 static uint8_t rgblcd_ltdc_clk_set(uint32_t clock);
-static uint32_t rgblcd_pow(uint8_t m, uint8_t n);
+static void rgblcd_display_dir(uint8_t dir);
+static void rgblcd_clear(uint16_t color);
 static void rgblcd_cache_clean_invalidate_region(void *addr, uint32_t bytes);
 static void rgblcd_cache_invalidate_region(void *addr, uint32_t bytes);
-static uint32_t rgblcd_dma2d_span_bytes(uint16_t psx, uint16_t pex, uint16_t pey, uint16_t psy);
 
 static void rgblcd_cache_clean_invalidate_region(void *addr, uint32_t bytes)
 {
@@ -91,19 +73,6 @@ static void rgblcd_cache_invalidate_region(void *addr, uint32_t bytes)
     __ISB();
 }
 
-static uint32_t rgblcd_dma2d_span_bytes(uint16_t psx, uint16_t pex, uint16_t pey, uint16_t psy)
-{
-    uint32_t width = (uint32_t)pex - (uint32_t)psx + 1U;
-    uint32_t rows = (uint32_t)pey - (uint32_t)psy + 1U;
-
-    return (((rows - 1U) * (uint32_t)rgblcddev.pwidth) + width) * (uint32_t)sizeof(uint16_t);
-}
-
-/**
- * @brief   初始化RGB LED
- * @param   无
- * @retval  无
- */
 void rgblcd_init(void)
 {
     LTDC_LayerCfgTypeDef ltdc_layer_cfg_struct = {0};
@@ -123,64 +92,58 @@ void rgblcd_init(void)
 #endif
     if (rgblcddev.id == 0x4342)         /* ATK-MD0430R-480272 */
     {
-        rgblcddev.pwidth = 480;         /* LCD面板的宽度 */
-        rgblcddev.pheight = 272;        /* LCD面板的高度 */
-        rgblcddev.hsw = 1;              /* 水平同步宽度 */
-        rgblcddev.vsw = 1;              /* 垂直同步宽度 */
-        rgblcddev.hbp = 40;             /* 水平后廊 */
-        rgblcddev.vbp = 8;              /* 垂直后廊 */
-        rgblcddev.hfp = 5;              /* 水平前廊 */
-        rgblcddev.vfp = 8;              /* 垂直前廊 */
+        rgblcddev.pwidth = 480;
+        rgblcddev.pheight = 272;
+        rgblcddev.hsw = 1;
+        rgblcddev.vsw = 1;
+        rgblcddev.hbp = 40;
+        rgblcddev.vbp = 8;
+        rgblcddev.hfp = 5;
+        rgblcddev.vfp = 8;
     }
     else if (rgblcddev.id == 0x7084)    /* ATK-MD0700R-800480 */
     {
-        rgblcddev.pwidth = 800;         /* LCD面板的宽度 */
-        rgblcddev.pheight = 480;        /* LCD面板的高度 */
-        rgblcddev.hsw = 1;              /* 水平同步宽度 */
-        rgblcddev.vsw = 1;              /* 垂直同步宽度 */
-        rgblcddev.hbp = 46;             /* 水平后廊 */
-        rgblcddev.vbp = 23;             /* 垂直后廊 */
-        rgblcddev.hfp = 210;            /* 水平前廊 */
-        rgblcddev.vfp = 22;             /* 垂直前廊 */
+        rgblcddev.pwidth = 800;
+        rgblcddev.pheight = 480;
+        rgblcddev.hsw = 1;
+        rgblcddev.vsw = 1;
+        rgblcddev.hbp = 46;
+        rgblcddev.vbp = 23;
+        rgblcddev.hfp = 210;
+        rgblcddev.vfp = 22;
     }
     else if (rgblcddev.id == 0x7016)    /* ATK-MD0700R-1024600 */
     {
-        rgblcddev.pwidth = 1024;        /* LCD面板的宽度 */
-        rgblcddev.pheight = 600;        /* LCD面板的高度 */
-        rgblcddev.hsw = 20;             /* 水平同步宽度 */
-        rgblcddev.vsw = 3;              /* 垂直同步宽度 */
-        rgblcddev.hbp = 140;            /* 水平后廊 */
-        rgblcddev.vbp = 20;             /* 垂直后廊 */
-        rgblcddev.hfp = 160;            /* 水平前廊 */
-        rgblcddev.vfp = 12;             /* 垂直前廊 */
-    }
-    else if (rgblcddev.id == 0x7018)    /* ATK-MD0700R-1280800 */
-    {
-        rgblcddev.pwidth = 1280;        /* LCD面板的宽度 */
-        rgblcddev.pheight = 800;        /* LCD面板的高度 */
-        /* 其他参数待定 */
+        rgblcddev.pwidth = 1024;
+        rgblcddev.pheight = 600;
+        rgblcddev.hsw = 20;
+        rgblcddev.vsw = 3;
+        rgblcddev.hbp = 140;
+        rgblcddev.vbp = 20;
+        rgblcddev.hfp = 160;
+        rgblcddev.vfp = 12;
     }
     else if (rgblcddev.id == 0x4384)    /* ATK-MD0430R-800480 */
     {
-        rgblcddev.pwidth = 800;         /* LCD面板的宽度 */
-        rgblcddev.pheight = 480;        /* LCD面板的高度 */
-        rgblcddev.hsw = 88;             /* 水平同步宽度 */
-        rgblcddev.vsw = 40;             /* 垂直同步宽度 */
-        rgblcddev.hbp = 48;             /* 水平后廊 */
-        rgblcddev.vbp = 32;             /* 垂直后廊 */
-        rgblcddev.hfp = 13;             /* 水平前廊 */
-        rgblcddev.vfp = 3;              /* 垂直前廊 */
+        rgblcddev.pwidth = 800;
+        rgblcddev.pheight = 480;
+        rgblcddev.hsw = 88;
+        rgblcddev.vsw = 40;
+        rgblcddev.hbp = 48;
+        rgblcddev.vbp = 32;
+        rgblcddev.hfp = 13;
+        rgblcddev.vfp = 3;
     }
     else if (rgblcddev.id == 0x1018)    /* ATK-MD1018R-1280800 */
     {
-        rgblcddev.pwidth = 1280;        /* LCD面板的宽度 */
-        rgblcddev.pheight = 800;        /* LCD面板的高度 */
-        rgblcddev.hsw = 140;            /* 水平同步宽度 */
-        rgblcddev.vsw = 10;             /* 垂直同步宽度 */
-        rgblcddev.hbp = 10;             /* 水平后廊 */
-        rgblcddev.vbp = 10;             /* 垂直后廊 */
-        rgblcddev.hfp = 10;             /* 水平前廊 */
-        rgblcddev.vfp = 3;              /* 垂直前廊 */
+        rgblcddev.pwidth = 1280;
+        rgblcddev.pheight = 800;
+        rgblcddev.hsw = 140;
+        rgblcddev.vsw = 10;
+        rgblcddev.hbp = 10;
+        rgblcddev.vbp = 10;
+        rgblcddev.hfp = 10;
+        rgblcddev.vfp = 3;
     }
 
     if ((rgblcddev.pwidth == 0U) || (rgblcddev.pheight == 0U) ||
@@ -204,27 +167,19 @@ void rgblcd_init(void)
     HAL_LTDC_DeInit(&hltdc);
     HAL_LTDC_Init(&hltdc);
 
-    if (rgblcddev.id == 0x4342) /* ATK-MD0430R-480272 */
+    if (rgblcddev.id == 0x4342)
     {
         rgblcd_ltdc_clk_set(9000000);   /* LTDC_CLK = 9MHz */
     }
-    else if (rgblcddev.id == 0x7084)    /* ATK-MD0700R-800480 */
+    else if ((rgblcddev.id == 0x7084) || (rgblcddev.id == 0x4384))
     {
         rgblcd_ltdc_clk_set(33333333);  /* LTDC_CLK = 33MHz */
     }
-    else if (rgblcddev.id == 0x7016)    /* ATK-MD0700R-1024600 */
+    else if (rgblcddev.id == 0x7016)
     {
         rgblcd_ltdc_clk_set(51200000);  /* LTDC_CLK ~= 51.2MHz */
     }
-    else if (rgblcddev.id == 0x7018)    /* ATK-MD0700R-1280800 */
-    {
-        /* 参数待定 */
-    }
-    else if (rgblcddev.id == 0x4384)    /* ATK-MD0430R-800480 */
-    {
-        rgblcd_ltdc_clk_set(33333333);  /* LTDC_CLK = 33MHz */
-    }
-    else if (rgblcddev.id == 0x1018)    /* ATK-MD1018R-1280800 */
+    else if (rgblcddev.id == 0x1018)
     {
         rgblcd_ltdc_clk_set(45000000);  /* LTDC_CLK = 45MHz */
     }
@@ -255,14 +210,7 @@ void rgblcd_init(void)
     g_rgblcd_init_stage = 5;
 }
 
-/**
- * @brief   设置RGB LCD显示方向
- * @param   dir: RGB LCD显示方向
- * @arg     0: 竖屏
- * @arg     1: 横屏
- * @retval  无
- */
-void rgblcd_display_dir(uint8_t dir)
+static void rgblcd_display_dir(uint8_t dir)
 {
     rgblcddev.dir = dir;
     if (rgblcddev.dir != 0)
@@ -277,601 +225,32 @@ void rgblcd_display_dir(uint8_t dir)
     }
 }
 
-/**
- * @brief   在RGB LCD指定区域内填充单个颜色
- * @param   sx: 指定区域的起始X坐标
- * @param   sy: 指定区域的起始Y坐标
- * @param   ex: 指定区域的结束X坐标
- * @param   ey: 指定区域的结束Y坐标
- * @param   color: 要填充的颜色
- * @retval  无
- */
-void rgblcd_fill(uint16_t sx, uint16_t sy, uint16_t ex, uint16_t ey, uint16_t color)
+/* DMA2D register-to-memory fill of the whole panel with one RGB565 color. */
+static void rgblcd_clear(uint16_t color)
 {
 #define CONVERTRGB5652ARGB8888(Color)                                               \
             ((((((((Color) >> (11U)) & 0x1FU) * 527U) + 23U) >> (6U)) << (16U)) |   \
             (((((((Color) >> (5U)) & 0x3FU) * 259U) + 33U) >> (6U)) << (8U)) |      \
             (((((Color) & 0x1FU) * 527U) + 23U) >> (6U)) | (0xFF000000U))
 
-    uint16_t psx;
-    uint16_t psy;
-    uint16_t pex;
-    uint16_t pey;
-
-    if ((rgblcddev.width == 0U) || (rgblcddev.height == 0U) ||
-        (rgblcddev.pwidth == 0U) || (rgblcddev.pheight == 0U) ||
-        (sx > ex) || (sy > ey))
+    if ((rgblcddev.pwidth == 0U) || (rgblcddev.pheight == 0U))
     {
         return;
     }
 
-    if (rgblcddev.dir == 0)
-    {
-        psx = sy;
-        psy = rgblcddev.pheight - ex - 1;
-        pex = ey;
-        pey = rgblcddev.pheight - sx - 1;
-    }
-    else
-    {
-        psx = sx;
-        psy = sy;
-        pex = ex;
-        pey = ey;
-    }
+    uint32_t cache_bytes = rgblcddev.pwidth * rgblcddev.pheight * (uint32_t)sizeof(uint16_t);
 
-    uint16_t *dst = &g_ltdc_lcd_framebuf[psy * rgblcddev.pwidth + psx];
-    uint32_t cache_bytes = rgblcd_dma2d_span_bytes(psx, pex, pey, psy);
-
-    rgblcd_cache_clean_invalidate_region(dst, cache_bytes);
+    rgblcd_cache_clean_invalidate_region(g_ltdc_lcd_framebuf, cache_bytes);
 
     hdma2d.Init.Mode = DMA2D_R2M;
-    hdma2d.Init.OutputOffset = rgblcddev.pwidth - (pex - psx + 1);
+    hdma2d.Init.OutputOffset = 0;
     HAL_DMA2D_Init(&hdma2d);
-    HAL_DMA2D_Start(&hdma2d, CONVERTRGB5652ARGB8888(color), (uint32_t)dst, pex - psx + 1, pey - psy + 1);
+    HAL_DMA2D_Start(&hdma2d, CONVERTRGB5652ARGB8888(color), (uint32_t)g_ltdc_lcd_framebuf,
+                    rgblcddev.pwidth, rgblcddev.pheight);
     HAL_DMA2D_PollForTransfer(&hdma2d, 50);
-    rgblcd_cache_invalidate_region(dst, cache_bytes);
+    rgblcd_cache_invalidate_region(g_ltdc_lcd_framebuf, cache_bytes);
 }
 
-/**
- * @brief   在RGB LCD指定区域内填充指定颜色块
- * @param   sx: 指定区域的起始X坐标
- * @param   sy: 指定区域的起始Y坐标
- * @param   ex: 指定区域的结束X坐标
- * @param   ey: 指定区域的结束Y坐标
- * @param   color: 指定颜色数组的首地址
- * @retval  无
- */
-void rgblcd_color_fill(uint16_t sx, uint16_t sy, uint16_t ex, uint16_t ey, uint16_t *color)
-{
-    uint16_t psx;
-    uint16_t psy;
-    uint16_t pex;
-    uint16_t pey;
-
-    if (rgblcddev.dir == 0)
-    {
-        psx = sy;
-        psy = rgblcddev.pheight - ex - 1;
-        pex = ey;
-        pey = rgblcddev.pheight - sx - 1;
-    }
-    else
-    {
-        psx = sx;
-        psy = sy;
-        pex = ex;
-        pey = ey;
-    }
-
-    uint16_t *dst = &g_ltdc_lcd_framebuf[psy * rgblcddev.pwidth + psx];
-    uint32_t cache_bytes = rgblcd_dma2d_span_bytes(psx, pex, pey, psy);
-
-    rgblcd_cache_clean_invalidate_region(dst, cache_bytes);
-
-    hdma2d.Init.Mode = DMA2D_M2M;
-    hdma2d.Init.OutputOffset = rgblcddev.pwidth - (pex - psx + 1);
-    HAL_DMA2D_Init(&hdma2d);
-    HAL_DMA2D_Start(&hdma2d, (uint32_t)color, (uint32_t)dst, pex - psx + 1, pey - psy + 1);
-    HAL_DMA2D_PollForTransfer(&hdma2d, 50);
-    rgblcd_cache_invalidate_region(dst, cache_bytes);
-}
-
-/**
- * @brief   RGB LCD画点
- * @param   x: 点的X坐标
- * @param   y: 点的Y坐标
- * @param   color: 点的颜色
- * @retval  无
- */
-void rgblcd_draw_point(uint16_t x, uint16_t y, uint16_t color)
-{
-    uint16_t px;
-    uint16_t py;
-
-    if (rgblcddev.dir == 0)
-    {
-        px = y;
-        py = rgblcddev.pheight - x - 1;
-    }
-    else
-    {
-        px = x;
-        py = y;
-    }
-
-    g_ltdc_lcd_framebuf[rgblcddev.pwidth * py + px] = color;
-    rgblcd_cache_clean_invalidate_region(&g_ltdc_lcd_framebuf[rgblcddev.pwidth * py + px], sizeof(uint16_t));
-}
-
-/**
- * @brief   RGB LCD读点
- * @param   x: 点的X坐标
- * @param   y: 点的Y坐标
- * @retval  点的颜色
- */
-uint16_t rgblcd_read_point(uint16_t x, uint16_t y)
-{
-    uint16_t px;
-    uint16_t py;
-
-    if (rgblcddev.dir == 0)
-    {
-        px = y;
-        py = rgblcddev.pheight - x - 1;
-    }
-    else
-    {
-        px = x;
-        py = y;
-    }
-
-    g_ltdc_lcd_framebuf[rgblcddev.pwidth * py + px] = g_ltdc_lcd_framebuf[rgblcddev.pwidth * py + px];
-
-    return g_ltdc_lcd_framebuf[rgblcddev.pwidth * py + px];
-}
-
-/**
- * @brief   RGB LCD清屏
- * @param   color: 清屏的颜色
- * @retval  无
- */
-void rgblcd_clear(uint16_t color)
-{
-    if ((rgblcddev.width == 0U) || (rgblcddev.height == 0U))
-    {
-        return;
-    }
-
-    rgblcd_fill(0, 0, rgblcddev.width - 1, rgblcddev.height - 1, color);
-}
-
-/**
- * @brief   RGB LCD画线
- * @param   x1   : 线的起始X坐标
- * @param   y1   : 线的起始Y坐标
- * @param   x2   : 线的结束X坐标
- * @param   y2   : 线的结束Y坐标
- * @param   color: 线的颜色
- * @retval  无
- */
-void rgblcd_draw_line(uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2, uint16_t color)
-{
-    uint16_t t;
-    int xerr = 0;
-    int yerr = 0;
-    int delta_x;
-    int delta_y;
-    int distance;
-    int incx;
-    int incy;
-    int row;
-    int col;
-
-    /* 计算坐标增量 */
-    delta_x = x2 - x1;
-    delta_y = y2 - y1;
-
-    row = x1;
-    col = y1;
-
-    /* 设置X单步方向 */
-    if (delta_x > 0)
-    {
-        incx = 1;
-    }
-    else if (delta_x == 0)
-    {
-        incx = 0;
-    }
-    else
-    {
-        incx = -1;
-        delta_x = -delta_x;
-    }
-
-    /* 设置Y单步方向 */
-    if (delta_y > 0)
-    {
-        incy = 1;
-    }
-    else if (delta_y == 0)
-    {
-        incy = 0;
-    }
-    else
-    {
-        incy = -1;
-        delta_y = -delta_y;
-    }
-
-    /* 选取基本增量坐标轴 */
-    if (delta_x > delta_y)
-    {
-        distance = delta_x;
-    }
-    else
-    {
-        distance = delta_y;
-    }
-
-    for (t = 0; t <= (distance + 1); t++)
-    {
-        rgblcd_draw_point(row, col, color);
-        xerr += delta_x;
-        yerr += delta_y;
-        if (xerr > distance)
-        {
-            xerr -= distance;
-            row += incx;
-        }
-        if (yerr > distance)
-        {
-            yerr -= distance;
-            col += incy;
-        }
-    }
-}
-
-/**
- * @brief   RGB LCD画水平线
- * @param   x    : 线的起始X坐标
- * @param   y    : 线的起始Y坐标
- * @param   len  : 线的长度
- * @param   color: 线的颜色
- * @retval  无
- */
-void rgblcd_draw_hline(uint16_t x, uint16_t y, uint16_t len, uint16_t color)
-{
-    if ((len == 0) || (x > rgblcddev.width) || (y > rgblcddev.height))
-    {
-        return;
-    }
-
-    rgblcd_fill(x, y, x + len - 1, y, color);
-}
-
-/**
- * @brief   RGB LCD画矩形
- * @param   x1   : 矩形左上角X坐标
- * @param   y1   : 矩形左上角Y坐标
- * @param   x2   : 矩形右下角X坐标
- * @param   y2   : 矩形右下角Y坐标
- * @param   color: 矩形的颜色
- * @retval  无
- */
-void rgblcd_draw_rectangle(uint16_t x1, uint16_t y1, uint16_t x2, uint16_t y2, uint16_t color)
-{
-    rgblcd_draw_line(x1, y1, x2, y1, color);
-    rgblcd_draw_line(x1, y1, x1, y2, color);
-    rgblcd_draw_line(x1, y2, x2, y2, color);
-    rgblcd_draw_line(x2, y1, x2, y2, color);
-}
-
-/**
- * @brief   RGB LCD画圆
- * @param   x0   : 圆心的X坐标
- * @param   y0   : 圆心的Y坐标
- * @param   r    : 圆的半径
- * @param   color: 圆的颜色
- * @retval  无
- */
-void rgblcd_draw_circle(uint16_t x0, uint16_t y0, uint8_t r, uint16_t color)
-{
-    int a;
-    int b;
-    int di;
-
-    a = 0;
-    b = r;
-    di = 3 - (r << 1);  /* 判断下个点位置的标志 */
-
-    while (a <= b)      /* 使用Bresenham算法画圆 */
-    {
-        rgblcd_draw_point(x0 + a, y0 - b, color);
-        rgblcd_draw_point(x0 + b, y0 - a, color);
-        rgblcd_draw_point(x0 + b, y0 + a, color);
-        rgblcd_draw_point(x0 + a, y0 + b, color);
-        rgblcd_draw_point(x0 - a, y0 + b, color);
-        rgblcd_draw_point(x0 - b, y0 + a, color);
-        rgblcd_draw_point(x0 - a, y0 - b, color);
-        rgblcd_draw_point(x0 - b, y0 - a, color);
-        a++;
-        if (di < 0)
-        {
-            di += 4 * a + 6;
-        }
-        else
-        {
-            di += 10 + 4 * (a - b);
-            b--;
-        }
-    }
-}
-
-/**
- * @brief   RGB LCD画实心圆
- * @param   x    : 圆心的X坐标
- * @param   y    : 圆心的Y坐标
- * @param   r    : 圆的半径
- * @param   color: 圆的颜色
- * @retval  无
- */
-void rgblcd_fill_circle(uint16_t x, uint16_t y, uint16_t r, uint16_t color)
-{
-    uint32_t i;
-    uint32_t imax;
-    uint32_t sqmax;
-    uint32_t xr;
-
-    imax = ((uint32_t)r * 707) / 1000 + 1;
-    sqmax = (uint32_t)r * (uint32_t)r + (uint32_t)r / 2;
-    xr = r;
-
-    rgblcd_draw_hline(x - r, y, 2 * r, color);
-    for (i = 1; i <= imax; i++)
-    {
-        if ((i * i + xr * xr) > sqmax)
-        {
-            if (xr > imax)
-            {
-                rgblcd_draw_hline (x - i + 1, y + xr, 2 * (i - 1), color);
-                rgblcd_draw_hline (x - i + 1, y - xr, 2 * (i - 1), color);
-            }
-            xr--;
-        }
-        rgblcd_draw_hline(x - xr, y + i, 2 * xr, color);
-        rgblcd_draw_hline(x - xr, y - i, 2 * xr, color);
-    }
-}
-
-/**
- * @brief   RGB LCD在指定位置显示一个字符
- * @param   x    : 指定位置的X坐标
- * @param   y    : 指定位置的Y坐标
- * @param   chr  : 要显示的字符，范围：' '~'~'
- * @param   size : 字体
- * @arg     12: 12*12 ASCII字符
- * @arg     16: 16*16 ASCII字符
- * @arg     24: 24*24 ASCII字符
- * @arg     32: 32*32 ASCII字符
- * @param   mode : 显示模式
- * @arg     0: 非叠加方式
- * @arg     1: 叠加方式
- * @param   color: 字符的颜色
- * @retval  无
- */
-void rgblcd_show_char(uint16_t x, uint16_t y, char chr, uint8_t size, uint8_t mode, uint16_t color)
-{
-    uint8_t csize;
-    uint8_t *pfont;
-    uint16_t y0;
-    uint8_t t;
-    uint8_t t1;
-    uint8_t temp;
-
-    csize = ((size >> 3) + (((size & 0x7) != 0) ? 1 : 0)) * (size >> 1);    /* 计算所选字体对应一个字符所占的字节数 */
-    chr -= ' ';                                                             /* 计算偏移后的值，因为字库是从空格开始的 */
-
-    switch (size)
-    {
-        case 12:                                                            /* 12*12 ASCII字符 */
-        {
-            pfont = (uint8_t *)asc2_1206[(uint8_t)chr];
-            break;
-        }
-        case 16:                                                            /* 16*16 ASCII字符 */
-        {
-            pfont = (uint8_t *)asc2_1608[(uint8_t)chr];
-            break;
-        }
-        case 24:                                                            /* 24*24 ASCII字符 */
-        {
-            pfont = (uint8_t *)asc2_2412[(uint8_t)chr];
-            break;
-        }
-        case 32:                                                            /* 32*32 ASCII字符 */
-        {
-            pfont = (uint8_t *)asc2_3216[(uint8_t)chr];
-            break;
-        }
-        default:
-        {
-            return;
-        }
-    }
-
-    y0 = y;
-    for (t = 0; t < csize; t++)
-    {
-        temp = pfont[t];                                                    /* 获取字符的点阵数据 */
-        for (t1 = 0; t1 < 8; t1++)                                          /* 遍历一个字节的8个位 */
-        {
-            if ((temp & 0x80) != 0)                                         /* 需要显示的有效点 */
-            {
-                rgblcd_draw_point(x, y, color);                             /* 以字符颜色绘制这个点 */
-            }
-            else if (mode == 0)                                             /* 不需要显示的无效点 */
-            {
-                rgblcd_draw_point(x, y, g_back_color);                      /* 绘制背景色 */
-            }
-
-            temp <<= 1;                                                     /* 移位至下一个位 */
-            y++;
-            if (y >= rgblcddev.height)                                      /* 判断Y坐标是否超出显示区域 */
-            {
-                return;
-            }
-            if ((y - y0) == size)                                           /* 本行绘制完成 */
-            {
-                y = y0;                                                     /* Y坐标复位 */
-                x++;                                                        /* 下一行 */
-                if (x >= rgblcddev.width)                                   /* 判断X坐标是否超出显示区域 */
-                {
-                    return;
-                }
-                break;
-            }
-        }
-    }
-}
-
-/**
- * @brief   RGB LCD显示len个数字
- * @param   x    : 起始X坐标
- * @param   y    : 起始Y坐标
- * @param   num  : 数值，范围：0~2^32
- * @param   len  : 显示数字的位数
- * @param   size : 字体
- * @arg     12: 12*12 ASCII字符
- * @arg     16: 16*16 ASCII字符
- * @arg     24: 24*24 ASCII字符
- * @arg     32: 32*32 ASCII字符
- * @param   color: 数字的颜色
- * @retval  无
- */
-void rgblcd_show_num(uint16_t x, uint16_t y, uint32_t num, uint8_t len, uint8_t size, uint16_t color)
-{
-    uint8_t t;
-    uint8_t temp;
-    uint8_t enshow = 0;
-
-    for (t = 0; t < len; t++)                                                   /* 按总显示位数循环 */
-    {
-        temp = (num / rgblcd_pow(10, len - t - 1)) % 10;                        /* 获取对应位的数字 */
-        if((enshow == 0) && (t < (len - 1)))                                    /* 没有使能显示，且还有位要显示 */
-        {
-            if (temp == 0)
-            {
-                rgblcd_show_char(x + (size >> 1) * t, y, ' ', size, 0, color);  /* 显示空格，占位 */
-                continue;                                                       /* 继续下一个位 */
-            }
-            else
-            {
-                enshow = 1;                                                     /* 使能显示 */
-            }
-        }
-
-        rgblcd_show_char(x + (size >> 1) * t, y, temp + '0', size, 0, color);   /* 显示字符 */
-    }
-}
-
-/**
- * @brief   RGB LCD扩展显示len个数字（显示高位0）
- * @param   x    : 起始X坐标
- * @param   y    : 起始Y坐标
- * @param   num  : 数值，范围：0~2^32
- * @param   len  : 显示数字的位数
- * @param   size : 字体
- * @arg     12: 12*12 ASCII字符
- * @arg     16: 16*16 ASCII字符
- * @arg     24: 24*24 ASCII字符
- * @arg     32: 32*32 ASCII字符
- * @param   mode : 显示模式
- * @arg     0: 非叠加方式
- * @arg     1: 叠加方式
- * @param   color: 数字的颜色
- * @retval  无
- */
-void rgblcd_show_xnum(uint16_t x, uint16_t y, uint32_t num, uint8_t len, uint8_t size, uint8_t mode, uint16_t color)
-{
-    uint8_t t;
-    uint8_t temp;
-    uint8_t enshow = 0;
-
-    for (t = 0; t < len; t++)                                                                   /* 按总显示位数循环 */
-    {
-        temp = (num / rgblcd_pow(10, len - t - 1)) % 10;                                        /* 获取对应位的数字 */
-        if((enshow == 0) && (t < (len - 1)))                                                    /* 没有使能显示，且还有位要显示 */
-        {
-            if (temp == 0)
-            {
-                if ((mode & 0x80) != 0)                                                         /* 高位需要填充0 */
-                {
-                    rgblcd_show_char(x + (size >> 1) * t, y, '0', size, mode & 0x01, color);    /* 显示0，占位 */
-                }
-                else
-                {
-                    rgblcd_show_char(x + (size >> 1) * t, y, ' ', size, mode & 0x01, color);    /* 显示空格，占位 */
-                }
-                continue;                                                                       /* 继续下一个位 */
-            }
-            else
-            {
-                enshow = 1;                                                                     /* 使能显示 */
-            }
-        }
-
-        rgblcd_show_char(x + (size >> 1) * t, y, temp + '0', size, mode & 0x01, color);        /* 显示字符 */
-    }
-}
-
-/**
- * @brief   RGB LCD显示字符串
- * @param   x     : 起始X坐标
- * @param   y     : 起始Y坐标
- * @param   width : 显示区域宽度
- * @param   height: 显示区域高度
- * @param   size  : 字体
- * @arg     12: 12*12 ASCII字符
- * @arg     16: 16*16 ASCII字符
- * @arg     24: 24*24 ASCII字符
- * @arg     32: 32*32 ASCII字符
- * @param   *p    : 字符串指针
- * @param   color : 字符串的颜色
- * @retval  无
- */
-void rgblcd_show_string(uint16_t x, uint16_t y, uint16_t width, uint16_t height, uint8_t size, char *p, uint16_t color)
-{
-    uint8_t x0;
-
-    x0 = x;
-    width += x;
-    height += y;
-    while ((*p <= '~') && (*p >= ' '))              /* 判断是否为非法字符 */
-    {
-        if (x >= width)                             /* 宽度越界 */
-        {
-            x = x0;                                 /* 换行 */
-            y += size;
-        }
-
-        if (y >= height)                            /* 高度越界 */
-        {
-            break;                                  /* 退出 */
-        }
-
-        rgblcd_show_char(x, y, *p, size, 0, color); /* 显示一个字符 */
-        x += (size >> 1);                           /* ASCII字符宽度为高度的一半 */
-        p++;
-    }
-}
-
-/**
- * @brief   读取RGB LCD ID
- * @param   无
- * @retval  RGB LCD ID
- */
 static uint16_t rgblcd_panelid_read(void)
 {
     GPIO_InitTypeDef gpio_init_struct = {0};
@@ -882,7 +261,7 @@ static uint16_t rgblcd_panelid_read(void)
         0x7018, /* ATK-MD0700R-1280800 */
         0x4384, /* ATK-MD0430R-800480 */
         0x1018, /* ATK-MD1018R-1280800 */
-        0xFFFF, /* Unknow */
+        0xFFFF, /* Unknown */
     };
     uint8_t id;
 
@@ -939,11 +318,8 @@ static void rgblcd_use_default_panel(void)
 }
 
 /**
- * @brief   LTDC时钟设置
- * @param   clock: LTDC时钟目标时钟
- * @retval  设置结果
- * @arg     0: 设置成功
- * @arg     1: 设置失败
+ * @brief   Configure the LTDC pixel clock from PLL1 through IC16.
+ * @retval  0: success, 1: failure (diagnostics in g_rgblcd_ltdc_* globals)
  */
 static uint8_t rgblcd_ltdc_clk_set(uint32_t clock)
 {
@@ -981,22 +357,4 @@ static uint8_t rgblcd_ltdc_clk_set(uint32_t clock)
     g_rgblcd_ltdc_clk_status = 0;
 
     return 0;
-}
-
-/**
- * @brief   RGB LCD平方函数
- * @param   m: 底数
- * @param   n: 指数
- * @retval  m^n
- */
-static uint32_t rgblcd_pow(uint8_t m, uint8_t n)
-{
-    uint32_t result = 1;
-
-    while (n--)
-    {
-        result *= m;
-    }
-
-    return result;
 }

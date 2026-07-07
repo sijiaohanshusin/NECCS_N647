@@ -84,29 +84,6 @@ private:
     Align alignment;
 };
 
-class AppHeatMap : public touchgfx::Widget
-{
-public:
-    AppHeatMap();
-
-    void setValues(const uint8_t* source, uint32_t count, uint8_t peakIndex);
-    void setColors(touchgfx::colortype background, touchgfx::colortype gridLine);
-    void setOverlayMode(bool enabled);
-
-    virtual void draw(const touchgfx::Rect& area) const;
-    virtual touchgfx::Rect getSolidRect() const;
-
-private:
-    static const uint32_t GridSize = 9U;
-    static const uint32_t CellCount = GridSize * GridSize;
-
-    uint8_t values[CellCount];
-    uint8_t peak;
-    touchgfx::colortype backgroundColor;
-    touchgfx::colortype gridColor;
-    bool overlayMode;
-};
-
 class AppRgb565Preview : public touchgfx::Widget
 {
 public:

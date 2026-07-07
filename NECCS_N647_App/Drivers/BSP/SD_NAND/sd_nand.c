@@ -8,7 +8,6 @@
 #include "sd_nand.h"
 
 #include <stdint.h>
-#include <string.h>
 
 extern SD_HandleTypeDef hsd2;
 
@@ -161,70 +160,7 @@ uint8_t sd_nand_write_disk(uint8_t *buf, uint32_t address, uint32_t count)
   return sd_nand_wait_transfer(SD_NAND_TIMEOUT_MS);
 }
 
-uint8_t sd_nand_read_block0(uint8_t *buf)
-{
-  return sd_nand_read_disk(buf, 0U, 1U);
-}
-
-uint8_t sd_nand_write_read_restore_test(uint32_t block_address)
-{
-  static uint8_t original[SD_NAND_BLOCK_SIZE] __attribute__((aligned(32)));
-  static uint8_t pattern[SD_NAND_BLOCK_SIZE] __attribute__((aligned(32)));
-  static uint8_t verify[SD_NAND_BLOCK_SIZE] __attribute__((aligned(32)));
-  uint8_t res;
-
-  res = sd_nand_init();
-  if (res != SD_NAND_OK)
-  {
-    return res;
-  }
-
-  if ((block_address == 0U) || (block_address >= sd_nand_get_block_count()))
-  {
-    return SD_NAND_ERROR_PARAM;
-  }
-
-  res = sd_nand_read_disk(original, block_address, 1U);
-  if (res != SD_NAND_OK)
-  {
-    return res;
-  }
-
-  for (uint32_t i = 0U; i < SD_NAND_BLOCK_SIZE; i++)
-  {
-    pattern[i] = (uint8_t)(0xA5U ^ (uint8_t)i);
-  }
-
-  res = sd_nand_write_disk(pattern, block_address, 1U);
-  if (res == SD_NAND_OK)
-  {
-    res = sd_nand_read_disk(verify, block_address, 1U);
-  }
-
-  if ((res == SD_NAND_OK) && (memcmp(pattern, verify, SD_NAND_BLOCK_SIZE) != 0))
-  {
-    res = SD_NAND_ERROR_VERIFY;
-  }
-
-  if (sd_nand_write_disk(original, block_address, 1U) != SD_NAND_OK)
-  {
-    return SD_NAND_ERROR;
-  }
-
-  return res;
-}
-
 uint32_t sd_nand_get_block_count(void)
 {
   return g_sd_nand_info_struct.LogBlockNbr;
-}
-
-uint32_t sd_nand_get_block_size(void)
-{
-  return g_sd_nand_info_struct.LogBlockSize;
-}
-
-uint64_t sd_nand_get_capacity_bytes(void)
-{
-  return ((uint64_t)g_sd_nand_info_struct.LogBlockNbr) * ((uint64_t)g_sd_nand_info_struct.LogBlockSize);
 }

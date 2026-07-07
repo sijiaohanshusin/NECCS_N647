@@ -135,7 +135,6 @@ private:
     AppTextLabel mediaLabel[MediaLabelCount];
     AppRgb565Preview mediaPreview;
 
-    AppHeatMap heatMap;
     AppTextLabel heatMetricLabel[4];
 
     touchgfx::BoxWithBorder micCell[MicCount];

@@ -281,63 +281,6 @@ BQ25730_StatusTypeDef BQ25730_SetChargeVoltageMv(BQ25730_HandleTypeDef *handle,
                                    (uint16_t)(code << BQ25730_CHARGE_VOLTAGE_SHIFT));
 }
 
-BQ25730_StatusTypeDef BQ25730_SetInputCurrentLimitMa(BQ25730_HandleTypeDef *handle,
-                                                     uint32_t current_ma)
-{
-    uint32_t code;
-    BQ25730_StatusTypeDef status;
-
-    status = BQ25730_CheckRange(current_ma, 0U, BQ25730_INPUT_CURRENT_MAX_MA, 1U);
-    if (status != BQ25730_OK)
-    {
-        return status;
-    }
-
-    code = current_ma / BQ25730_INPUT_CURRENT_STEP_MA;
-    return BQ25730_WriteRegister16(handle,
-                                   BQ25730_REG_IIN_HOST,
-                                   (uint16_t)(code << BQ25730_CURRENT_LIMIT_SHIFT));
-}
-
-BQ25730_StatusTypeDef BQ25730_SetOtgVoltageMv(BQ25730_HandleTypeDef *handle,
-                                              uint32_t voltage_mv)
-{
-    uint32_t code;
-    BQ25730_StatusTypeDef status;
-
-    status = BQ25730_CheckRange(voltage_mv,
-                                BQ25730_OTG_VOLTAGE_MIN_MV,
-                                BQ25730_OTG_VOLTAGE_MAX_MV,
-                                0U);
-    if (status != BQ25730_OK)
-    {
-        return status;
-    }
-
-    code = voltage_mv / BQ25730_OTG_VOLTAGE_STEP_MV;
-    return BQ25730_WriteRegister16(handle,
-                                   BQ25730_REG_OTG_VOLTAGE,
-                                   (uint16_t)(code << BQ25730_OTG_VOLTAGE_SHIFT));
-}
-
-BQ25730_StatusTypeDef BQ25730_SetOtgCurrentMa(BQ25730_HandleTypeDef *handle,
-                                             uint32_t current_ma)
-{
-    uint32_t code;
-    BQ25730_StatusTypeDef status;
-
-    status = BQ25730_CheckRange(current_ma, 0U, BQ25730_OTG_CURRENT_MAX_MA, 1U);
-    if (status != BQ25730_OK)
-    {
-        return status;
-    }
-
-    code = current_ma / BQ25730_OTG_CURRENT_STEP_MA;
-    return BQ25730_WriteRegister16(handle,
-                                   BQ25730_REG_OTG_CURRENT,
-                                   (uint16_t)(code << BQ25730_CURRENT_LIMIT_SHIFT));
-}
-
 BQ25730_StatusTypeDef BQ25730_SetOtgEnabled(BQ25730_HandleTypeDef *handle,
                                             uint8_t enabled)
 {
@@ -529,29 +472,4 @@ BQ25730_StatusTypeDef BQ25730_ReadPins(BQ25730_HandleTypeDef *handle,
     }
 
     return handle->bus.read_pins(handle->bus.context, pin_state);
-}
-
-BQ25730_StatusTypeDef BQ25730_ReadStatusSnapshot(BQ25730_HandleTypeDef *handle,
-                                                 BQ25730_StatusSnapshotTypeDef *snapshot)
-{
-    BQ25730_StatusTypeDef status;
-
-    if (snapshot == NULL)
-    {
-        return BQ25730_INVALID_ARGUMENT;
-    }
-
-    status = BQ25730_ReadChargerStatus(handle, &snapshot->charger_status);
-    if (status != BQ25730_OK)
-    {
-        return status;
-    }
-
-    status = BQ25730_ReadProchotStatus(handle, &snapshot->prochot_status);
-    if (status != BQ25730_OK)
-    {
-        return status;
-    }
-
-    return BQ25730_ReadPins(handle, &snapshot->pin_state);
 }

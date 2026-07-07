@@ -808,57 +808,6 @@ PCMD3180_StatusTypeDef PCMD3180_Activate(PCMD3180_HandleTypeDef *handle,
     return PCMD3180_OK;
 }
 
-PCMD3180_StatusTypeDef PCMD3180_ConfigureArrayMode(PCMD3180_HandleTypeDef *handles,
-                                                   const uint8_t *addresses,
-                                                   const PCMD3180_BusTypeDef *bus,
-                                                   PCMD3180_ArrayModeTypeDef mode)
-{
-    PCMD3180_ArrayModeConfigTypeDef mode_config;
-    PCMD3180_StatusTypeDef status;
-
-    if ((handles == NULL) || (bus == NULL))
-    {
-        return PCMD3180_INVALID_ARGUMENT;
-    }
-
-    status = PCMD3180_GetArrayModeConfig(mode, &mode_config);
-    if (status != PCMD3180_OK)
-    {
-        return status;
-    }
-
-    for (uint32_t index = 0U; index < PCMD3180_ARRAY_DEVICE_COUNT; index++)
-    {
-        PCMD3180_ConfigTypeDef device_config;
-        uint8_t address7 = mode_config.devices[index].address7;
-
-        if (addresses != NULL)
-        {
-            address7 = addresses[index];
-        }
-
-        status = PCMD3180_Init(&handles[index], bus, address7);
-        if (status != PCMD3180_OK)
-        {
-            return status;
-        }
-
-        status = PCMD3180_BuildDeviceConfig(&mode_config, index, &device_config);
-        if (status != PCMD3180_OK)
-        {
-            return status;
-        }
-
-        status = PCMD3180_Configure(&handles[index], &device_config);
-        if (status != PCMD3180_OK)
-        {
-            return status;
-        }
-    }
-
-    return PCMD3180_OK;
-}
-
 PCMD3180_StatusTypeDef PCMD3180_SelectPage(PCMD3180_HandleTypeDef *handle,
                                            uint8_t page)
 {
@@ -1082,19 +1031,6 @@ PCMD3180_StatusTypeDef PCMD3180_ReadStatus(PCMD3180_HandleTypeDef *handle,
     }
 
     return PCMD3180_ReadRegister(handle, PCMD3180_REG_GPI_MON, &status_snapshot->gpi_mon);
-}
-
-uint8_t PCMD3180_CountEnabledChannels(uint8_t channel_mask)
-{
-    uint8_t count = 0U;
-
-    while (channel_mask != 0U)
-    {
-        count = (uint8_t)(count + (channel_mask & 0x01U));
-        channel_mask = (uint8_t)(channel_mask >> 1U);
-    }
-
-    return count;
 }
 
 uint8_t PCMD3180_GetSlotWidthBits(PCMD3180_SlotWidthTypeDef slot_width)

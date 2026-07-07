@@ -423,27 +423,6 @@ void PCMD3180_HAL_BusInit(PCMD3180_BusTypeDef *bus,
     bus->set_shutdown = PCMD3180_HAL_SetShutdown;
 }
 
-void PCMD3180_HAL_BusInitSoftwareI2C(PCMD3180_BusTypeDef *bus,
-                                     PCMD3180_HAL_BusContextTypeDef *context)
-{
-    if (context != NULL)
-    {
-        context->use_software_i2c = 1U;
-        context->software_i2c_active = 0U;
-    }
-
-    if (bus == NULL)
-    {
-        return;
-    }
-
-    bus->context = context;
-    bus->write_reg = PCMD3180_HAL_WriteReg;
-    bus->read_reg = PCMD3180_HAL_ReadReg;
-    bus->delay_ms = PCMD3180_HAL_DelayMs;
-    bus->set_shutdown = PCMD3180_HAL_SetShutdown;
-}
-
 void PCMD3180_HAL_SetSoftwareI2CEnabled(PCMD3180_HAL_BusContextTypeDef *context,
                                         uint8_t enabled)
 {

@@ -316,11 +316,6 @@ void TemplateView::setupNavigation()
 
 void TemplateView::setupImagePage()
 {
-    heatMap.setPosition(CameraPreviewX, CameraPreviewY, CameraPreviewW, CameraPreviewH);
-    heatMap.setColors(ColorPanel, ColorLine);
-    heatMap.setOverlayMode(false);
-    heatMap.setVisible(false);
-
     const uint16_t hudIcons[4] = {
         BITMAP_UI_PEAK_ID,
         BITMAP_UI_PCMD_ID,
@@ -729,9 +724,6 @@ void TemplateView::refreshVisibility()
         imageProfileIcon[i].invalidate();
     }
 
-    heatMap.setOverlayMode(false);
-    heatMap.setVisible(false);
-    heatMap.invalidate();
     for (uint32_t i = 0U; i < 4U; ++i)
     {
         heatMetricLabel[i].setVisible(imageVisible);

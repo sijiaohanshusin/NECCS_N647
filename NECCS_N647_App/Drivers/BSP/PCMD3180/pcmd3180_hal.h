@@ -36,9 +36,6 @@ typedef struct
 void PCMD3180_HAL_BusInit(PCMD3180_BusTypeDef *bus,
                           PCMD3180_HAL_BusContextTypeDef *context);
 
-void PCMD3180_HAL_BusInitSoftwareI2C(PCMD3180_BusTypeDef *bus,
-                                     PCMD3180_HAL_BusContextTypeDef *context);
-
 void PCMD3180_HAL_SetSoftwareI2CEnabled(PCMD3180_HAL_BusContextTypeDef *context,
                                         uint8_t enabled);
 

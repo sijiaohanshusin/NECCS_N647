@@ -33,11 +33,7 @@ uint8_t sd_nand_is_inserted(void);
 uint8_t sd_nand_init(void);
 uint8_t sd_nand_read_disk(uint8_t *buf, uint32_t address, uint32_t count);
 uint8_t sd_nand_write_disk(uint8_t *buf, uint32_t address, uint32_t count);
-uint8_t sd_nand_read_block0(uint8_t *buf);
-uint8_t sd_nand_write_read_restore_test(uint32_t block_address);
 uint32_t sd_nand_get_block_count(void);
-uint32_t sd_nand_get_block_size(void);
-uint64_t sd_nand_get_capacity_bytes(void);
 
 #ifdef __cplusplus
 }
