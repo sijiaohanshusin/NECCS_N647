@@ -6,24 +6,26 @@
 #include <touchgfx/hal/Types.hpp>
 #include <touchgfx/Bitmap.hpp>
 
-const uint16_t BITMAP_UI_BATTERY_ID = 0;
-const uint16_t BITMAP_UI_CAMERA_ID = 1;
-const uint16_t BITMAP_UI_FAST_ID = 2;
-const uint16_t BITMAP_UI_IMAGE_ID = 3;
-const uint16_t BITMAP_UI_LOGO_ID = 4;
-const uint16_t BITMAP_UI_MEDIA_ID = 5;
-const uint16_t BITMAP_UI_MIC_ID = 6;
-const uint16_t BITMAP_UI_PCMD_ID = 7;
-const uint16_t BITMAP_UI_PEAK_ID = 8;
-const uint16_t BITMAP_UI_PERF_ID = 9;
-const uint16_t BITMAP_UI_QUALITY_ID = 10;
-const uint16_t BITMAP_UI_RECORD_ID = 11;
-const uint16_t BITMAP_UI_SD_ID = 12;
-const uint16_t BITMAP_UI_SETTINGS_ID = 13;
-const uint16_t BITMAP_UI_SNAPSHOT_ID = 14;
-const uint16_t BITMAP_UI_STANDARD_ID = 15;
-const uint16_t BITMAP_UI_TOUCH_ID = 16;
-const uint16_t BITMAP_UI_WARN_ID = 17;
+const uint16_t BITMAP_BOOT_EMBLEM_ID = 0;
+const uint16_t BITMAP_BRAND_MARK_ID = 1;
+const uint16_t BITMAP_UI_BATTERY_ID = 2;
+const uint16_t BITMAP_UI_CAMERA_ID = 3;
+const uint16_t BITMAP_UI_FAST_ID = 4;
+const uint16_t BITMAP_UI_IMAGE_ID = 5;
+const uint16_t BITMAP_UI_LOGO_ID = 6;
+const uint16_t BITMAP_UI_MEDIA_ID = 7;
+const uint16_t BITMAP_UI_MIC_ID = 8;
+const uint16_t BITMAP_UI_PCMD_ID = 9;
+const uint16_t BITMAP_UI_PEAK_ID = 10;
+const uint16_t BITMAP_UI_PERF_ID = 11;
+const uint16_t BITMAP_UI_QUALITY_ID = 12;
+const uint16_t BITMAP_UI_RECORD_ID = 13;
+const uint16_t BITMAP_UI_SD_ID = 14;
+const uint16_t BITMAP_UI_SETTINGS_ID = 15;
+const uint16_t BITMAP_UI_SNAPSHOT_ID = 16;
+const uint16_t BITMAP_UI_STANDARD_ID = 17;
+const uint16_t BITMAP_UI_TOUCH_ID = 18;
+const uint16_t BITMAP_UI_WARN_ID = 19;
 
 namespace BitmapDatabase
 {

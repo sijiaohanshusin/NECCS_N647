@@ -4,12 +4,67 @@
 
 FONT_TABLE_LOCATION_FLASH_PRAGMA
 KEEP extern const touchgfx::GlyphNode glyphs_NotoSansSC_VF_30_4bpp[] FONT_TABLE_LOCATION_FLASH_ATTRIBUTE = {
-    {     0, 0x002E,   3,   3,   3,   2,   7,   0,   0, 0x00 },
-    {     6, 0x003F,  11,  22,  22,   1,  13,   0,   0, 0x00 },
+    {     0, 0x0020,   0,   0,   0,   0,   7,   0,   0, 0x00 },
+    {     0, 0x0025,  24,  22,  22,   1,  26,   0,   0, 0x00 },
+    {   264, 0x002B,  14,  15,  18,   1,  16,   0,   0, 0x00 },
+    {   369, 0x002C,   4,   8,   3,   1,   7,   0,   0, 0x00 },
+    {   385, 0x002D,   8,   2,   9,   1,  10,   0,   0, 0x00 },
+    {   393, 0x002E,   3,   3,   3,   2,   7,   0,   0, 0x00 },
+    {   399, 0x002F,  12,  29,  23,   0,  12,   0,   0, 0x00 },
+    {   573, 0x0030,  13,  22,  22,   1,  16,   0,   0, 0x00 },
+    {   727, 0x0031,  12,  22,  22,   2,  16,   0,   0, 0x00 },
+    {   859, 0x0032,  14,  22,  22,   1,  16,   0,   0, 0x00 },
+    {  1013, 0x0033,  13,  22,  22,   1,  16,   0,   0, 0x00 },
+    {  1167, 0x0034,  15,  22,  22,   0,  16,   0,   0, 0x00 },
+    {  1343, 0x0035,  13,  22,  22,   1,  16,   0,   0, 0x00 },
+    {  1497, 0x0036,  14,  22,  22,   1,  16,   0,   0, 0x00 },
+    {  1651, 0x0037,  14,  22,  22,   1,  16,   0,   0, 0x00 },
+    {  1805, 0x0038,  14,  22,  22,   1,  16,   0,   0, 0x00 },
+    {  1959, 0x0039,  13,  22,  22,   1,  16,   0,   0, 0x00 },
+    {  2113, 0x003A,   3,  15,  15,   2,   7,   0,   0, 0x00 },
+    {  2143, 0x003F,  11,  22,  22,   1,  13,   0,   0, 0x00 },
+    {  2275, 0x0041,  17,  22,  22,   0,  17,   0,   0, 0x00 },
+    {  2473, 0x0042,  15,  22,  22,   3,  19,   0,   0, 0x00 },
+    {  2649, 0x0043,  17,  22,  22,   1,  19,   0,   0, 0x00 },
+    {  2847, 0x0044,  15,  22,  22,   3,  20,   0,   0, 0x00 },
+    {  3023, 0x0045,  13,  22,  22,   3,  17,   0,   0, 0x00 },
+    {  3177, 0x0046,  12,  22,  22,   3,  16,   0,   0, 0x00 },
+    {  3309, 0x0047,  17,  22,  22,   1,  20,   0,   0, 0x00 },
+    {  3507, 0x0048,  15,  22,  22,   3,  21,   0,   0, 0x00 },
+    {  3683, 0x0049,   2,  22,  22,   3,   8,   0,   0, 0x00 },
+    {  3705, 0x004A,  11,  22,  22,   1,  15,   0,   0, 0x00 },
+    {  3837, 0x004B,  15,  22,  22,   3,  18,   0,   0, 0x00 },
+    {  4013, 0x004C,  12,  22,  22,   3,  15,   0,   0, 0x00 },
+    {  4145, 0x004D,  17,  22,  22,   3,  23,   0,   0, 0x00 },
+    {  4343, 0x004E,  15,  22,  22,   3,  21,   0,   0, 0x00 },
+    {  4519, 0x004F,  19,  22,  22,   1,  21,   0,   0, 0x00 },
+    {  4739, 0x0050,  14,  22,  22,   3,  18,   0,   0, 0x00 },
+    {  4893, 0x0051,  19,  27,  22,   1,  21,   0,   0, 0x00 },
+    {  5163, 0x0052,  14,  22,  22,   3,  18,   0,   0, 0x00 },
+    {  5317, 0x0053,  15,  22,  22,   1,  17,   0,   0, 0x00 },
+    {  5493, 0x0054,  16,  22,  22,   1,  17,   0,   0, 0x00 },
+    {  5669, 0x0055,  15,  22,  22,   3,  21,   0,   0, 0x00 },
+    {  5845, 0x0056,  16,  22,  22,   0,  16,   0,   0, 0x00 },
+    {  6021, 0x0057,  24,  22,  22,   1,  25,   0,   0, 0x00 },
+    {  6285, 0x0058,  15,  22,  22,   0,  16,   0,   0, 0x00 },
+    {  6461, 0x0059,  15,  22,  22,   0,  14,   0,   0, 0x00 },
+    {  6637, 0x005A,  16,  22,  22,   1,  18,   0,   0, 0x00 },
+    {  6813, 0x00B0,   8,   8,  23,   1,  10,   0,   0, 0x00 },
+    {     0, 0x4EEA,  29,  28,  25,   0,  30,   0,   0, 0x00 },
+    {   420, 0x4F53,  28,  27,  25,   1,  30,   0,   0, 0x00 },
     {     0, 0x50CF,  28,  27,  25,   1,  30,   0,   0, 0x00 },
+    {   378, 0x5217,  26,  28,  25,   2,  30,   0,   0, 0x00 },
+    {   742, 0x53C2,  28,  28,  25,   1,  30,   0,   0, 0x00 },
     {     0, 0x58F0,  27,  27,  25,   1,  30,   0,   0, 0x00 },
-    {   378, 0x5B66,  27,  28,  26,   2,  30,   0,   0, 0x00 },
-    {     0, 0x6210,  28,  28,  25,   1,  30,   0,   0, 0x00 }
+    {   378, 0x5A92,  28,  28,  26,   1,  30,   0,   0, 0x00 },
+    {   770, 0x5B66,  27,  28,  26,   2,  30,   0,   0, 0x00 },
+    {     0, 0x6210,  28,  28,  25,   1,  30,   0,   0, 0x00 },
+    {   392, 0x6570,  28,  27,  25,   1,  30,   0,   0, 0x00 },
+    {     0, 0x7CFB,  25,  27,  25,   3,  30,   0,   0, 0x00 },
+    {   351, 0x7EDF,  28,  27,  25,   1,  30,   0,   0, 0x00 },
+    {     0, 0x8C31,  28,  27,  25,   1,  30,   0,   0, 0x00 },
+    {     0, 0x9635,  26,  27,  25,   3,  30,   0,   0, 0x00 },
+    {     0, 0x9891,  28,  29,  26,   1,  30,   0,   0, 0x00 }
 };
 
 // NotoSansSC_VF_30_4bpp
@@ -18,11 +73,21 @@ KEEP extern const touchgfx::GlyphNode glyphs_NotoSansSC_VF_30_4bpp[] FONT_TABLE_
 FONT_GLYPH_LOCATION_FLASH_PRAGMA
 KEEP extern const uint8_t unicodes_NotoSansSC_VF_30_4bpp_0[] FONT_GLYPH_LOCATION_FLASH_ATTRIBUTE;
 FONT_GLYPH_LOCATION_FLASH_PRAGMA
+KEEP extern const uint8_t unicodes_NotoSansSC_VF_30_4bpp_9[] FONT_GLYPH_LOCATION_FLASH_ATTRIBUTE;
+FONT_GLYPH_LOCATION_FLASH_PRAGMA
 KEEP extern const uint8_t unicodes_NotoSansSC_VF_30_4bpp_10[] FONT_GLYPH_LOCATION_FLASH_ATTRIBUTE;
 FONT_GLYPH_LOCATION_FLASH_PRAGMA
 KEEP extern const uint8_t unicodes_NotoSansSC_VF_30_4bpp_11[] FONT_GLYPH_LOCATION_FLASH_ATTRIBUTE;
 FONT_GLYPH_LOCATION_FLASH_PRAGMA
 KEEP extern const uint8_t unicodes_NotoSansSC_VF_30_4bpp_12[] FONT_GLYPH_LOCATION_FLASH_ATTRIBUTE;
+FONT_GLYPH_LOCATION_FLASH_PRAGMA
+KEEP extern const uint8_t unicodes_NotoSansSC_VF_30_4bpp_15[] FONT_GLYPH_LOCATION_FLASH_ATTRIBUTE;
+FONT_GLYPH_LOCATION_FLASH_PRAGMA
+KEEP extern const uint8_t unicodes_NotoSansSC_VF_30_4bpp_17[] FONT_GLYPH_LOCATION_FLASH_ATTRIBUTE;
+FONT_GLYPH_LOCATION_FLASH_PRAGMA
+KEEP extern const uint8_t unicodes_NotoSansSC_VF_30_4bpp_18[] FONT_GLYPH_LOCATION_FLASH_ATTRIBUTE;
+FONT_GLYPH_LOCATION_FLASH_PRAGMA
+KEEP extern const uint8_t unicodes_NotoSansSC_VF_30_4bpp_19[] FONT_GLYPH_LOCATION_FLASH_ATTRIBUTE;
 FONT_SEARCHTABLE_LOCATION_FLASH_PRAGMA
 KEEP extern const uint8_t* const unicodes_NotoSansSC_VF_30_4bpp[] FONT_SEARCHTABLE_LOCATION_FLASH_ATTRIBUTE = {
     unicodes_NotoSansSC_VF_30_4bpp_0,
@@ -34,10 +99,17 @@ KEEP extern const uint8_t* const unicodes_NotoSansSC_VF_30_4bpp[] FONT_SEARCHTAB
     0,
     0,
     0,
-    0,
+    unicodes_NotoSansSC_VF_30_4bpp_9,
     unicodes_NotoSansSC_VF_30_4bpp_10,
     unicodes_NotoSansSC_VF_30_4bpp_11,
-    unicodes_NotoSansSC_VF_30_4bpp_12
+    unicodes_NotoSansSC_VF_30_4bpp_12,
+    0,
+    0,
+    unicodes_NotoSansSC_VF_30_4bpp_15,
+    0,
+    unicodes_NotoSansSC_VF_30_4bpp_17,
+    unicodes_NotoSansSC_VF_30_4bpp_18,
+    unicodes_NotoSansSC_VF_30_4bpp_19
 };
 FONT_KERNING_LOCATION_FLASH_PRAGMA
 KEEP extern const touchgfx::KerningNode kerning_NotoSansSC_VF_30_4bpp[] FONT_KERNING_LOCATION_FLASH_ATTRIBUTE;
@@ -45,6 +117,6 @@ touchgfx::GeneratedFont& getFont_NotoSansSC_VF_30_4bpp();
 
 touchgfx::GeneratedFont& getFont_NotoSansSC_VF_30_4bpp()
 {
-    static touchgfx::GeneratedFont NotoSansSC_VF_30_4bpp(glyphs_NotoSansSC_VF_30_4bpp, 6, 33, 30, 0, 0, 4, 1, 0, 0, unicodes_NotoSansSC_VF_30_4bpp, kerning_NotoSansSC_VF_30_4bpp, 63, 46, 0, 0);
+    static touchgfx::GeneratedFont NotoSansSC_VF_30_4bpp(glyphs_NotoSansSC_VF_30_4bpp, 61, 36, 30, 0, 0, 4, 1, 0, 1, unicodes_NotoSansSC_VF_30_4bpp, kerning_NotoSansSC_VF_30_4bpp, 63, 46, 0, 0);
     return NotoSansSC_VF_30_4bpp;
 }

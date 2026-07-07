@@ -1696,5 +1696,60 @@
 			<type>1</type>
 			<locationURI>PARENT-2-PROJECT_LOC/Appli/TouchGFX/generated/fonts/src/Font_NotoSansSC_VF_15_4bpp_19.cpp</locationURI>
 		</link>
+		<link>
+			<name>Application/User/generated/Font_NotoSansSC_VF_15_4bpp_4.cpp</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/Appli/TouchGFX/generated/fonts/src/Font_NotoSansSC_VF_15_4bpp_4.cpp</locationURI>
+		</link>
+		<link>
+			<name>Application/User/generated/Font_NotoSansSC_VF_21_4bpp_14.cpp</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/Appli/TouchGFX/generated/fonts/src/Font_NotoSansSC_VF_21_4bpp_14.cpp</locationURI>
+		</link>
+		<link>
+			<name>Application/User/generated/Font_NotoSansSC_VF_21_4bpp_19.cpp</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/Appli/TouchGFX/generated/fonts/src/Font_NotoSansSC_VF_21_4bpp_19.cpp</locationURI>
+		</link>
+		<link>
+			<name>Application/User/generated/Font_NotoSansSC_VF_21_4bpp_4.cpp</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/Appli/TouchGFX/generated/fonts/src/Font_NotoSansSC_VF_21_4bpp_4.cpp</locationURI>
+		</link>
+		<link>
+			<name>Application/User/generated/Font_NotoSansSC_VF_30_4bpp_15.cpp</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/Appli/TouchGFX/generated/fonts/src/Font_NotoSansSC_VF_30_4bpp_15.cpp</locationURI>
+		</link>
+		<link>
+			<name>Application/User/generated/Font_NotoSansSC_VF_30_4bpp_17.cpp</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/Appli/TouchGFX/generated/fonts/src/Font_NotoSansSC_VF_30_4bpp_17.cpp</locationURI>
+		</link>
+		<link>
+			<name>Application/User/generated/Font_NotoSansSC_VF_30_4bpp_18.cpp</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/Appli/TouchGFX/generated/fonts/src/Font_NotoSansSC_VF_30_4bpp_18.cpp</locationURI>
+		</link>
+		<link>
+			<name>Application/User/generated/Font_NotoSansSC_VF_30_4bpp_19.cpp</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/Appli/TouchGFX/generated/fonts/src/Font_NotoSansSC_VF_30_4bpp_19.cpp</locationURI>
+		</link>
+		<link>
+			<name>Application/User/generated/Font_NotoSansSC_VF_30_4bpp_9.cpp</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/Appli/TouchGFX/generated/fonts/src/Font_NotoSansSC_VF_30_4bpp_9.cpp</locationURI>
+		</link>
+		<link>
+			<name>Application/User/generated/image_boot_emblem.cpp</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/Appli/TouchGFX/generated/images/src/image_boot_emblem.cpp</locationURI>
+		</link>
+		<link>
+			<name>Application/User/generated/image_brand_mark.cpp</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/Appli/TouchGFX/generated/images/src/image_brand_mark.cpp</locationURI>
+		</link>
 	</linkedResources>
 </projectDescription>

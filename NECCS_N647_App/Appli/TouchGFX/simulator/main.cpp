@@ -81,8 +81,8 @@ touchgfx::LCD8bpp_ABGR2222 lcd;
 #endif
     touchgfx::SDL2TouchController tc;
 
-    // Create hardware layer. Use a display size of 480x272.
-    touchgfx::HAL& hal = touchgfx::touchgfx_generic_init<touchgfx::HALSDL2>(dma, lcd, tc, 480, 272, 0, 0);
+    // Create hardware layer. Match the N647 panel resolution (1024x600).
+    touchgfx::HAL& hal = touchgfx::touchgfx_generic_init<touchgfx::HALSDL2>(dma, lcd, tc, 1024, 600, 0, 0);
 
     // Simulate hardware running at 60Hz generating a vsync every 16.6667 ms
     static_cast<touchgfx::HALSDL2&>(hal).setVsyncInterval(16.6667f);
