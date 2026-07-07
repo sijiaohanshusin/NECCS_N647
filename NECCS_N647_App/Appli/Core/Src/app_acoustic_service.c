@@ -12,7 +12,17 @@
 #define APP_ACOUSTIC_SERVICE_DEGRADE_LIMIT       3U
 #define APP_ACOUSTIC_SERVICE_PROCESS_PERIOD_TICKS \
   (TX_TIMER_TICKS_PER_SECOND / APP_ACOUSTIC_SERVICE_TARGET_FPS)
+/* Bring-up preview: when no valid SRP result exists yet, force the overlay
+ * confidence up so the heatmap stays visible on screen. This intentionally
+ * publishes fake confidence, so it is restricted to DEBUG builds; Release
+ * must honour the "no trusted heatmap without a valid result" rule. */
+#ifndef APP_ACOUSTIC_SERVICE_PREVIEW_OVERLAY_ENABLE
+#ifdef DEBUG
 #define APP_ACOUSTIC_SERVICE_PREVIEW_OVERLAY_ENABLE 1U
+#else
+#define APP_ACOUSTIC_SERVICE_PREVIEW_OVERLAY_ENABLE 0U
+#endif
+#endif
 #define APP_ACOUSTIC_SERVICE_PREVIEW_MIN_CONFIDENCE 0.70f
 #define APP_ACOUSTIC_SERVICE_SAMPLE_COUNT \
   (APP_MIC_ARRAY_PHYSICAL_MIC_COUNT * APP_AUDIO_FRAME_DEFAULT_WIDE32_FRAME_LEN)
@@ -598,6 +608,122 @@ AppAcousticImagingStatus_t AppAcousticService_Init(void)
   return status;
 }
 
+/* Sanitize the requested mode/policy and reinitialize the SRP runtime when a
+ * change is pending. Returns 1 when the runtime is ready for processing. */
+static uint8_t AppAcousticService_SyncRuntimeConfig(AppAcousticServiceSnapshot_t *snapshot)
+{
+  AppAcousticImagingStatus_t status;
+
+  if (AppAcousticService_ModeIsValid(s_requested_mode) == 0U)
+  {
+    s_requested_mode = APP_ACOUSTIC_IMAGING_MODE_STANDARD;
+    s_profile_change_pending = 1U;
+  }
+  s_requested_profile = AppAcousticService_ProfileFromMode(s_requested_mode);
+  if (AppAcousticService_BinPolicyIsValid(s_requested_bin_policy) == 0U)
+  {
+    s_requested_bin_policy = APP_ACOUSTIC_IMAGING_BIN_POLICY_PROFILE_DEFAULT;
+    s_profile_change_pending = 1U;
+  }
+  snapshot->requested_mode = s_requested_mode;
+  snapshot->requested_profile = s_requested_profile;
+  snapshot->requested_bin_policy = s_requested_bin_policy;
+
+  if ((s_profile_change_pending == 0U) &&
+      (s_srp_ctx.initialized != 0U) &&
+      (s_active_mode == s_requested_mode) &&
+      (s_srp_ctx.config.bin_policy ==
+       App_AcousticImaging_ResolveBinPolicy(s_requested_profile, s_requested_bin_policy)))
+  {
+    return 1U;
+  }
+
+  status = AppAcousticService_InitRuntime(s_requested_mode, s_requested_bin_policy);
+  snapshot->initialized = (status == APP_ACOUSTIC_IMAGING_OK) ? 1U : 0U;
+  snapshot->last_status = (int32_t)status;
+  snapshot->service_status = (status == APP_ACOUSTIC_IMAGING_OK) ?
+                             APP_ACOUSTIC_SERVICE_STATUS_WAIT_FRAME :
+                             (int32_t)status;
+  snapshot->active_mode = s_active_mode;
+  snapshot->active_profile = s_active_profile;
+  snapshot->active_bin_policy = s_srp_ctx.config.bin_policy;
+  snapshot->active_channel_mask = s_srp_ctx.active_channel_mask;
+  snapshot->pair_count = s_srp_ctx.pair_count;
+  snapshot->grid_count = s_srp_ctx.grid_count;
+  snapshot->active_bin_count = (uint16_t)s_srp_ctx.active_bin_count;
+  AppAcousticService_PublishSnapshot(snapshot);
+
+  return (status == APP_ACOUSTIC_IMAGING_OK) ? 1U : 0U;
+}
+
+/* Publish a skip/failure snapshot and report it to the bring-up tracker. */
+static void AppAcousticService_PublishSkip(AppAcousticServiceSnapshot_t *snapshot,
+                                           int32_t service_status,
+                                           uint8_t clear_result,
+                                           uint8_t is_failure)
+{
+  if (is_failure != 0U)
+  {
+    snapshot->failed_frames++;
+  }
+  else
+  {
+    snapshot->skipped_frames++;
+  }
+  if (clear_result != 0U)
+  {
+    snapshot->valid = 0U;
+    AppAcousticService_ClearHeat(snapshot);
+  }
+  snapshot->service_status = service_status;
+  AppAcousticService_PublishSnapshot(snapshot);
+  if (is_failure != 0U)
+  {
+    App_BringUpStatus_Fail(APP_BRINGUP_MODULE_ACOUSTIC, service_status);
+  }
+  else
+  {
+    App_BringUpStatus_Heartbeat(APP_BRINGUP_MODULE_ACOUSTIC, service_status);
+  }
+}
+
+/* Run SRP on one frame and fill the snapshot with the outcome. */
+static AppAcousticImagingStatus_t AppAcousticService_ProcessFrame(AppAcousticServiceSnapshot_t *snapshot,
+                                                                  const AppAudioFrame_t *work_frame,
+                                                                  uint32_t frame_seq,
+                                                                  uint32_t *elapsed_ms)
+{
+  AppAcousticImagingStatus_t status;
+  uint32_t process_start_ms = HAL_GetTick();
+
+  status = App_AcousticSrp_ProcessFrame(&s_srp_ctx, work_frame, &s_vis_frame);
+  *elapsed_ms = HAL_GetTick() - process_start_ms;
+
+  snapshot->last_status = (int32_t)status;
+  if (status == APP_ACOUSTIC_IMAGING_OK)
+  {
+    snapshot->service_status = APP_ACOUSTIC_SERVICE_STATUS_OK;
+    snapshot->processed_frames++;
+    s_have_input_seq = 1U;
+    s_last_input_seq = frame_seq;
+    AppAcousticService_FillVisSnapshot(snapshot, &s_vis_frame, &s_srp_ctx);
+    App_AcousticSrp_GetPerf(&s_srp_ctx, &snapshot->perf);
+    AppAcousticService_UpdatePerf(snapshot, &snapshot->perf, *elapsed_ms);
+    AppAcousticService_UpdateFps(snapshot);
+    App_BringUpStatus_Ready(APP_BRINGUP_MODULE_ACOUSTIC, (int32_t)status);
+  }
+  else
+  {
+    snapshot->failed_frames++;
+    snapshot->valid = 0U;
+    snapshot->service_status = (int32_t)status;
+    AppAcousticService_ClearHeat(snapshot);
+    App_BringUpStatus_Fail(APP_BRINGUP_MODULE_ACOUSTIC, (int32_t)status);
+  }
+
+  return status;
+}
+
 void AppAcousticService_ThreadEntry(ULONG thread_input)
 {
   AppAudioFrame_t capture_frame;
@@ -630,113 +756,46 @@ void AppAcousticService_ThreadEntry(ULONG thread_input)
     }
     next_process_tick = now_tick + period_ticks;
 
+    /* Phase 1: pick up mode/profile/bin-policy changes. */
     AppAcousticService_LoadSnapshot(&snapshot);
     snapshot.running = 1U;
-    if (AppAcousticService_ModeIsValid(s_requested_mode) == 0U)
+    if (AppAcousticService_SyncRuntimeConfig(&snapshot) == 0U)
     {
-      s_requested_mode = APP_ACOUSTIC_IMAGING_MODE_STANDARD;
-      s_profile_change_pending = 1U;
-    }
-    s_requested_profile = AppAcousticService_ProfileFromMode(s_requested_mode);
-    if (AppAcousticService_BinPolicyIsValid(s_requested_bin_policy) == 0U)
-    {
-      s_requested_bin_policy = APP_ACOUSTIC_IMAGING_BIN_POLICY_PROFILE_DEFAULT;
-      s_profile_change_pending = 1U;
-    }
-    snapshot.requested_mode = s_requested_mode;
-    snapshot.requested_profile = s_requested_profile;
-    snapshot.requested_bin_policy = s_requested_bin_policy;
-
-    if ((s_profile_change_pending != 0U) ||
-        (s_srp_ctx.initialized == 0U) ||
-        (s_active_mode != s_requested_mode) ||
-        (s_srp_ctx.config.bin_policy !=
-         App_AcousticImaging_ResolveBinPolicy(s_requested_profile, s_requested_bin_policy)))
-    {
-      status = AppAcousticService_InitRuntime(s_requested_mode, s_requested_bin_policy);
-      snapshot.initialized = (status == APP_ACOUSTIC_IMAGING_OK) ? 1U : 0U;
-      snapshot.last_status = (int32_t)status;
-      snapshot.service_status = (status == APP_ACOUSTIC_IMAGING_OK) ?
-                                APP_ACOUSTIC_SERVICE_STATUS_WAIT_FRAME :
-                                (int32_t)status;
-      snapshot.active_mode = s_active_mode;
-      snapshot.active_profile = s_active_profile;
-      snapshot.active_bin_policy = s_srp_ctx.config.bin_policy;
-      snapshot.active_channel_mask = s_srp_ctx.active_channel_mask;
-      snapshot.pair_count = s_srp_ctx.pair_count;
-      snapshot.grid_count = s_srp_ctx.grid_count;
-      snapshot.active_bin_count = (uint16_t)s_srp_ctx.active_bin_count;
-      AppAcousticService_PublishSnapshot(&snapshot);
-      if (status != APP_ACOUSTIC_IMAGING_OK)
-      {
-        tx_thread_sleep(1U);
-        continue;
-      }
+      tx_thread_sleep(1U);
+      continue;
     }
 
+    /* Phase 2: acquire a fresh PCMD frame. */
     if (AppPcmdCapture_GetLatestAudioFrame(&capture_frame) == 0U)
     {
-      snapshot.skipped_frames++;
-      snapshot.valid = 0U;
-      snapshot.service_status = APP_ACOUSTIC_SERVICE_STATUS_WAIT_FRAME;
-      AppAcousticService_ClearHeat(&snapshot);
-      AppAcousticService_PublishSnapshot(&snapshot);
-      App_BringUpStatus_Heartbeat(APP_BRINGUP_MODULE_ACOUSTIC,
-                                  APP_ACOUSTIC_SERVICE_STATUS_WAIT_FRAME);
+      AppAcousticService_PublishSkip(&snapshot,
+                                     APP_ACOUSTIC_SERVICE_STATUS_WAIT_FRAME,
+                                     1U, 0U);
       continue;
     }
 
     if ((s_have_input_seq != 0U) && (capture_frame.seq == s_last_input_seq))
     {
-      snapshot.skipped_frames++;
       snapshot.input_seq = capture_frame.seq;
-      snapshot.service_status = APP_ACOUSTIC_SERVICE_STATUS_WAIT_FRAME;
-      AppAcousticService_PublishSnapshot(&snapshot);
-      App_BringUpStatus_Heartbeat(APP_BRINGUP_MODULE_ACOUSTIC,
-                                  APP_ACOUSTIC_SERVICE_STATUS_WAIT_FRAME);
+      AppAcousticService_PublishSkip(&snapshot,
+                                     APP_ACOUSTIC_SERVICE_STATUS_WAIT_FRAME,
+                                     0U, 0U);
       continue;
     }
 
     snapshot.input_seq = capture_frame.seq;
     if (AppAcousticService_CopyFrame(&work_frame, &capture_frame) == 0U)
     {
-      snapshot.failed_frames++;
-      snapshot.valid = 0U;
-      snapshot.service_status = APP_ACOUSTIC_SERVICE_STATUS_COPY_FAILED;
-      AppAcousticService_ClearHeat(&snapshot);
-      AppAcousticService_PublishSnapshot(&snapshot);
-      App_BringUpStatus_Fail(APP_BRINGUP_MODULE_ACOUSTIC,
-                             APP_ACOUSTIC_SERVICE_STATUS_COPY_FAILED);
+      AppAcousticService_PublishSkip(&snapshot,
+                                     APP_ACOUSTIC_SERVICE_STATUS_COPY_FAILED,
+                                     1U, 1U);
       continue;
     }
 
-    {
-      uint32_t process_start_ms = HAL_GetTick();
-      status = App_AcousticSrp_ProcessFrame(&s_srp_ctx, &work_frame, &s_vis_frame);
-      process_elapsed_ms = HAL_GetTick() - process_start_ms;
-    }
-    snapshot.last_status = (int32_t)status;
-    if (status == APP_ACOUSTIC_IMAGING_OK)
-    {
-      snapshot.service_status = APP_ACOUSTIC_SERVICE_STATUS_OK;
-      snapshot.processed_frames++;
-      s_have_input_seq = 1U;
-      s_last_input_seq = capture_frame.seq;
-      AppAcousticService_FillVisSnapshot(&snapshot, &s_vis_frame, &s_srp_ctx);
-      App_AcousticSrp_GetPerf(&s_srp_ctx, &snapshot.perf);
-      AppAcousticService_UpdatePerf(&snapshot, &snapshot.perf, process_elapsed_ms);
-      AppAcousticService_UpdateFps(&snapshot);
-      App_BringUpStatus_Ready(APP_BRINGUP_MODULE_ACOUSTIC, (int32_t)status);
-    }
-    else
-    {
-      snapshot.failed_frames++;
-      snapshot.valid = 0U;
-      snapshot.service_status = (int32_t)status;
-      AppAcousticService_ClearHeat(&snapshot);
-      App_BringUpStatus_Fail(APP_BRINGUP_MODULE_ACOUSTIC, (int32_t)status);
-    }
-
+    /* Phase 3: process and publish. */
+    status = AppAcousticService_ProcessFrame(&snapshot, &work_frame,
+                                             capture_frame.seq,
+                                             &process_elapsed_ms);
     AppAcousticService_UpdateDegrade(&snapshot, status, process_elapsed_ms);
     AppAcousticService_PublishSnapshot(&snapshot);
   }

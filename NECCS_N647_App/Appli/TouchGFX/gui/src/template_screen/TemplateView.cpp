@@ -5,8 +5,6 @@
 
 #include <stdio.h>
 
-#include "app_camera_display.h"
-
 namespace
 {
 constexpr int16_t CameraPreviewX = 192;
@@ -677,8 +675,8 @@ void TemplateView::refreshVisibility()
     const bool settingsVisible = (activeScreen == APP_UI_SCREEN_SETTINGS);
     const bool mediaVisible = (activeScreen == APP_UI_SCREEN_MEDIA);
 
-    AppCameraDisplay_SetVisible(imageVisible ? 1U : 0U);
-
+    /* Camera LTDC layer visibility is owned by the Model (setActiveScreen);
+     * the View only manages its own widgets. */
     cameraPreviewKey.setVisible(imageVisible);
     imageHudPanel.setVisible(imageVisible);
     imageBottomPanel.setVisible(imageVisible);

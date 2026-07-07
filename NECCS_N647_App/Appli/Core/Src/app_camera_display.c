@@ -13,7 +13,15 @@
 #define APP_CAMERA_DISPLAY_HEAT_CELL_COUNT \
   (APP_CAMERA_DISPLAY_HEAT_GRID_SIZE * APP_CAMERA_DISPLAY_HEAT_GRID_SIZE)
 #define APP_CAMERA_DISPLAY_HEAT_MIN_VALUE    9U
+/* Bring-up aid: force-highlight the peak cell even when its heat value is
+ * low. DEBUG-only; Release draws only genuine heat values. */
+#ifndef APP_CAMERA_DISPLAY_OVERLAY_BRINGUP_ENABLE
+#ifdef DEBUG
 #define APP_CAMERA_DISPLAY_OVERLAY_BRINGUP_ENABLE 1U
+#else
+#define APP_CAMERA_DISPLAY_OVERLAY_BRINGUP_ENABLE 0U
+#endif
+#endif
 #define APP_CAMERA_DISPLAY_BRINGUP_PEAK_VALUE     224U
 #define APP_CAMERA_DISPLAY_COMPOSE_ENABLE          1U
 #define APP_CAMERA_DISPLAY_DMA2D_COPY_ENABLE       1U
@@ -309,6 +317,7 @@ static uint8_t AppCameraDisplay_OverlayRect(uint8_t value,
   return 1U;
 }
 
+#if APP_CAMERA_DISPLAY_OVERLAY_BRINGUP_ENABLE
 static uint8_t AppCameraDisplay_OverlayCellBlock(uint32_t index,
                                                  int32_t *x,
                                                  int32_t *y,
@@ -335,6 +344,7 @@ static uint8_t AppCameraDisplay_OverlayCellBlock(uint32_t index,
   *height = cell_h - 10;
   return 1U;
 }
+#endif /* APP_CAMERA_DISPLAY_OVERLAY_BRINGUP_ENABLE */
 
 static uint8_t AppCameraDisplay_EffectiveHeatValue(const AppCameraDisplayAcousticOverlay_t *overlay,
                                                    uint32_t index)

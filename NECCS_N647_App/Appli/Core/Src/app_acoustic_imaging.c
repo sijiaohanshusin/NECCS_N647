@@ -669,58 +669,63 @@ AppAcousticImagingStatus_t App_AcousticImaging_GetDefaultRunModeConfig(AppAcoust
   return App_AcousticImaging_ValidateConfig(config);
 }
 
-AppAcousticImagingStatus_t App_AcousticImaging_ValidateConfig(const AppAcousticImagingConfig_t *config)
+static uint8_t App_AcousticImaging_ConfigEnumsAndRangesOk(const AppAcousticImagingConfig_t *config)
 {
-  uint32_t max_pairs;
-  uint32_t valid_channel_mask;
+  return ((App_MicArray_ValidateMode(config->mic_mode) != 0U) &&
+          (App_AcousticImaging_IsValidAlgorithm(config->algorithm) != 0U) &&
+          (App_AcousticImaging_IsValidProfile(config->profile) != 0U) &&
+          (App_AcousticImaging_IsValidRunMode(config->run_mode) != 0U) &&
+          (App_AcousticImaging_IsValidPairSelect(config->pair_select) != 0U) &&
+          (App_AcousticImaging_IsValidBinPolicy(config->bin_policy) != 0U) &&
+          (config->sample_rate_hz == App_MicArray_GetModeSampleRateHz(config->mic_mode)) &&
+          (config->channel_count == App_MicArray_GetModeMicCount(config->mic_mode)) &&
+          (config->channel_count != 0U) &&
+          (config->frame_len != 0U) &&
+          (config->nfft >= config->frame_len) &&
+          (config->coarse_grid_size == APP_ACOUSTIC_IMAGING_COARSE_GRID_SIZE) &&
+          (config->coarse_angle_min_deg == -60) &&
+          (config->coarse_angle_max_deg == 60) &&
+          (config->fine_top_k == APP_ACOUSTIC_IMAGING_FINE_TOP_K) &&
+          (config->fine_grid_size == APP_ACOUSTIC_IMAGING_FINE_GRID_SIZE) &&
+          (config->speed_of_sound_mps >= 300.0f) &&
+          (config->speed_of_sound_mps <= 380.0f) &&
+          (config->smoothing_alpha >= 0.0f) &&
+          (config->smoothing_alpha <= 0.95f) &&
+          (config->quality_min >= 0.0f) &&
+          (config->quality_min <= 1.0f) &&
+          (config->energy_min >= 0.0f) &&
+          (config->energy_min <= 1.0f)) ? 1U : 0U;
+}
 
-  if ((config == NULL) ||
-      (App_MicArray_ValidateMode(config->mic_mode) == 0U) ||
-      (App_AcousticImaging_IsValidAlgorithm(config->algorithm) == 0U) ||
-      (App_AcousticImaging_IsValidProfile(config->profile) == 0U) ||
-      (App_AcousticImaging_IsValidRunMode(config->run_mode) == 0U) ||
-      (App_AcousticImaging_IsValidPairSelect(config->pair_select) == 0U) ||
-      (App_AcousticImaging_IsValidBinPolicy(config->bin_policy) == 0U) ||
-      (config->sample_rate_hz != App_MicArray_GetModeSampleRateHz(config->mic_mode)) ||
-      (config->channel_count != App_MicArray_GetModeMicCount(config->mic_mode)) ||
-      (config->channel_count == 0U) ||
-      (config->frame_len == 0U) ||
-      (config->nfft < config->frame_len) ||
-      (config->active_bin_end >= (config->nfft / 2U)) ||
-      (config->active_bin_end < config->active_bin_start) ||
-      (config->active_bin_count == 0U) ||
+static uint8_t App_AcousticImaging_ConfigAlgorithmModeOk(const AppAcousticImagingConfig_t *config)
+{
+  if (config->algorithm == APP_ACOUSTIC_IMAGING_ALGO_CORE16_HF_NEARFIELD)
+  {
+    return (config->mic_mode == APP_MIC_ARRAY_MODE_CORE16_192K) ? 1U : 0U;
+  }
+
+  return (config->mic_mode == APP_MIC_ARRAY_MODE_WIDE32_48K) ? 1U : 0U;
+}
+
+static uint8_t App_AcousticImaging_ConfigPairCountOk(const AppAcousticImagingConfig_t *config)
+{
+  uint32_t max_pairs = (config->channel_count * (config->channel_count - 1U)) / 2U;
+
+  return ((config->pair_count != 0U) &&
+          (config->pair_count <= max_pairs) &&
+          (config->pair_count <= APP_ACOUSTIC_IMAGING_PAIR_COUNT_MAX)) ? 1U : 0U;
+}
+
+/* Active bins must stay inside [start, end], below nfft/2, be strictly
+ * increasing, and fit the LUT capacity. */
+static uint8_t App_AcousticImaging_ConfigActiveBinsOk(const AppAcousticImagingConfig_t *config)
+{
+  if ((config->active_bin_count == 0U) ||
       (config->active_bin_count > APP_ACOUSTIC_IMAGING_BIN_COUNT_MAX) ||
-      (config->coarse_grid_size != APP_ACOUSTIC_IMAGING_COARSE_GRID_SIZE) ||
-      (config->coarse_angle_min_deg != -60) ||
-      (config->coarse_angle_max_deg != 60) ||
-      (config->fine_top_k != APP_ACOUSTIC_IMAGING_FINE_TOP_K) ||
-      (config->fine_grid_size != APP_ACOUSTIC_IMAGING_FINE_GRID_SIZE) ||
-      (config->speed_of_sound_mps < 300.0f) ||
-      (config->speed_of_sound_mps > 380.0f) ||
-      (config->smoothing_alpha < 0.0f) ||
-      (config->smoothing_alpha > 0.95f) ||
-      (config->quality_min < 0.0f) ||
-      (config->quality_min > 1.0f) ||
-      (config->energy_min < 0.0f) ||
-      (config->energy_min > 1.0f))
+      (config->active_bin_end < config->active_bin_start) ||
+      (config->active_bin_end >= (config->nfft / 2U)))
   {
-    return APP_ACOUSTIC_IMAGING_INVALID_ARGUMENT;
-  }
-
-  if (((config->algorithm == APP_ACOUSTIC_IMAGING_ALGO_CORE16_HF_NEARFIELD) &&
-       (config->mic_mode != APP_MIC_ARRAY_MODE_CORE16_192K)) ||
-      ((config->algorithm != APP_ACOUSTIC_IMAGING_ALGO_CORE16_HF_NEARFIELD) &&
-       (config->mic_mode != APP_MIC_ARRAY_MODE_WIDE32_48K)))
-  {
-    return APP_ACOUSTIC_IMAGING_INVALID_ARGUMENT;
-  }
-
-  max_pairs = (config->channel_count * (config->channel_count - 1U)) / 2U;
-  if ((config->pair_count == 0U) ||
-      (config->pair_count > max_pairs) ||
-      (config->pair_count > APP_ACOUSTIC_IMAGING_PAIR_COUNT_MAX))
-  {
-    return APP_ACOUSTIC_IMAGING_INVALID_ARGUMENT;
+    return 0U;
   }
 
   for (uint32_t i = 0U; i < config->active_bin_count; i++)
@@ -731,19 +736,35 @@ AppAcousticImagingStatus_t App_AcousticImaging_ValidateConfig(const AppAcousticI
         (bin > config->active_bin_end) ||
         (bin >= (config->nfft / 2U)))
     {
-      return APP_ACOUSTIC_IMAGING_INVALID_ARGUMENT;
+      return 0U;
     }
 
     if ((i > 0U) && (bin <= config->active_bins[i - 1U]))
     {
-      return APP_ACOUSTIC_IMAGING_INVALID_ARGUMENT;
+      return 0U;
     }
   }
 
-  valid_channel_mask = App_AcousticImaging_ChannelMaskForCount(config->channel_count);
-  if (((config->channel_mask & valid_channel_mask) == 0U) ||
-      ((config->channel_mask & ~valid_channel_mask) != 0U) ||
-      ((config->bad_channel_mask & ~valid_channel_mask) != 0U))
+  return 1U;
+}
+
+static uint8_t App_AcousticImaging_ConfigChannelMaskOk(const AppAcousticImagingConfig_t *config)
+{
+  uint32_t valid_channel_mask = App_AcousticImaging_ChannelMaskForCount(config->channel_count);
+
+  return (((config->channel_mask & valid_channel_mask) != 0U) &&
+          ((config->channel_mask & ~valid_channel_mask) == 0U) &&
+          ((config->bad_channel_mask & ~valid_channel_mask) == 0U)) ? 1U : 0U;
+}
+
+AppAcousticImagingStatus_t App_AcousticImaging_ValidateConfig(const AppAcousticImagingConfig_t *config)
+{
+  if ((config == NULL) ||
+      (App_AcousticImaging_ConfigEnumsAndRangesOk(config) == 0U) ||
+      (App_AcousticImaging_ConfigAlgorithmModeOk(config) == 0U) ||
+      (App_AcousticImaging_ConfigPairCountOk(config) == 0U) ||
+      (App_AcousticImaging_ConfigActiveBinsOk(config) == 0U) ||
+      (App_AcousticImaging_ConfigChannelMaskOk(config) == 0U))
   {
     return APP_ACOUSTIC_IMAGING_INVALID_ARGUMENT;
   }
@@ -908,25 +929,34 @@ AppAcousticImagingStatus_t App_AcousticImaging_SetBinPolicy(AppAcousticImagingCo
     }
   }
 
-  if (status != APP_ACOUSTIC_IMAGING_OK)
-  {
-    return status;
-  }
-
-  return App_AcousticImaging_ValidateConfig(config);
+  /* Bin tables were just written by SetContinuousBins/SetSparseBins; the
+   * config as a whole is validated once by the entry points
+   * (GetDefault*Config / App_AcousticSrp_Init) instead of after every
+   * setter. */
+  return status;
 }
 
 AppAcousticImagingStatus_t App_AcousticImaging_SetTemperature(AppAcousticImagingConfig_t *config,
                                                               float temperature_c)
 {
+  float speed_of_sound_mps;
+
   if (config == NULL)
   {
     return APP_ACOUSTIC_IMAGING_INVALID_ARGUMENT;
   }
 
+  /* Only the derived speed of sound needs checking here; the surrounding
+   * config is validated at the entry points. */
+  speed_of_sound_mps = 331.3f + (0.606f * temperature_c);
+  if ((speed_of_sound_mps < 300.0f) || (speed_of_sound_mps > 380.0f))
+  {
+    return APP_ACOUSTIC_IMAGING_INVALID_ARGUMENT;
+  }
+
   config->temperature_c = temperature_c;
-  config->speed_of_sound_mps = 331.3f + (0.606f * temperature_c);
-  return App_AcousticImaging_ValidateConfig(config);
+  config->speed_of_sound_mps = speed_of_sound_mps;
+  return APP_ACOUSTIC_IMAGING_OK;
 }
 
 AppAcousticImagingStatus_t App_AcousticImaging_BuildPairSet(const AppAcousticImagingConfig_t *config,
@@ -1082,13 +1112,14 @@ AppAcousticImagingStatus_t App_AcousticImaging_FillCoarseTdoaLut(const AppAcoust
 AppAcousticImagingStatus_t App_AcousticImaging_ValidateFrame(const AppAcousticImagingConfig_t *config,
                                                              const AppAudioFrame_t *frame)
 {
-  AppAcousticImagingStatus_t config_status;
   AppAudioFrameStatus_t frame_status;
 
-  config_status = App_AcousticImaging_ValidateConfig(config);
-  if (config_status != APP_ACOUSTIC_IMAGING_OK)
+  /* Called per frame from the SRP hot path: the config belongs to an
+   * initialized context and was fully validated at init, so only the frame
+   * and its match against the config are checked here. */
+  if (config == NULL)
   {
-    return config_status;
+    return APP_ACOUSTIC_IMAGING_INVALID_ARGUMENT;
   }
 
   frame_status = App_AudioFrame_Validate(frame);

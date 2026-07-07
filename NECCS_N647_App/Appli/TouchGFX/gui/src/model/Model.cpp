@@ -248,11 +248,22 @@ static void AppCameraDisplay_SetAcousticOverlay(const uint8_t* heat,
     (void)qualityPct;
     (void)enabled;
 }
+
+static void AppCameraDisplay_SetVisible(uint8_t visible)
+{
+    (void)visible;
+}
 #endif
 
 namespace
 {
+/* Bring-up preview keeps the overlay visible even without a valid SRP
+ * result; DEBUG-only so Release shows the overlay only for real detections. */
+#ifdef DEBUG
 constexpr bool APP_UI_ACOUSTIC_OVERLAY_PREVIEW_ENABLE = true;
+#else
+constexpr bool APP_UI_ACOUSTIC_OVERLAY_PREVIEW_ENABLE = false;
+#endif
 constexpr uint8_t APP_UI_ACOUSTIC_OVERLAY_MIN_QUALITY = 1U;
 
 uint8_t clampPercent(uint32_t value)
@@ -542,6 +553,9 @@ void Model::setActiveScreen(uint8_t screen)
     if (screen <= APP_UI_SCREEN_MEDIA)
     {
         snapshot.activeScreen = screen;
+        /* The camera LTDC layer is only shown on the image page; owning this
+         * here keeps the View free of direct app-layer calls. */
+        AppCameraDisplay_SetVisible((screen == APP_UI_SCREEN_IMAGE) ? 1U : 0U);
         if (modelListener != 0)
         {
             modelListener->uiSnapshotUpdated(snapshot);
