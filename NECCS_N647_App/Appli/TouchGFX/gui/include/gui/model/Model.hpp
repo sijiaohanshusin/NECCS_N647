@@ -192,6 +192,11 @@ struct AppUiSnapshot
     int16_t candPhi[3];
     uint8_t candStrength[3];
     uint8_t heatPalette;
+    uint8_t acousticScene;
+    int8_t acousticTempC;
+    uint16_t acousticBandLoHz;
+    uint16_t acousticBandHiHz;
+    uint16_t acousticSpeedX10;
     uint8_t micLevel[32];
     int8_t micDbfs[32];
     int8_t pcmdRawPeakDbfs;
@@ -237,6 +242,8 @@ public:
     void setActiveScreen(uint8_t screen);
     void setActiveProfile(uint8_t profile);
     void cycleHeatPalette();
+    void cycleScene();
+    void adjustTemperature(int8_t deltaC);
     void requestScreenshot();
     void toggleRecording();
     void refreshMedia();

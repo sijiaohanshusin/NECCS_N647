@@ -45,6 +45,8 @@ public:
 
     void selectScreen(uint8_t screen);
     void selectProfile(uint8_t profile);
+    void cycleScene();
+    void adjustTemperature(int8_t deltaC);
     void cycleHeatPalette();
     void requestScreenshot();
     void toggleRecording();

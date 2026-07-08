@@ -192,6 +192,12 @@ AppAcousticImagingStatus_t App_AcousticImaging_SetBinPolicy(AppAcousticImagingCo
 AppAcousticImagingStatus_t App_AcousticImaging_SetTemperature(AppAcousticImagingConfig_t *config,
                                                               float temperature_c);
 
+/* Replace the active bin table with a contiguous [bin_lo, bin_hi] band
+ * (scene presets / user band selection). Caller re-validates via init. */
+AppAcousticImagingStatus_t App_AcousticImaging_SetBand(AppAcousticImagingConfig_t *config,
+                                                       uint16_t bin_lo,
+                                                       uint16_t bin_hi);
+
 AppAcousticImagingStatus_t App_AcousticImaging_BuildPairSet(const AppAcousticImagingConfig_t *config,
                                                             AppAcousticImagingPair_t *pairs,
                                                             uint32_t pair_capacity,

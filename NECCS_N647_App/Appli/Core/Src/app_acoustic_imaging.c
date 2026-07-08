@@ -959,6 +959,22 @@ AppAcousticImagingStatus_t App_AcousticImaging_SetTemperature(AppAcousticImaging
   return APP_ACOUSTIC_IMAGING_OK;
 }
 
+AppAcousticImagingStatus_t App_AcousticImaging_SetBand(AppAcousticImagingConfig_t *config,
+                                                       uint16_t bin_lo,
+                                                       uint16_t bin_hi)
+{
+  if ((config == NULL) ||
+      (bin_lo == 0U) ||
+      (bin_hi < bin_lo) ||
+      (bin_hi >= (config->nfft / 2U)))
+  {
+    return APP_ACOUSTIC_IMAGING_INVALID_ARGUMENT;
+  }
+
+  config->bin_policy = APP_ACOUSTIC_IMAGING_BIN_POLICY_PROFILE_DEFAULT;
+  return App_AcousticImaging_SetContinuousBins(config, bin_lo, bin_hi);
+}
+
 AppAcousticImagingStatus_t App_AcousticImaging_BuildPairSet(const AppAcousticImagingConfig_t *config,
                                                             AppAcousticImagingPair_t *pairs,
                                                             uint32_t pair_capacity,

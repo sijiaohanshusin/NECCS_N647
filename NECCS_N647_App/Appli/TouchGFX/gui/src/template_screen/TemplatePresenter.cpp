@@ -42,6 +42,16 @@ void TemplatePresenter::cycleHeatPalette()
     model->cycleHeatPalette();
 }
 
+void TemplatePresenter::cycleScene()
+{
+    model->cycleScene();
+}
+
+void TemplatePresenter::adjustTemperature(int8_t deltaC)
+{
+    model->adjustTemperature(deltaC);
+}
+
 void TemplatePresenter::requestScreenshot()
 {
     model->requestScreenshot();

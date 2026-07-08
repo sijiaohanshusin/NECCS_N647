@@ -71,6 +71,7 @@ private:
     void onNavPressed(const touchgfx::AbstractButton& source);
     void onQuickPressed(const touchgfx::AbstractButton& source);
     void onProfilePressed(const touchgfx::AbstractButton& source);
+    void onParamsPressed(const touchgfx::AbstractButton& source);
     void onMediaPressed(const touchgfx::AbstractButton& source);
 
     /* ---- chrome ---- */
@@ -149,6 +150,10 @@ private:
     AppRoundedPanel paramRowPanel[ParamRowCount];
     AppTextLabel paramRowName[ParamRowCount];
     AppTextLabel paramRowValue[ParamRowCount];
+    touchgfx::TouchArea paramRowTouch[ParamRowCount];
+    AppRoundedPanel tempStepChip[2];
+    AppTextLabel tempStepLabel[2];
+    touchgfx::TouchArea tempStepTouch[2];
 
     /* ---- media page ---- */
     AppTextLabel mediaTitle;
@@ -178,6 +183,7 @@ private:
     touchgfx::Callback<TemplateView, const touchgfx::AbstractButton&> navPressedCallback;
     touchgfx::Callback<TemplateView, const touchgfx::AbstractButton&> quickPressedCallback;
     touchgfx::Callback<TemplateView, const touchgfx::AbstractButton&> profilePressedCallback;
+    touchgfx::Callback<TemplateView, const touchgfx::AbstractButton&> paramsPressedCallback;
     touchgfx::Callback<TemplateView, const touchgfx::AbstractButton&> mediaPressedCallback;
 
     uint8_t activeScreen;

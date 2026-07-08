@@ -53,6 +53,34 @@ const char* profileName(uint8_t profile)
     }
 }
 
+const char* sceneName(uint8_t scene)
+{
+    switch (scene)
+    {
+    case 1U:
+        return "气体泄漏";
+    case 2U:
+        return "轴承";
+    case 3U:
+        return "电气";
+    default:
+        return "通用";
+    }
+}
+
+const char* paletteName(uint8_t palette)
+{
+    switch (palette)
+    {
+    case 1U:
+        return "彩虹";
+    case 2U:
+        return "高对比";
+    default:
+        return "铁红";
+    }
+}
+
 const char* powerStateName(uint8_t state)
 {
     switch (state)
@@ -122,6 +150,7 @@ TemplateView::TemplateView()
     : navPressedCallback(this, &TemplateView::onNavPressed),
       quickPressedCallback(this, &TemplateView::onQuickPressed),
       profilePressedCallback(this, &TemplateView::onProfilePressed),
+      paramsPressedCallback(this, &TemplateView::onParamsPressed),
       mediaPressedCallback(this, &TemplateView::onMediaPressed),
       activeScreen(APP_UI_SCREEN_BOOT),
       activeProfile(APP_UI_PROFILE_BALANCED),
@@ -504,9 +533,38 @@ void TemplateView::setupParamsPage()
         add(paramRowPanel[i]);
 
         setupLabel(paramRowName[i], ContentX + 48, static_cast<int16_t>(y + 20), 220, 24, 2, rowNames[i], ColorMuted);
-        setupLabel(paramRowValue[i], ContentX + 500, static_cast<int16_t>(y + 20), 392, 24, 2, rowValues[i], ColorText, AppTextLabel::ALIGN_RIGHT);
+        /* Temperature row keeps space free on the right for the steppers. */
+        const int16_t valueWidth = (i == 2U) ? 280 : 392;
+        setupLabel(paramRowValue[i], ContentX + 500, static_cast<int16_t>(y + 20), valueWidth, 24, 2, rowValues[i], ColorText, AppTextLabel::ALIGN_RIGHT);
         add(paramRowName[i]);
         add(paramRowValue[i]);
+
+        /* Scene and palette rows toggle on tap anywhere in the row. */
+        if ((i == 0U) || (i == 3U))
+        {
+            paramRowTouch[i].setPosition(ContentX + 24, y, 892, 64);
+            paramRowTouch[i].setAction(paramsPressedCallback);
+            add(paramRowTouch[i]);
+        }
+    }
+
+    /* Temperature steppers on row 2. */
+    static const char* stepText[2] = {"-", "+"};
+    for (uint32_t i = 0U; i < 2U; ++i)
+    {
+        const int16_t x = static_cast<int16_t>(ContentX + 800 + (i * 56));
+        const int16_t y = static_cast<int16_t>(208 + (2U * 78) + 10);
+        tempStepChip[i].setPosition(x, y, 44, 44);
+        tempStepChip[i].setStyle(ColorPanel2, 12U);
+        tempStepChip[i].setBorder(ColorBlueDim, true);
+        add(tempStepChip[i]);
+
+        setupLabel(tempStepLabel[i], x, static_cast<int16_t>(y + 9), 44, 26, 2, stepText[i], ColorBlue, AppTextLabel::ALIGN_CENTER);
+        add(tempStepLabel[i]);
+
+        tempStepTouch[i].setPosition(x, y, 44, 44);
+        tempStepTouch[i].setAction(paramsPressedCallback);
+        add(tempStepTouch[i]);
     }
 }
 
@@ -857,6 +915,13 @@ void TemplateView::refreshVisibility()
         paramRowPanel[i].setVisible(paramsVisible);
         paramRowName[i].setVisible(paramsVisible);
         paramRowValue[i].setVisible(paramsVisible);
+        paramRowTouch[i].setVisible(paramsVisible && ((i == 0U) || (i == 3U)));
+    }
+    for (uint32_t i = 0U; i < 2U; ++i)
+    {
+        tempStepChip[i].setVisible(paramsVisible);
+        tempStepLabel[i].setVisible(paramsVisible);
+        tempStepTouch[i].setVisible(paramsVisible);
     }
 
     /* media */
@@ -906,7 +971,9 @@ void TemplateView::refreshStatusBar(const AppUiSnapshot& snapshot)
 {
     char text[48];
 
-    (void)snprintf(text, sizeof(text), "通用 · %s", profileName(activeProfile));
+    (void)snprintf(text, sizeof(text), "%s · %s",
+                   sceneName(snapshot.acousticScene),
+                   profileName(activeProfile));
     modeChipLabel.setText(text);
 
     const bool recording = (snapshot.mediaFlags & APP_UI_MEDIA_FLAG_RECORDING) != 0U;
@@ -1133,10 +1200,11 @@ void TemplateView::refreshImagePage(const AppUiSnapshot& snapshot)
     quickLabel[1].setText(recording ? "停止" : "录像");
     quickLabel[1].setColors(recording ? ColorRed : ColorText, ColorBg, false);
 
-    static const char* paletteNames[3] = {"铁红", "彩虹", "对比"};
-    quickLabel[3].setText(paletteNames[(snapshot.heatPalette < 3U) ? snapshot.heatPalette : 0U]);
+    quickLabel[3].setText(paletteName(snapshot.heatPalette));
 
     quickLabel[4].setText(profileName(activeProfile));
+
+    railSceneValue.setText(sceneName(snapshot.acousticScene));
 }
 
 void TemplateView::refreshMicPage(const AppUiSnapshot& snapshot)
@@ -1248,7 +1316,7 @@ void TemplateView::refreshSystemPage(const AppUiSnapshot& snapshot)
 
 void TemplateView::refreshParamsPage(const AppUiSnapshot& snapshot)
 {
-    (void)snapshot;
+    char text[48];
 
     for (uint32_t i = 0U; i < ProfileCount; ++i)
     {
@@ -1258,6 +1326,21 @@ void TemplateView::refreshParamsPage(const AppUiSnapshot& snapshot)
         profileChipLabel[i].setColors(active ? ColorText : ColorMuted, ColorBg, false);
         profileChip[i].invalidate();
     }
+
+    paramRowValue[0].setText(sceneName(snapshot.acousticScene));
+
+    (void)snprintf(text, sizeof(text), "%u - %u Hz",
+                   snapshot.acousticBandLoHz,
+                   snapshot.acousticBandHiHz);
+    paramRowValue[1].setText(text);
+
+    (void)snprintf(text, sizeof(text), "%d℃ / %u.%u m/s",
+                   snapshot.acousticTempC,
+                   snapshot.acousticSpeedX10 / 10U,
+                   snapshot.acousticSpeedX10 % 10U);
+    paramRowValue[2].setText(text);
+
+    paramRowValue[3].setText(paletteName(snapshot.heatPalette));
 }
 
 void TemplateView::refreshMediaPage(const AppUiSnapshot& snapshot)
@@ -1393,6 +1476,26 @@ void TemplateView::onProfilePressed(const touchgfx::AbstractButton& source)
             presenter->selectProfile(static_cast<uint8_t>(i));
             return;
         }
+    }
+}
+
+void TemplateView::onParamsPressed(const touchgfx::AbstractButton& source)
+{
+    if (&source == &paramRowTouch[0])
+    {
+        presenter->cycleScene();
+    }
+    else if (&source == &paramRowTouch[3])
+    {
+        presenter->cycleHeatPalette();
+    }
+    else if (&source == &tempStepTouch[0])
+    {
+        presenter->adjustTemperature(-1);
+    }
+    else if (&source == &tempStepTouch[1])
+    {
+        presenter->adjustTemperature(1);
     }
 }
 

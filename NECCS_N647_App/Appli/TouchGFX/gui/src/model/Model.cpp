@@ -217,6 +217,11 @@ typedef struct
     int16_t phi_deg;
     uint8_t quality_pct;
     uint8_t contrast_pct;
+    uint8_t scene;
+    int8_t temperature_c;
+    uint16_t band_lo_hz;
+    uint16_t band_hi_hz;
+    uint16_t speed_mps_x10;
     uint8_t cand_count;
     int16_t cand_theta[APP_ACOUSTIC_SERVICE_CAND_MAX];
     int16_t cand_phi[APP_ACOUSTIC_SERVICE_CAND_MAX];
@@ -225,17 +230,39 @@ typedef struct
     uint8_t perf_load[5];
 } AppAcousticServiceSnapshot_t;
 
+typedef enum
+{
+    APP_ACOUSTIC_SCENE_GENERAL = 0,
+    APP_ACOUSTIC_SCENE_COUNT = 4
+} AppAcousticScene_t;
+
 static void AppAcousticService_GetSnapshot(AppAcousticServiceSnapshot_t* snapshot)
 {
     if (snapshot != 0)
     {
         memset(snapshot, 0, sizeof(*snapshot));
+        snapshot->temperature_c = 25;
+        snapshot->band_lo_hz = 563U;
+        snapshot->band_hi_hz = 7875U;
+        snapshot->speed_mps_x10 = 3465U;
     }
 }
 
 static int32_t AppAcousticService_SetProfile(AppAcousticImagingProfile_t profile)
 {
     (void)profile;
+    return 0;
+}
+
+static int32_t AppAcousticService_SetScene(AppAcousticScene_t scene)
+{
+    (void)scene;
+    return 0;
+}
+
+static int32_t AppAcousticService_SetTemperature(int8_t temperatureC)
+{
+    (void)temperatureC;
     return 0;
 }
 
@@ -437,6 +464,11 @@ void pollAcoustic(AppUiSnapshot& snapshot)
         snapshot.candStrength[i] = (i < snapshot.candCount) ? acoustic.cand_strength[i] : 0U;
     }
     snapshot.heatPalette = AppCameraDisplay_GetHeatPalette();
+    snapshot.acousticScene = acoustic.scene;
+    snapshot.acousticTempC = acoustic.temperature_c;
+    snapshot.acousticBandLoHz = acoustic.band_lo_hz;
+    snapshot.acousticBandHiHz = acoustic.band_hi_hz;
+    snapshot.acousticSpeedX10 = acoustic.speed_mps_x10;
 
     /* DEBUG preview keeps the overlay path exercised only until the first
      * real SRP frame lands (the field is all-zero until then, so the draw
@@ -786,6 +818,38 @@ void Model::cycleHeatPalette()
     const uint8_t next = static_cast<uint8_t>((AppCameraDisplay_GetHeatPalette() + 1U) % 3U);
     AppCameraDisplay_SetHeatPalette(next);
     snapshot.heatPalette = next;
+    if (modelListener != 0)
+    {
+        modelListener->uiSnapshotUpdated(snapshot);
+    }
+}
+
+void Model::cycleScene()
+{
+    const uint8_t next = static_cast<uint8_t>((snapshot.acousticScene + 1U) %
+                                              static_cast<uint8_t>(APP_ACOUSTIC_SCENE_COUNT));
+    (void)AppAcousticService_SetScene(static_cast<AppAcousticScene_t>(next));
+    /* Optimistic update; the service confirms via the next snapshot poll. */
+    snapshot.acousticScene = next;
+    if (modelListener != 0)
+    {
+        modelListener->uiSnapshotUpdated(snapshot);
+    }
+}
+
+void Model::adjustTemperature(int8_t deltaC)
+{
+    int32_t next = static_cast<int32_t>(snapshot.acousticTempC) + deltaC;
+    if (next < -20)
+    {
+        next = -20;
+    }
+    if (next > 60)
+    {
+        next = 60;
+    }
+    (void)AppAcousticService_SetTemperature(static_cast<int8_t>(next));
+    snapshot.acousticTempC = static_cast<int8_t>(next);
     if (modelListener != 0)
     {
         modelListener->uiSnapshotUpdated(snapshot);

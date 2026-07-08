@@ -23,21 +23,19 @@
 #define APP_ACOUSTIC_SERVICE_CAMERA_VFOV_HALF_DEG \
   (APP_ACOUSTIC_SERVICE_CAMERA_VFOV_DEG * 0.5f)
 
-/* Heat-field rendering parameters (defaults; runtime-adjustable in P4). */
-#define APP_ACOUSTIC_SERVICE_FIELD_DB_FLOOR     (-15.0f)
-#define APP_ACOUSTIC_SERVICE_FIELD_GAMMA        1.10f
+/* Heat-field rendering defaults; the live values sit in s_field_params and
+ * are runtime-adjustable (scene presets / settings page). Adaptive
+ * background subtraction (bg_gain, H7-style noise_adapt_gain): the display
+ * floor is the field mean scaled by that gain, so a diffuse ambient field
+ * stays dark and only sources standing out of the background light up. */
 #define APP_ACOUSTIC_SERVICE_FIELD_EMA_ATTACK   0.65f
 #define APP_ACOUSTIC_SERVICE_FIELD_EMA_DECAY    0.12f
-#define APP_ACOUSTIC_SERVICE_FIELD_NOISE_GATE   0.10f
-/* Adaptive background subtraction (H7-style noise_adapt_gain): the display
- * floor is the field mean scaled by this gain, so a diffuse ambient field
- * stays dark and only sources standing out of the background light up.
- * SRP-PHAT ambient fields are flat-ish; without this the per-frame peak
- * normalisation would paint the whole camera window at ~mid heat. */
-#define APP_ACOUSTIC_SERVICE_FIELD_BG_GAIN      1.45f
 #define APP_ACOUSTIC_SERVICE_FIELD_FINE_GAIN    0.65f
 #define APP_ACOUSTIC_SERVICE_FIELD_FINE_SIGMA   1.35f
-#define APP_ACOUSTIC_SERVICE_FIELD_SMOOTH_PASSES 1U
+/* Frequency resolution of the Wide32/48k pipeline (48000 / 256). */
+#define APP_ACOUSTIC_SERVICE_BIN_HZ             187.5f
+#define APP_ACOUSTIC_SERVICE_TEMP_MIN_C         (-20)
+#define APP_ACOUSTIC_SERVICE_TEMP_MAX_C         60
 
 static AppAcousticSrpContext_t s_srp_ctx __attribute__((aligned(32)));
 static AppAcousticImagingVisFrame_t s_vis_frame __attribute__((aligned(32)));
@@ -64,6 +62,36 @@ static volatile AppAcousticImagingBinPolicy_t s_requested_bin_policy =
 static volatile uint8_t s_profile_change_pending;
 static AppAcousticImagingRunMode_t s_active_mode = APP_ACOUSTIC_IMAGING_MODE_STANDARD;
 static AppAcousticImagingProfile_t s_active_profile = APP_ACOUSTIC_IMAGING_PROFILE_BALANCED;
+
+/* Scene / temperature / field-parameter runtime state. Scene band presets
+ * are clamped to the Wide32/48k observable range (bins 3..42). bin_lo==0
+ * means "keep the profile's default bin policy" (the verified baseline). */
+typedef struct
+{
+  uint16_t bin_lo;
+  uint16_t bin_hi;
+  AppAcousticFieldParams_t params;
+} AppAcousticScenePreset_t;
+
+static const AppAcousticScenePreset_t s_scene_presets[APP_ACOUSTIC_SCENE_COUNT] =
+{
+  /* GENERAL: policy-default bins, balanced rendering (verified baseline). */
+  { 0U, 0U,   { -15.0f, 1.10f, 0.10f, 1.45f, 1U } },
+  /* LEAK: high band, crisp and responsive. */
+  { 27U, 42U, { -12.0f, 1.25f, 0.06f, 1.30f, 0U } },
+  /* BEARING: mid band, extra smoothing for steady hot-spots. */
+  { 11U, 32U, { -18.0f, 1.15f, 0.10f, 1.50f, 2U } },
+  /* ELECTRICAL: upper band, high contrast. */
+  { 16U, 42U, { -14.0f, 1.35f, 0.08f, 1.40f, 1U } },
+};
+
+static volatile AppAcousticScene_t s_requested_scene = APP_ACOUSTIC_SCENE_GENERAL;
+static AppAcousticScene_t s_active_scene = APP_ACOUSTIC_SCENE_GENERAL;
+static volatile int8_t s_requested_temperature_c = 25;
+static int8_t s_active_temperature_c = 25;
+static AppAcousticFieldParams_t s_field_params = { -15.0f, 1.10f, 0.10f, 1.45f, 1U };
+/* Copy used by the processing path for the current frame. */
+static AppAcousticFieldParams_t s_field_active;
 static uint8_t s_have_input_seq;
 static uint32_t s_last_input_seq;
 static uint32_t s_over_budget_count;
@@ -71,6 +99,8 @@ static uint32_t s_error_count;
 static uint32_t s_fps_window_ms;
 static uint32_t s_fps_window_frames;
 static uint16_t s_effective_fps_x10;
+
+static void AppAcousticService_FillConfigSnapshot(AppAcousticServiceSnapshot_t *snapshot);
 
 static uint8_t AppAcousticService_ClampPercentU32(uint32_t value)
 {
@@ -248,6 +278,10 @@ static AppAcousticImagingStatus_t AppAcousticService_InitRuntime(AppAcousticImag
 {
   AppAcousticImagingConfig_t config;
   AppAcousticImagingStatus_t status;
+  const AppAcousticScene_t scene =
+      (s_requested_scene < APP_ACOUSTIC_SCENE_COUNT) ? s_requested_scene : APP_ACOUSTIC_SCENE_GENERAL;
+  const AppAcousticScenePreset_t *preset = &s_scene_presets[scene];
+  const int8_t temperature_c = s_requested_temperature_c;
 
   status = App_AcousticImaging_GetDefaultRunModeConfig(mode, &config);
   if (status != APP_ACOUSTIC_IMAGING_OK)
@@ -267,12 +301,32 @@ static AppAcousticImagingStatus_t AppAcousticService_InitRuntime(AppAcousticImag
     return status;
   }
 
+  /* Scene band override (bin_lo==0 keeps the policy default bins). */
+  if (preset->bin_lo != 0U)
+  {
+    status = App_AcousticImaging_SetBand(&config, preset->bin_lo, preset->bin_hi);
+    if (status != APP_ACOUSTIC_IMAGING_OK)
+    {
+      memset(&s_srp_ctx, 0, sizeof(s_srp_ctx));
+      return status;
+    }
+  }
+
+  status = App_AcousticImaging_SetTemperature(&config, (float)temperature_c);
+  if (status != APP_ACOUSTIC_IMAGING_OK)
+  {
+    memset(&s_srp_ctx, 0, sizeof(s_srp_ctx));
+    return status;
+  }
+
   status = App_AcousticSrp_Init(&s_srp_ctx, &config, APP_ACOUSTIC_BACKEND_F32_CMSIS);
   if (status == APP_ACOUSTIC_IMAGING_OK)
   {
     s_active_mode = mode;
     s_active_profile = config.profile;
     s_requested_profile = config.profile;
+    s_active_scene = scene;
+    s_active_temperature_c = temperature_c;
     s_over_budget_count = 0U;
     s_error_count = 0U;
     s_profile_change_pending = 0U;
@@ -481,6 +535,20 @@ static void AppAcousticService_BuildLinearField(const AppAcousticImagingVisFrame
   }
 }
 
+/* Load the runtime field parameters for this frame (UI thread writes them
+ * with IRQs masked; a masked copy here gives a coherent snapshot). */
+static void AppAcousticService_LoadFieldParams(void)
+{
+  uint32_t primask = __get_PRIMASK();
+
+  __disable_irq();
+  s_field_active = s_field_params;
+  if (primask == 0U)
+  {
+    __enable_irq();
+  }
+}
+
 /* One separable 3x3 [1 2 1] smoothing pass over the linear field. */
 static void AppAcousticService_SmoothField(void)
 {
@@ -525,7 +593,7 @@ static void AppAcousticService_NormalizeField(AppAcousticServiceSnapshot_t *snap
   float mean = 0.0f;
   float floor_lin;
   float bg_floor;
-  float span_db = -APP_ACOUSTIC_SERVICE_FIELD_DB_FLOOR;
+  float span_db = -s_field_active.db_floor;
   float inv_span_db = 1.0f / span_db;
 
   for (uint32_t i = 0U; i < APP_ACOUSTIC_SERVICE_FIELD_COUNT; i++)
@@ -560,8 +628,8 @@ static void AppAcousticService_NormalizeField(AppAcousticServiceSnapshot_t *snap
     return;
   }
 
-  floor_lin = APP_ACOUSTIC_SERVICE_FIELD_NOISE_GATE * s_field_peak_ema;
-  bg_floor = mean * APP_ACOUSTIC_SERVICE_FIELD_BG_GAIN;
+  floor_lin = s_field_active.noise_gate * s_field_peak_ema;
+  bg_floor = mean * s_field_active.bg_gain;
   if (bg_floor > floor_lin)
   {
     floor_lin = bg_floor;
@@ -596,14 +664,14 @@ static void AppAcousticService_NormalizeField(AppAcousticServiceSnapshot_t *snap
 
     /* 20*log10(norm) mapped from [db_floor, 0] onto [0, 1]. */
     db = 20.0f * log10f(norm);
-    if (db <= APP_ACOUSTIC_SERVICE_FIELD_DB_FLOOR)
+    if (db <= s_field_active.db_floor)
     {
       snapshot->field[i] = 0U;
       continue;
     }
 
     norm = (db + span_db) * inv_span_db;
-    norm = powf(norm, APP_ACOUSTIC_SERVICE_FIELD_GAMMA);
+    norm = powf(norm, s_field_active.gamma);
     snapshot->field[i] = (uint8_t)((norm * 255.0f) + 0.5f);
   }
   }
@@ -626,8 +694,9 @@ static void AppAcousticService_FillCameraField(AppAcousticServiceSnapshot_t *sna
     return;
   }
 
+  AppAcousticService_LoadFieldParams();
   AppAcousticService_BuildLinearField(vis_frame);
-  for (uint32_t pass = 0U; pass < APP_ACOUSTIC_SERVICE_FIELD_SMOOTH_PASSES; pass++)
+  for (uint32_t pass = 0U; pass < s_field_active.smooth_passes; pass++)
   {
     AppAcousticService_SmoothField();
   }
@@ -826,9 +895,23 @@ AppAcousticImagingStatus_t AppAcousticService_Init(void)
   s_snapshot.pair_count = s_srp_ctx.pair_count;
   s_snapshot.grid_count = s_srp_ctx.grid_count;
   s_snapshot.active_bin_count = (uint16_t)s_srp_ctx.active_bin_count;
+  AppAcousticService_FillConfigSnapshot(&s_snapshot);
   __DMB();
 
   return status;
+}
+
+/* Mirror scene/temperature/band/params into the published snapshot. */
+static void AppAcousticService_FillConfigSnapshot(AppAcousticServiceSnapshot_t *snapshot)
+{
+  snapshot->scene = (uint8_t)s_active_scene;
+  snapshot->temperature_c = s_active_temperature_c;
+  snapshot->speed_mps_x10 = (uint16_t)((s_srp_ctx.config.speed_of_sound_mps * 10.0f) + 0.5f);
+  snapshot->band_lo_hz =
+      (uint16_t)(((float)s_srp_ctx.config.active_bin_start * APP_ACOUSTIC_SERVICE_BIN_HZ) + 0.5f);
+  snapshot->band_hi_hz =
+      (uint16_t)(((float)s_srp_ctx.config.active_bin_end * APP_ACOUSTIC_SERVICE_BIN_HZ) + 0.5f);
+  AppAcousticService_GetFieldParams(&snapshot->field_params);
 }
 
 /* Sanitize the requested mode/policy and reinitialize the SRP runtime when a
@@ -855,6 +938,8 @@ static uint8_t AppAcousticService_SyncRuntimeConfig(AppAcousticServiceSnapshot_t
   if ((s_profile_change_pending == 0U) &&
       (s_srp_ctx.initialized != 0U) &&
       (s_active_mode == s_requested_mode) &&
+      (s_active_scene == s_requested_scene) &&
+      (s_active_temperature_c == s_requested_temperature_c) &&
       (s_srp_ctx.config.bin_policy ==
        App_AcousticImaging_ResolveBinPolicy(s_requested_profile, s_requested_bin_policy)))
   {
@@ -874,6 +959,7 @@ static uint8_t AppAcousticService_SyncRuntimeConfig(AppAcousticServiceSnapshot_t
   snapshot->pair_count = s_srp_ctx.pair_count;
   snapshot->grid_count = s_srp_ctx.grid_count;
   snapshot->active_bin_count = (uint16_t)s_srp_ctx.active_bin_count;
+  AppAcousticService_FillConfigSnapshot(snapshot);
   AppAcousticService_PublishSnapshot(snapshot);
 
   return (status == APP_ACOUSTIC_IMAGING_OK) ? 1U : 0U;
@@ -1061,6 +1147,91 @@ AppAcousticImagingStatus_t AppAcousticService_SetMode(AppAcousticImagingRunMode_
   s_profile_change_pending = 1U;
 
   return APP_ACOUSTIC_IMAGING_OK;
+}
+
+AppAcousticImagingStatus_t AppAcousticService_SetScene(AppAcousticScene_t scene)
+{
+  if (scene >= APP_ACOUSTIC_SCENE_COUNT)
+  {
+    return APP_ACOUSTIC_IMAGING_INVALID_ARGUMENT;
+  }
+
+  /* Scene switch re-baselines the rendering parameters to the preset. */
+  AppAcousticService_SetFieldParams(&s_scene_presets[scene].params);
+  s_requested_scene = scene;
+  s_profile_change_pending = 1U;
+
+  return APP_ACOUSTIC_IMAGING_OK;
+}
+
+AppAcousticImagingStatus_t AppAcousticService_SetTemperature(int8_t temperature_c)
+{
+  if ((temperature_c < APP_ACOUSTIC_SERVICE_TEMP_MIN_C) ||
+      (temperature_c > APP_ACOUSTIC_SERVICE_TEMP_MAX_C))
+  {
+    return APP_ACOUSTIC_IMAGING_INVALID_ARGUMENT;
+  }
+
+  s_requested_temperature_c = temperature_c;
+  s_profile_change_pending = 1U;
+
+  return APP_ACOUSTIC_IMAGING_OK;
+}
+
+static float AppAcousticService_ClampF32(float value, float lo, float hi)
+{
+  if (value < lo)
+  {
+    return lo;
+  }
+  if (value > hi)
+  {
+    return hi;
+  }
+  return value;
+}
+
+void AppAcousticService_SetFieldParams(const AppAcousticFieldParams_t *params)
+{
+  AppAcousticFieldParams_t next;
+  uint32_t primask;
+
+  if (params == NULL)
+  {
+    return;
+  }
+
+  next.db_floor = AppAcousticService_ClampF32(params->db_floor, -30.0f, -6.0f);
+  next.gamma = AppAcousticService_ClampF32(params->gamma, 0.5f, 2.5f);
+  next.noise_gate = AppAcousticService_ClampF32(params->noise_gate, 0.0f, 0.6f);
+  next.bg_gain = AppAcousticService_ClampF32(params->bg_gain, 1.0f, 3.0f);
+  next.smooth_passes = (params->smooth_passes > 3U) ? 3U : params->smooth_passes;
+
+  primask = __get_PRIMASK();
+  __disable_irq();
+  s_field_params = next;
+  if (primask == 0U)
+  {
+    __enable_irq();
+  }
+}
+
+void AppAcousticService_GetFieldParams(AppAcousticFieldParams_t *params)
+{
+  uint32_t primask;
+
+  if (params == NULL)
+  {
+    return;
+  }
+
+  primask = __get_PRIMASK();
+  __disable_irq();
+  *params = s_field_params;
+  if (primask == 0U)
+  {
+    __enable_irq();
+  }
 }
 
 AppAcousticImagingStatus_t AppAcousticService_SetBinPolicy(AppAcousticImagingBinPolicy_t policy)

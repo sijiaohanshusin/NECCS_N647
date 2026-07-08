@@ -37,7 +37,9 @@ public:
     void setAlignment(Align value);
 
 private:
-    static const uint32_t MaxText = 96U;
+    /* Longest live string is a media path (~40 chars); 56 keeps margin while
+     * saving 80 bytes per label instance (~150 labels in the View). */
+    static const uint32_t MaxText = 56U;
 
     uint16_t typedTextId() const;
     void refreshTypedText();
