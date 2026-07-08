@@ -656,6 +656,52 @@ static void App_AcousticSrp_RunFft(const AppAcousticSrpContext_t *ctx)
   }
 }
 
+uint32_t App_AcousticSrp_GetRefSpectrum(const AppAcousticSrpContext_t *ctx,
+                                        float *mags,
+                                        uint32_t mag_count)
+{
+  const AppAcousticSrpWorkspace_t *workspace = &s_srp_workspace;
+  const float *freq = NULL;
+  uint32_t half;
+
+  if ((ctx == NULL) || (mags == NULL) || (mag_count == 0U) || (ctx->initialized == 0U))
+  {
+    return 0U;
+  }
+
+  /* First active channel's spectrum from the frame just processed (the
+   * service is single-threaded, so the workspace still holds it). */
+  for (uint32_t channel = 0U; channel < ctx->config.channel_count; channel++)
+  {
+    if (App_AcousticSrp_ChannelIsActive(ctx, channel) != 0U)
+    {
+      freq = &workspace->freq[channel * ctx->config.nfft];
+      break;
+    }
+  }
+  if (freq == NULL)
+  {
+    return 0U;
+  }
+
+  half = ctx->config.nfft / 2U;
+  if (mag_count > half)
+  {
+    mag_count = half;
+  }
+
+  /* CMSIS rfft packed layout: [X0.re, XN/2.re, X1.re, X1.im, ...].
+   * |re| + |im| is a fine magnitude proxy for a display spectrum. */
+  mags[0] = App_AcousticSrp_AbsF32(freq[0]);
+  for (uint32_t bin = 1U; bin < mag_count; bin++)
+  {
+    mags[bin] = App_AcousticSrp_AbsF32(freq[bin * 2U]) +
+                App_AcousticSrp_AbsF32(freq[(bin * 2U) + 1U]);
+  }
+
+  return mag_count;
+}
+
 static uint8_t App_AcousticSrp_PairHasWeight(const AppAcousticSrpContext_t *ctx,
                                              uint32_t pair_index)
 {

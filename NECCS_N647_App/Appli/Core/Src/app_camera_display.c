@@ -265,11 +265,13 @@ static void AppCameraDisplay_BuildHeatLuts(void)
     }
     else
     {
+      /* Quadratic ramp starting at 0 right at the threshold: the hot-region
+       * edge fades in instead of stepping to a visible base alpha, which is
+       * what made the field read as "blocky" on the panel. */
       const uint32_t span = 255U - APP_CAMERA_DISPLAY_HEAT_ALPHA_MIN_VALUE;
       const uint32_t t = ((v - APP_CAMERA_DISPLAY_HEAT_ALPHA_MIN_VALUE) * 255U) / span;
-      s_heat_alpha_lut[v] = (uint8_t)(APP_CAMERA_DISPLAY_HEAT_ALPHA_BASE +
-                                      ((t * (APP_CAMERA_DISPLAY_HEAT_ALPHA_MAX -
-                                             APP_CAMERA_DISPLAY_HEAT_ALPHA_BASE)) / 255U));
+      const uint32_t t_sq = (t * t) / 255U;
+      s_heat_alpha_lut[v] = (uint8_t)((t_sq * APP_CAMERA_DISPLAY_HEAT_ALPHA_MAX) / 255U);
     }
   }
 

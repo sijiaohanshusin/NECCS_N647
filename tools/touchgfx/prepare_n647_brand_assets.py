@@ -78,6 +78,30 @@ def main():
     ring.save(ring_path)
     print("boot_ring: %dx%d -> %s" % (size, size, ring_path))
 
+    # Enclosure silkscreen artwork reused as UI decoration (L8 quantized):
+    #   deco_wave: gold particle wave -> boot page footer band
+    #   deco_sonar: sonar arcs -> system page ornament
+    silk_dir = os.path.dirname(args.src)
+    wave_src = os.path.join(silk_dir, "01_透明底.png")
+    if os.path.exists(wave_src):
+        wave = Image.open(wave_src).convert("RGBA")
+        wave = wave.crop(content_bbox(wave))
+        w = 900
+        wave = wave.resize((w, max(1, round(wave.height * (w / wave.width)))), Image.LANCZOS)
+        wave_path = os.path.join(args.out_dir, "deco_wave.png")
+        save_quantized(wave, wave_path)
+        print("deco_wave: %dx%d -> %s" % (wave.width, wave.height, wave_path))
+
+    sonar_src = os.path.join(silk_dir, "06_透明底.png")
+    if os.path.exists(sonar_src):
+        sonar = Image.open(sonar_src).convert("RGBA")
+        sonar = sonar.crop(content_bbox(sonar))
+        w = 280
+        sonar = sonar.resize((w, max(1, round(sonar.height * (w / sonar.width)))), Image.LANCZOS)
+        sonar_path = os.path.join(args.out_dir, "deco_sonar.png")
+        save_quantized(sonar, sonar_path)
+        print("deco_sonar: %dx%d -> %s" % (sonar.width, sonar.height, sonar_path))
+
 
 if __name__ == "__main__":
     main()

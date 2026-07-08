@@ -153,6 +153,8 @@ TemplateView::TemplateView()
       profilePressedCallback(this, &TemplateView::onProfilePressed),
       paramsPressedCallback(this, &TemplateView::onParamsPressed),
       mediaPressedCallback(this, &TemplateView::onMediaPressed),
+      menuPressedCallback(this, &TemplateView::onMenuPressed),
+      bandChangedCallback(this, &TemplateView::onBandChanged),
       activeScreen(APP_UI_SCREEN_BOOT),
       activeProfile(APP_UI_PROFILE_BALANCED),
       bootEmblemAlpha(0U),
@@ -160,7 +162,8 @@ TemplateView::TemplateView()
       bootBarWidth(0),
       bootBarTarget(0),
       mediaPreviewGeneration(0U),
-      recActive(false)
+      recActive(false),
+      menuOpen(false)
 {
 }
 
@@ -181,8 +184,9 @@ void TemplateView::setupScreen()
     setupParamsPage();
     setupMediaPage();
     setupStatusBar();
-    setupNavigation();
     setupBootPage();
+    /* Menu popup last: it overlays everything. */
+    setupNavigation();
 
     refreshVisibility();
     refreshNavigation();
@@ -214,6 +218,18 @@ void TemplateView::setupStatusBar()
     setupLabel(brandTitle, 58, 10, 170, 26, 2, "声学成像仪", ColorText);
     add(brandTitle);
 
+    /* Brand area doubles as the menu button (hamburger glyph, no font dep). */
+    for (uint32_t i = 0U; i < 3U; ++i)
+    {
+        menuBurger[i].setPosition(216, static_cast<int16_t>(15 + (i * 5)), 18, 2);
+        menuBurger[i].setColor(ColorMuted);
+        add(menuBurger[i]);
+    }
+
+    menuTouch.setPosition(0, 0, 244, BarH);
+    menuTouch.setAction(menuPressedCallback);
+    add(menuTouch);
+
     modeChip.setPosition(250, 8, 190, 28);
     modeChip.setStyle(ColorPanel2, 14U);
     modeChip.setBorder(ColorBlueDim, true);
@@ -244,19 +260,23 @@ void TemplateView::setupStatusBar()
 
 void TemplateView::setupNavigation()
 {
-    navPanel.setPosition(0, BarH + 1, NavW, ScreenH - BarH - 1);
-    navPanel.setColor(ColorPanel);
-    add(navPanel);
+    /* Popup menu: dim scrim (tap outside to close) + panel under the brand
+     * area with one row per page. Added last, so it overlays every page. */
+    menuScrim.setPosition(0, 0, ScreenW, ScreenH);
+    menuScrim.setColor(rgb(3, 6, 10));
+    menuScrim.setAlpha(140U);
+    add(menuScrim);
 
-    navPanelLine.setPosition(NavW, BarH + 1, 1, ScreenH - BarH - 1);
-    navPanelLine.setColor(ColorLine);
-    add(navPanelLine);
+    menuScrimTouch.setPosition(0, 0, ScreenW, ScreenH);
+    menuScrimTouch.setAction(menuPressedCallback);
+    add(menuScrimTouch);
 
-    navActiveBar.setPosition(0, 64, 3, 64);
-    navActiveBar.setColor(ColorBlue);
-    add(navActiveBar);
+    menuPanel.setPosition(10, BarH + 6, 250, 5 * 62 + 20);
+    menuPanel.setStyle(ColorPanel2, 14U);
+    menuPanel.setBorder(ColorBlueDim, true);
+    add(menuPanel);
 
-    static const char* labels[NavCount] = {"成像", "阵列", "参数", "媒体", "系统"};
+    static const char* labels[NavCount] = {"实时成像", "麦克风阵列", "参数设置", "媒体中心", "系统状态"};
     static const uint16_t icons[NavCount] = {
         BITMAP_UI_IMAGE_ID,
         BITMAP_UI_MIC_ID,
@@ -267,19 +287,43 @@ void TemplateView::setupNavigation()
 
     for (uint32_t i = 0U; i < NavCount; ++i)
     {
-        const int16_t y = static_cast<int16_t>(64 + (i * 82));
+        const int16_t y = static_cast<int16_t>(BarH + 16 + (i * 62));
+
+        navActiveDot[i].setPosition(26, static_cast<int16_t>(y + 20), 6, 6);
+        navActiveDot[i].setColor(ColorBlue);
+        add(navActiveDot[i]);
 
         navIcon[i].setBitmap(touchgfx::Bitmap(icons[i]));
-        navIcon[i].setPosition(26, static_cast<int16_t>(y + 10), 24, 24);
+        navIcon[i].setPosition(44, static_cast<int16_t>(y + 10), 24, 24);
         add(navIcon[i]);
 
-        setupLabel(navLabel[i], 0, static_cast<int16_t>(y + 38), NavW, 18, 1, labels[i], ColorMuted, AppTextLabel::ALIGN_CENTER);
+        setupLabel(navLabel[i], 82, static_cast<int16_t>(y + 11), 160, 24, 2, labels[i], ColorText);
         add(navLabel[i]);
 
-        navTouch[i].setPosition(0, y, NavW, 64);
+        navTouch[i].setPosition(14, y, 242, 58);
         navTouch[i].setAction(navPressedCallback);
         add(navTouch[i]);
     }
+}
+
+void TemplateView::setMenuOpen(bool open)
+{
+    menuOpen = open;
+    menuScrim.setVisible(open);
+    menuScrimTouch.setVisible(open);
+    menuPanel.setVisible(open);
+    for (uint32_t i = 0U; i < NavCount; ++i)
+    {
+        navIcon[i].setVisible(open);
+        navLabel[i].setVisible(open);
+        navTouch[i].setVisible(open);
+        navActiveDot[i].setVisible(open);
+    }
+    if (open)
+    {
+        refreshNavigation();
+    }
+    invalidate();
 }
 
 void TemplateView::setupImagePage()
@@ -323,22 +367,23 @@ void TemplateView::setupImagePage()
         BITMAP_UI_QUALITY_ID,
         BITMAP_UI_STANDARD_ID
     };
+    /* Quick actions fill the left column freed by the popup navigation. */
     for (uint32_t i = 0U; i < QuickCount; ++i)
     {
-        const int16_t y = static_cast<int16_t>(CamY + (i * 78));
-        quickButton[i].setPosition(84, y, 96, 68);
-        quickButton[i].setStyle(ColorPanel2, 10U);
+        const int16_t y = static_cast<int16_t>(CamY + (i * 86));
+        quickButton[i].setPosition(16, y, 160, 78);
+        quickButton[i].setStyle(ColorPanel2, 12U);
         quickButton[i].setBorder(ColorLine, true);
         add(quickButton[i]);
 
         quickIcon[i].setBitmap(touchgfx::Bitmap(quickIcons[i]));
-        quickIcon[i].setPosition(120, static_cast<int16_t>(y + 9), 24, 24);
+        quickIcon[i].setPosition(84, static_cast<int16_t>(y + 12), 24, 24);
         add(quickIcon[i]);
 
-        setupLabel(quickLabel[i], 84, static_cast<int16_t>(y + 40), 96, 20, 1, quickNames[i], ColorText, AppTextLabel::ALIGN_CENTER);
+        setupLabel(quickLabel[i], 16, static_cast<int16_t>(y + 46), 160, 20, 1, quickNames[i], ColorText, AppTextLabel::ALIGN_CENTER);
         add(quickLabel[i]);
 
-        quickTouch[i].setPosition(84, y, 96, 68);
+        quickTouch[i].setPosition(16, y, 160, 78);
         quickTouch[i].setAction(quickPressedCallback);
         add(quickTouch[i]);
     }
@@ -411,24 +456,13 @@ void TemplateView::setupImagePage()
     add(railModeValue);
     add(railSceneValue);
 
-    /* bottom strip under the camera window */
-    stripPanel.setPosition(CamX, 548, CamW, 40);
-    stripPanel.setColor(ColorPanel);
-    add(stripPanel);
+    /* Interactive FFT spectrum with band selection under the camera window. */
+    spectrumPanel.setPosition(CamX, 546, CamW, 46);
+    spectrumPanel.setBandChangedCallback(bandChangedCallback);
+    add(spectrumPanel);
 
-    static const char* stripInitial[StripCount] = {"方位 --", "俯仰 --", "质量 --", "峰值 --"};
-    for (uint32_t i = 0U; i < StripCount; ++i)
-    {
-        setupLabel(stripLabel[i],
-                   static_cast<int16_t>(CamX + 18 + (i * 158)),
-                   557,
-                   150,
-                   22,
-                   1,
-                   stripInitial[i],
-                   (i == 2U) ? ColorBlue : ((i == 3U) ? ColorAmber : ColorText));
-        add(stripLabel[i]);
-    }
+    setupLabel(spectrumBandLabel, 16, 548, 160, 20, 1, "频带 -- Hz", ColorMuted, AppTextLabel::ALIGN_CENTER);
+    add(spectrumBandLabel);
 }
 
 void TemplateView::setupMicPage()
@@ -476,6 +510,12 @@ void TemplateView::setupSystemPage()
     sysPerfCard.setStyle(ColorPanel, 12U);
     sysPerfCard.setBorder(ColorLine, true);
     add(sysPerfCard);
+
+    /* Enclosure silkscreen sonar arcs as a card watermark. */
+    sysDecoSonar.setBitmap(touchgfx::Bitmap(BITMAP_DECO_SONAR_ID));
+    sysDecoSonar.setPosition(static_cast<int16_t>(ContentX + 144), 336, 280, 190);
+    sysDecoSonar.setAlpha(45U);
+    add(sysDecoSonar);
 
     sysInfoCard.setPosition(ContentX + 560, 104, 356, 440);
     sysInfoCard.setStyle(ColorPanel, 12U);
@@ -537,37 +577,43 @@ void TemplateView::setupParamsPage()
         add(profileTouch[i]);
     }
 
+    /* Two columns: measurement setup (left) and heat rendering (right). */
+    const int16_t leftX = static_cast<int16_t>(ContentX + 24);
+    const int16_t rightX = static_cast<int16_t>(ContentX + 478);
+    const int16_t colW = 430;
+
     static const char* rowNames[ParamRowCount] = {"场景模式", "频带", "温度 / 声速", "调色板", "声源轨迹"};
     static const char* rowValues[ParamRowCount] = {"通用", "563 - 7875 Hz", "25℃ / 346 m/s", "铁红", "关闭"};
     for (uint32_t i = 0U; i < ParamRowCount; ++i)
     {
         const int16_t y = static_cast<int16_t>(200 + (i * 72));
-        paramRowPanel[i].setPosition(ContentX + 24, y, 892, 60);
+        paramRowPanel[i].setPosition(leftX, y, colW, 60);
         paramRowPanel[i].setStyle(ColorPanel, 12U);
         paramRowPanel[i].setBorder(ColorLine, true);
         add(paramRowPanel[i]);
 
-        setupLabel(paramRowName[i], ContentX + 48, static_cast<int16_t>(y + 18), 220, 24, 2, rowNames[i], ColorMuted);
+        setupLabel(paramRowName[i], static_cast<int16_t>(leftX + 18), static_cast<int16_t>(y + 20), 130, 22, 1, rowNames[i], ColorMuted);
         /* Temperature row keeps space free on the right for the steppers. */
-        const int16_t valueWidth = (i == 2U) ? 280 : 392;
-        setupLabel(paramRowValue[i], ContentX + 500, static_cast<int16_t>(y + 18), valueWidth, 24, 2, rowValues[i], ColorText, AppTextLabel::ALIGN_RIGHT);
+        const int16_t valueWidth = (i == 2U) ? 148 : 258;
+        setupLabel(paramRowValue[i], static_cast<int16_t>(leftX + 152), static_cast<int16_t>(y + 18), valueWidth, 24, 2, rowValues[i], ColorText, AppTextLabel::ALIGN_RIGHT);
         add(paramRowName[i]);
         add(paramRowValue[i]);
 
         /* Scene, palette and trail rows toggle on tap anywhere in the row. */
         if ((i == 0U) || (i == 3U) || (i == 4U))
         {
-            paramRowTouch[i].setPosition(ContentX + 24, y, 892, 60);
+            paramRowTouch[i].setPosition(leftX, y, colW, 60);
             paramRowTouch[i].setAction(paramsPressedCallback);
             add(paramRowTouch[i]);
         }
     }
 
-    /* Temperature steppers on row 2. */
     static const char* stepText[2] = {"-", "+"};
+
+    /* Temperature steppers on row 2. */
     for (uint32_t i = 0U; i < 2U; ++i)
     {
-        const int16_t x = static_cast<int16_t>(ContentX + 800 + (i * 56));
+        const int16_t x = static_cast<int16_t>(leftX + colW - 104 + (i * 52));
         const int16_t y = static_cast<int16_t>(200 + (2U * 72) + 8);
         tempStepChip[i].setPosition(x, y, 44, 44);
         tempStepChip[i].setStyle(ColorPanel2, 12U);
@@ -580,6 +626,43 @@ void TemplateView::setupParamsPage()
         tempStepTouch[i].setPosition(x, y, 44, 44);
         tempStepTouch[i].setAction(paramsPressedCallback);
         add(tempStepTouch[i]);
+    }
+
+    /* Heat rendering parameter steppers (right column). */
+    setupLabel(paramsRenderCaption, rightX, 172, 200, 22, 1, "热图渲染", ColorMuted);
+    add(paramsRenderCaption);
+
+    static const char* renderNames[RenderRowCount] = {"dB 下限", "伽马", "噪声门", "平滑"};
+    for (uint32_t i = 0U; i < RenderRowCount; ++i)
+    {
+        const int16_t y = static_cast<int16_t>(200 + (i * 72));
+        renderRowPanel[i].setPosition(rightX, y, colW, 60);
+        renderRowPanel[i].setStyle(ColorPanel, 12U);
+        renderRowPanel[i].setBorder(ColorLine, true);
+        add(renderRowPanel[i]);
+
+        setupLabel(renderRowName[i], static_cast<int16_t>(rightX + 18), static_cast<int16_t>(y + 20), 110, 22, 1, renderNames[i], ColorMuted);
+        setupLabel(renderRowValue[i], static_cast<int16_t>(rightX + 130), static_cast<int16_t>(y + 18), 176, 24, 2, "--", ColorText, AppTextLabel::ALIGN_RIGHT);
+        add(renderRowName[i]);
+        add(renderRowValue[i]);
+
+        for (uint32_t j = 0U; j < 2U; ++j)
+        {
+            const uint32_t idx = (i * 2U) + j;
+            const int16_t x = static_cast<int16_t>(rightX + colW - 104 + (j * 52));
+
+            renderStepChip[idx].setPosition(x, static_cast<int16_t>(y + 8), 44, 44);
+            renderStepChip[idx].setStyle(ColorPanel2, 12U);
+            renderStepChip[idx].setBorder(ColorBlueDim, true);
+            add(renderStepChip[idx]);
+
+            setupLabel(renderStepLabel[idx], x, static_cast<int16_t>(y + 17), 44, 26, 2, stepText[j], ColorBlue, AppTextLabel::ALIGN_CENTER);
+            add(renderStepLabel[idx]);
+
+            renderStepTouch[idx].setPosition(x, static_cast<int16_t>(y + 8), 44, 44);
+            renderStepTouch[idx].setAction(paramsPressedCallback);
+            add(renderStepTouch[idx]);
+        }
     }
 }
 
@@ -642,11 +725,31 @@ void TemplateView::setupBootPage()
     bootBg.setColor(ColorBg);
     add(bootBg);
 
+    /* Enclosure silkscreen wave as a subtle footer backdrop. */
+    bootDecoWave.setBitmap(touchgfx::Bitmap(BITMAP_DECO_WAVE_ID));
+    bootDecoWave.setPosition(62, 408, 900, 186);
+    bootDecoWave.setAlpha(90U);
+    add(bootDecoWave);
+
+    /* Competition badge, top-centre above the emblem. */
+    bootCompBadge.setBitmap(touchgfx::Bitmap(BITMAP_DECO_COMP_ID));
+    bootCompBadge.setPosition(232, 24, 560, 89);
+    bootCompBadge.setAlpha(210U);
+    add(bootCompBadge);
+
+    /* Fixed-geometry rings, animated by alpha only: rescaling images every
+     * tick redrew a ~350px square each frame and made the whole boot page
+     * shimmer (single-buffer render racing the scanout). */
+    static const int16_t ringDiameter[BootRingCount] = {150, 240, 330};
     for (uint32_t i = 0U; i < BootRingCount; ++i)
     {
+        const int16_t d = ringDiameter[i];
         bootRing[i].setBitmap(touchgfx::Bitmap(BITMAP_BOOT_RING_ID));
         bootRing[i].setScalingAlgorithm(touchgfx::ScalableImage::BILINEAR_INTERPOLATION);
-        bootRing[i].setPosition(452, 130, 120, 120);
+        bootRing[i].setPosition(static_cast<int16_t>(512 - (d / 2)),
+                                static_cast<int16_t>(192 - (d / 2)),
+                                d,
+                                d);
         bootRing[i].setAlpha(0U);
         add(bootRing[i]);
     }
@@ -715,28 +818,28 @@ void TemplateView::handleTickEvent()
         return;
     }
 
-    /* Expanding sonar rings around the emblem centre (512, 192).
-     * Only the ring band (four edge strips of the bounding box) is
-     * invalidated: a full-rect invalidate would redraw the emblem region
-     * every tick and made the logo visibly flicker on the panel. */
-    constexpr uint16_t Period = 96U;
-    constexpr int16_t RingCx = 512;
-    constexpr int16_t RingCy = 192;
+    /* Breathing rings: fixed geometry, alpha-only animation, ring-band
+     * invalidation, updated every other tick. Keeps the per-frame redraw
+     * area tiny so the single-buffer render never races the scanout. */
+    constexpr uint16_t Period = 120U;
     bootPhase = static_cast<uint16_t>((bootPhase + 1U) % Period);
-    for (uint32_t i = 0U; i < BootRingCount; ++i)
+    if ((bootPhase % 2U) == 0U)
     {
-        const uint16_t offset = static_cast<uint16_t>((bootPhase + ((Period / BootRingCount) * i)) % Period);
-        const int16_t diameter = static_cast<int16_t>(96 + ((260 * offset) / Period));
-        const uint32_t fade = Period - offset;
-        const uint8_t alpha = static_cast<uint8_t>((170U * fade * fade) / (Period * Period));
+        for (uint32_t i = 0U; i < BootRingCount; ++i)
+        {
+            const uint16_t offset = static_cast<uint16_t>((bootPhase + ((Period / BootRingCount) * i)) % Period);
+            /* Triangle wave 0..255..0 across the period, squared for ease. */
+            const uint32_t tri = (offset < (Period / 2U))
+                                 ? ((offset * 510U) / Period)
+                                 : (((Period - offset) * 510U) / Period);
+            const uint8_t alpha = static_cast<uint8_t>((tri * tri * 150U) / (255U * 255U));
 
-        invalidateRingBand(bootRing[i].getX(), bootRing[i].getY(), bootRing[i].getWidth());
-        bootRing[i].setPosition(static_cast<int16_t>(RingCx - (diameter / 2)),
-                                static_cast<int16_t>(RingCy - (diameter / 2)),
-                                diameter,
-                                diameter);
-        bootRing[i].setAlpha(alpha);
-        invalidateRingBand(bootRing[i].getX(), bootRing[i].getY(), diameter);
+            if (alpha != bootRing[i].getAlpha())
+            {
+                bootRing[i].setAlpha(alpha);
+                invalidateRingBand(bootRing[i].getX(), bootRing[i].getY(), bootRing[i].getWidth());
+            }
+        }
     }
 
     if (bootEmblemAlpha < 255U)
@@ -821,6 +924,8 @@ void TemplateView::refreshVisibility()
 
     /* boot */
     bootBg.setVisible(bootVisible);
+    bootDecoWave.setVisible(bootVisible);
+    bootCompBadge.setVisible(bootVisible);
     for (uint32_t i = 0U; i < BootRingCount; ++i)
     {
         bootRing[i].setVisible(bootVisible);
@@ -850,14 +955,23 @@ void TemplateView::refreshVisibility()
     sdLabel.setVisible(chromeVisible);
     battLabel.setVisible(chromeVisible);
     fpsLabel.setVisible(chromeVisible);
-    navPanel.setVisible(chromeVisible);
-    navPanelLine.setVisible(chromeVisible);
-    navActiveBar.setVisible(chromeVisible);
+    for (uint32_t i = 0U; i < 3U; ++i)
+    {
+        menuBurger[i].setVisible(chromeVisible);
+    }
+    menuTouch.setVisible(chromeVisible);
+
+    /* popup menu: page switches and boot both close it */
+    const bool popupVisible = chromeVisible && menuOpen;
+    menuScrim.setVisible(popupVisible);
+    menuScrimTouch.setVisible(popupVisible);
+    menuPanel.setVisible(popupVisible);
     for (uint32_t i = 0U; i < NavCount; ++i)
     {
-        navIcon[i].setVisible(chromeVisible);
-        navLabel[i].setVisible(chromeVisible);
-        navTouch[i].setVisible(chromeVisible);
+        navIcon[i].setVisible(popupVisible);
+        navLabel[i].setVisible(popupVisible);
+        navTouch[i].setVisible(popupVisible);
+        navActiveDot[i].setVisible(popupVisible);
     }
 
     /* imaging */
@@ -901,11 +1015,8 @@ void TemplateView::refreshVisibility()
     railSceneValue.setVisible(imageVisible);
     railCandLabel[0].setVisible(imageVisible);
     railCandLabel[1].setVisible(imageVisible);
-    stripPanel.setVisible(imageVisible);
-    for (uint32_t i = 0U; i < StripCount; ++i)
-    {
-        stripLabel[i].setVisible(imageVisible);
-    }
+    spectrumPanel.setVisible(imageVisible);
+    spectrumBandLabel.setVisible(imageVisible);
 
     /* array */
     micTitle.setVisible(micVisible);
@@ -923,6 +1034,7 @@ void TemplateView::refreshVisibility()
     /* system */
     sysTitle.setVisible(sysVisible);
     sysPerfCard.setVisible(sysVisible);
+    sysDecoSonar.setVisible(sysVisible);
     sysInfoCard.setVisible(sysVisible);
     for (uint32_t i = 0U; i < PerfCount; ++i)
     {
@@ -959,6 +1071,19 @@ void TemplateView::refreshVisibility()
         tempStepLabel[i].setVisible(paramsVisible);
         tempStepTouch[i].setVisible(paramsVisible);
     }
+    paramsRenderCaption.setVisible(paramsVisible);
+    for (uint32_t i = 0U; i < RenderRowCount; ++i)
+    {
+        renderRowPanel[i].setVisible(paramsVisible);
+        renderRowName[i].setVisible(paramsVisible);
+        renderRowValue[i].setVisible(paramsVisible);
+    }
+    for (uint32_t i = 0U; i < (RenderRowCount * 2U); ++i)
+    {
+        renderStepChip[i].setVisible(paramsVisible);
+        renderStepLabel[i].setVisible(paramsVisible);
+        renderStepTouch[i].setVisible(paramsVisible);
+    }
 
     /* media */
     mediaTitle.setVisible(mediaVisible);
@@ -993,14 +1118,10 @@ void TemplateView::refreshNavigation()
     for (uint32_t i = 0U; i < NavCount; ++i)
     {
         const bool active = (navScreens[i] == activeScreen);
-        navLabel[i].setColors(active ? ColorBlue : ColorMuted, ColorBg, false);
-        if (active)
-        {
-            navActiveBar.setPosition(0, static_cast<int16_t>(64 + (i * 82)), 3, 64);
-        }
+        navLabel[i].setColors(active ? ColorBlue : ColorText, ColorBg, false);
+        navActiveDot[i].setVisible(menuOpen && active);
+        navActiveDot[i].invalidate();
     }
-    navActiveBar.invalidate();
-    navPanel.invalidate();
 }
 
 void TemplateView::refreshStatusBar(const AppUiSnapshot& snapshot)
@@ -1167,26 +1288,31 @@ void TemplateView::refreshImagePage(const AppUiSnapshot& snapshot)
 
     (void)snprintf(text, sizeof(text), "方位 %+d°", snapshot.thetaDeg);
     railTheta.setText(text);
-    stripLabel[0].setText(text);
 
     (void)snprintf(text, sizeof(text), "俯仰 %+d°", snapshot.phiDeg);
     railPhi.setText(text);
-    stripLabel[1].setText(text);
 
-    (void)snprintf(text, sizeof(text), "质量 %02u%%", snapshot.qualityPct);
-    stripLabel[2].setText(text);
-
-    (void)snprintf(text, sizeof(text), "峰值 %d dBFS", snapshot.pcmdRawPeakDbfs);
-    stripLabel[3].setText(text);
+    /* spectrum panel + band readout in the left column */
+    spectrumPanel.setData(snapshot.spectrum,
+                          snapshot.acousticBandLoHz,
+                          snapshot.acousticBandHiHz,
+                          snapshot.spectrumPeakBin);
+    (void)snprintf(text, sizeof(text), "频带 %u-%u Hz",
+                   snapshot.acousticBandLoHz,
+                   snapshot.acousticBandHiHz);
+    spectrumBandLabel.setText(text);
 
     int16_t fillW = static_cast<int16_t>((144 * snapshot.qualityPct) / 100);
     if (fillW < 4)
     {
         fillW = 4;
     }
-    railQualityFill.setPosition(RailX + 14, 142, fillW, 5);
-    railQualityTrack.invalidate();
-    railQualityFill.invalidate();
+    if (railQualityFill.getWidth() != fillW)
+    {
+        railQualityFill.setPosition(RailX + 14, 142, fillW, 5);
+        railQualityTrack.invalidate();
+        railQualityFill.invalidate();
+    }
 
     /* Secondary sources (multi-source list). */
     for (uint32_t i = 0U; i < 2U; ++i)
@@ -1206,6 +1332,10 @@ void TemplateView::refreshImagePage(const AppUiSnapshot& snapshot)
         }
         railCandLabel[i].setText(text);
     }
+
+    /* Peak level readout folded into the source card title. */
+    (void)snprintf(text, sizeof(text), "声源 · 峰值 %d dB", snapshot.pcmdRawPeakDbfs);
+    railSourceTitle.setText(text);
 
     const bool pcmdOk = (snapshot.pcmdFlags & APP_UI_PCMD_FLAG_FRAME_VALID) != 0U;
     const bool pcmdFault = (snapshot.pcmdFlags & APP_UI_PCMD_FLAG_RAW_FAULT) != 0U;
@@ -1331,9 +1461,12 @@ void TemplateView::refreshSystemPage(const AppUiSnapshot& snapshot)
         {
             w = 6;
         }
-        perfFill[i].setPosition(ContentX + 180, perfFill[i].getY(), w, 16);
-        perfTrack[i].invalidate();
-        perfFill[i].invalidate();
+        if (perfFill[i].getWidth() != w)
+        {
+            perfFill[i].setPosition(ContentX + 180, perfFill[i].getY(), w, 16);
+            perfTrack[i].invalidate();
+            perfFill[i].invalidate();
+        }
 
         formatCyclesM(text, sizeof(text), cycles[i]);
         perfValue[i].setText(text);
@@ -1424,6 +1557,21 @@ void TemplateView::refreshParamsPage(const AppUiSnapshot& snapshot)
 
     paramRowValue[4].setColors((snapshot.trailEnabled != 0U) ? ColorBlue : ColorText, ColorBg, false);
     paramRowValue[4].setText((snapshot.trailEnabled != 0U) ? "开" : "关闭");
+
+    /* render parameter steppers */
+    (void)snprintf(text, sizeof(text), "%d dB", snapshot.fieldDbFloor);
+    renderRowValue[0].setText(text);
+
+    (void)snprintf(text, sizeof(text), "%u.%02u",
+                   snapshot.fieldGammaX100 / 100U,
+                   snapshot.fieldGammaX100 % 100U);
+    renderRowValue[1].setText(text);
+
+    (void)snprintf(text, sizeof(text), "0.%02u", snapshot.fieldNoiseGateX100);
+    renderRowValue[2].setText(text);
+
+    (void)snprintf(text, sizeof(text), "%u", snapshot.fieldSmoothPasses);
+    renderRowValue[3].setText(text);
 }
 
 void TemplateView::refreshMediaPage(const AppUiSnapshot& snapshot)
@@ -1524,10 +1672,29 @@ void TemplateView::onNavPressed(const touchgfx::AbstractButton& source)
     {
         if (&source == &navTouch[i])
         {
+            setMenuOpen(false);
             presenter->selectScreen(navScreens[i]);
             return;
         }
     }
+}
+
+void TemplateView::onMenuPressed(const touchgfx::AbstractButton& source)
+{
+    /* Brand-area tap toggles; scrim tap always closes. */
+    if (&source == &menuScrimTouch)
+    {
+        setMenuOpen(false);
+    }
+    else
+    {
+        setMenuOpen(!menuOpen);
+    }
+}
+
+void TemplateView::onBandChanged(uint16_t loHz, uint16_t hiHz)
+{
+    presenter->setBandHz(loHz, hiHz);
 }
 
 void TemplateView::onQuickPressed(const touchgfx::AbstractButton& source)
@@ -1587,6 +1754,18 @@ void TemplateView::onParamsPressed(const touchgfx::AbstractButton& source)
     else if (&source == &tempStepTouch[1])
     {
         presenter->adjustTemperature(1);
+    }
+    else
+    {
+        for (uint32_t i = 0U; i < (RenderRowCount * 2U); ++i)
+        {
+            if (&source == &renderStepTouch[i])
+            {
+                presenter->adjustFieldParam(static_cast<uint8_t>(i / 2U),
+                                            ((i % 2U) == 0U) ? -1 : 1);
+                return;
+            }
+        }
     }
 }
 

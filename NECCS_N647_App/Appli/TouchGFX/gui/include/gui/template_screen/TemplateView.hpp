@@ -39,7 +39,6 @@ private:
     static const uint32_t QuickCount = 5U;
     static const uint32_t RailCardCount = 4U;
     static const uint32_t RailStateRows = 3U;
-    static const uint32_t StripCount = 4U;
     static const uint32_t MicCount = 32U;
     static const uint32_t PerfCount = 5U;
     static const uint32_t SysInfoCount = 10U;
@@ -73,6 +72,9 @@ private:
     void onProfilePressed(const touchgfx::AbstractButton& source);
     void onParamsPressed(const touchgfx::AbstractButton& source);
     void onMediaPressed(const touchgfx::AbstractButton& source);
+    void onMenuPressed(const touchgfx::AbstractButton& source);
+    void onBandChanged(uint16_t loHz, uint16_t hiHz);
+    void setMenuOpen(bool open);
     /* Invalidate only the ring outline strips of a boot ring bounding box,
      * keeping the emblem region untouched (prevents logo flicker). */
     void invalidateRingBand(int16_t x, int16_t y, int16_t diameter);
@@ -92,12 +94,15 @@ private:
     AppTextLabel battLabel;
     AppTextLabel fpsLabel;
 
-    /* ---- navigation rail ---- */
-    touchgfx::Box navPanel;
-    touchgfx::Box navPanelLine;
-    touchgfx::Box navActiveBar;
+    /* ---- popup navigation menu (opens from the brand area) ---- */
+    touchgfx::TouchArea menuTouch;
+    touchgfx::Box menuBurger[3];
+    touchgfx::Box menuScrim;        /* full-screen dim + outside-tap dismiss */
+    touchgfx::TouchArea menuScrimTouch;
+    AppRoundedPanel menuPanel;
     touchgfx::Image navIcon[NavCount];
     AppTextLabel navLabel[NavCount];
+    touchgfx::Box navActiveDot[NavCount];
     touchgfx::TouchArea navTouch[NavCount];
 
     /* ---- imaging page ---- */
@@ -124,8 +129,8 @@ private:
     AppTextLabel railModeValue;
     AppTextLabel railSceneValue;
     AppTextLabel railCandLabel[2];
-    touchgfx::Box stripPanel;
-    AppTextLabel stripLabel[StripCount];
+    AppSpectrumPanel spectrumPanel;
+    AppTextLabel spectrumBandLabel;
 
     /* ---- array page ---- */
     AppTextLabel micTitle;
@@ -158,6 +163,15 @@ private:
     AppRoundedPanel tempStepChip[2];
     AppTextLabel tempStepLabel[2];
     touchgfx::TouchArea tempStepTouch[2];
+    /* render-parameter steppers: 4 rows x (-, +) */
+    static const uint32_t RenderRowCount = 4U;
+    AppTextLabel paramsRenderCaption;
+    AppRoundedPanel renderRowPanel[RenderRowCount];
+    AppTextLabel renderRowName[RenderRowCount];
+    AppTextLabel renderRowValue[RenderRowCount];
+    AppRoundedPanel renderStepChip[RenderRowCount * 2U];
+    AppTextLabel renderStepLabel[RenderRowCount * 2U];
+    touchgfx::TouchArea renderStepTouch[RenderRowCount * 2U];
 
     /* ---- media page ---- */
     AppTextLabel mediaTitle;
@@ -173,6 +187,9 @@ private:
     /* ---- boot page ---- */
     static const uint32_t BootRingCount = 3U;
     touchgfx::Box bootBg;
+    touchgfx::Image bootDecoWave;   /* enclosure silkscreen: gold wave */
+    touchgfx::Image sysDecoSonar;   /* enclosure silkscreen: sonar arcs */
+    touchgfx::Image bootCompBadge;  /* competition badge (9th AI design) */
     touchgfx::ScalableImage bootRing[BootRingCount];
     touchgfx::Image bootEmblem;
     AppTextLabel bootTitle;
@@ -189,6 +206,8 @@ private:
     touchgfx::Callback<TemplateView, const touchgfx::AbstractButton&> profilePressedCallback;
     touchgfx::Callback<TemplateView, const touchgfx::AbstractButton&> paramsPressedCallback;
     touchgfx::Callback<TemplateView, const touchgfx::AbstractButton&> mediaPressedCallback;
+    touchgfx::Callback<TemplateView, const touchgfx::AbstractButton&> menuPressedCallback;
+    touchgfx::Callback<TemplateView, uint16_t, uint16_t> bandChangedCallback;
 
     uint8_t activeScreen;
     uint8_t activeProfile;
@@ -198,6 +217,7 @@ private:
     int16_t bootBarTarget;
     uint32_t mediaPreviewGeneration;
     bool recActive;
+    bool menuOpen;
 };
 
 #endif // TEMPLATE_VIEW_HPP

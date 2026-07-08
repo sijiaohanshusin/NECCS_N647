@@ -83,20 +83,26 @@ typedef struct
 static const AppAcousticScenePreset_t s_scene_presets[APP_ACOUSTIC_SCENE_COUNT] =
 {
   /* GENERAL: policy-default bins, balanced rendering (verified baseline). */
-  { 0U, 0U,   { -15.0f, 1.10f, 0.10f, 1.45f, 1U } },
+  { 0U, 0U,   { -15.0f, 1.10f, 0.10f, 1.45f, 2U } },
   /* LEAK: high band, crisp and responsive. */
-  { 27U, 42U, { -12.0f, 1.25f, 0.06f, 1.30f, 0U } },
+  { 27U, 42U, { -12.0f, 1.25f, 0.06f, 1.30f, 1U } },
   /* BEARING: mid band, extra smoothing for steady hot-spots. */
-  { 11U, 32U, { -18.0f, 1.15f, 0.10f, 1.50f, 2U } },
+  { 11U, 32U, { -18.0f, 1.15f, 0.10f, 1.50f, 3U } },
   /* ELECTRICAL: upper band, high contrast. */
-  { 16U, 42U, { -14.0f, 1.35f, 0.08f, 1.40f, 1U } },
+  { 16U, 42U, { -14.0f, 1.35f, 0.08f, 1.40f, 2U } },
 };
 
 static volatile AppAcousticScene_t s_requested_scene = APP_ACOUSTIC_SCENE_GENERAL;
 static AppAcousticScene_t s_active_scene = APP_ACOUSTIC_SCENE_GENERAL;
 static volatile int8_t s_requested_temperature_c = 25;
 static int8_t s_active_temperature_c = 25;
-static AppAcousticFieldParams_t s_field_params = { -15.0f, 1.10f, 0.10f, 1.45f, 1U };
+/* Custom analysis band (bins) from the spectrum panel; 0 = use scene band.
+ * Cleared on scene change. */
+static volatile uint16_t s_requested_band_lo_bin;
+static volatile uint16_t s_requested_band_hi_bin;
+static uint16_t s_active_band_lo_bin;
+static uint16_t s_active_band_hi_bin;
+static AppAcousticFieldParams_t s_field_params = { -15.0f, 1.10f, 0.10f, 1.45f, 2U };
 /* Copy used by the processing path for the current frame. */
 static AppAcousticFieldParams_t s_field_active;
 static uint8_t s_have_input_seq;
@@ -308,15 +314,36 @@ static AppAcousticImagingStatus_t AppAcousticService_InitRuntime(AppAcousticImag
     return status;
   }
 
-  /* Scene band override (bin_lo==0 keeps the policy default bins). */
-  if (preset->bin_lo != 0U)
+  /* Band priority: user's custom band (spectrum panel) > scene preset >
+   * profile default bins. */
   {
-    status = App_AcousticImaging_SetBand(&config, preset->bin_lo, preset->bin_hi);
-    if (status != APP_ACOUSTIC_IMAGING_OK)
+    const uint16_t custom_lo = s_requested_band_lo_bin;
+    const uint16_t custom_hi = s_requested_band_hi_bin;
+    uint16_t band_lo = 0U;
+    uint16_t band_hi = 0U;
+
+    if (custom_lo != 0U)
     {
-      memset(&s_srp_ctx, 0, sizeof(s_srp_ctx));
-      return status;
+      band_lo = custom_lo;
+      band_hi = custom_hi;
     }
+    else if (preset->bin_lo != 0U)
+    {
+      band_lo = preset->bin_lo;
+      band_hi = preset->bin_hi;
+    }
+
+    if (band_lo != 0U)
+    {
+      status = App_AcousticImaging_SetBand(&config, band_lo, band_hi);
+      if (status != APP_ACOUSTIC_IMAGING_OK)
+      {
+        memset(&s_srp_ctx, 0, sizeof(s_srp_ctx));
+        return status;
+      }
+    }
+    s_active_band_lo_bin = custom_lo;
+    s_active_band_hi_bin = custom_hi;
   }
 
   status = App_AcousticImaging_SetTemperature(&config, (float)temperature_c);
@@ -403,76 +430,130 @@ static float AppAcousticService_FieldRowToPhi(uint32_t fy)
           (float)APP_ACOUSTIC_SERVICE_FIELD_H);
 }
 
+/* Catmull-Rom weight evaluation for the four taps around fractional t. */
+static void AppAcousticService_CatmullRomWeights(float t, float w[4])
+{
+  const float t2 = t * t;
+  const float t3 = t2 * t;
+
+  w[0] = 0.5f * (-t3 + (2.0f * t2) - t);
+  w[1] = 0.5f * ((3.0f * t3) - (5.0f * t2) + 2.0f);
+  w[2] = 0.5f * ((-3.0f * t3) + (4.0f * t2) + t);
+  w[3] = 0.5f * (t3 - t2);
+}
+
 /* Resample the regular 9x9 coarse SRP grid (theta-major layout, 15 deg
- * pitch, +/-60 deg) into the camera-aspect field with bilinear sampling,
- * then fuse the fine refinement points as Gaussian bumps. */
+ * pitch, +/-60 deg) into the camera-aspect field with Catmull-Rom bicubic
+ * sampling (C1-continuous - bilinear left visible diamond-shaped steps at
+ * the 15 deg grid pitch), then fuse the fine points as Gaussian bumps. */
 static void AppAcousticService_BuildLinearField(const AppAcousticImagingVisFrame_t *vis_frame)
 {
   const float inv_step = 1.0f / 15.0f;
-  const uint32_t n = APP_ACOUSTIC_IMAGING_COARSE_GRID_SIZE;
+  const int32_t n = (int32_t)APP_ACOUSTIC_IMAGING_COARSE_GRID_SIZE;
   float coarse_abs[APP_ACOUSTIC_IMAGING_COARSE_TOTAL];
+  /* Per-column tap indices/weights are identical for every row: precompute. */
+  int32_t col_i0[APP_ACOUSTIC_SERVICE_FIELD_W];
+  float col_w[APP_ACOUSTIC_SERVICE_FIELD_W][4];
 
   for (uint32_t i = 0U; i < APP_ACOUSTIC_IMAGING_COARSE_TOTAL; i++)
   {
     coarse_abs[i] = AppAcousticService_AbsF32(vis_frame->power[i]);
   }
 
+  for (uint32_t fx = 0U; fx < APP_ACOUSTIC_SERVICE_FIELD_W; fx++)
+  {
+    const float theta = AppAcousticService_FieldColToTheta(fx);
+    float u = (theta + 60.0f) * inv_step;
+
+    if (u < 0.0f)
+    {
+      u = 0.0f;
+    }
+    if (u > (float)(n - 1))
+    {
+      u = (float)(n - 1);
+    }
+    col_i0[fx] = (int32_t)u;
+    if (col_i0[fx] > (n - 2))
+    {
+      col_i0[fx] = n - 2;
+    }
+    AppAcousticService_CatmullRomWeights(u - (float)col_i0[fx], col_w[fx]);
+  }
+
   for (uint32_t fy = 0U; fy < APP_ACOUSTIC_SERVICE_FIELD_H; fy++)
   {
     const float phi = AppAcousticService_FieldRowToPhi(fy);
     float v = (phi + 60.0f) * inv_step;
-    uint32_t v0;
-    float wv;
+    int32_t v0;
+    float wv[4];
+    float row_taps[APP_ACOUSTIC_IMAGING_COARSE_GRID_SIZE];
 
     if (v < 0.0f)
     {
       v = 0.0f;
     }
-    if (v > (float)(n - 1U))
+    if (v > (float)(n - 1))
     {
-      v = (float)(n - 1U);
+      v = (float)(n - 1);
     }
-    v0 = (uint32_t)v;
-    if (v0 >= (n - 1U))
+    v0 = (int32_t)v;
+    if (v0 > (n - 2))
     {
-      v0 = n - 2U;
+      v0 = n - 2;
     }
-    wv = v - (float)v0;
+    AppAcousticService_CatmullRomWeights(v - (float)v0, wv);
+
+    /* Vertical pass: blend the four phi taps (edge-clamped) for each of the
+     * nine theta columns. Layout: index = theta_idx * n + phi_idx. */
+    for (int32_t tx = 0; tx < n; tx++)
+    {
+      float acc = 0.0f;
+
+      for (int32_t k = 0; k < 4; k++)
+      {
+        int32_t py = v0 - 1 + k;
+
+        if (py < 0)
+        {
+          py = 0;
+        }
+        if (py > (n - 1))
+        {
+          py = n - 1;
+        }
+        acc += wv[k] * coarse_abs[(tx * n) + py];
+      }
+      row_taps[tx] = acc;
+    }
 
     for (uint32_t fx = 0U; fx < APP_ACOUSTIC_SERVICE_FIELD_W; fx++)
     {
-      const float theta = AppAcousticService_FieldColToTheta(fx);
-      float u = (theta + 60.0f) * inv_step;
-      uint32_t u0;
-      float wu;
-      float sample;
+      const int32_t u0 = col_i0[fx];
+      const float *wu = col_w[fx];
+      float sample = 0.0f;
 
-      if (u < 0.0f)
+      for (int32_t k = 0; k < 4; k++)
       {
-        u = 0.0f;
-      }
-      if (u > (float)(n - 1U))
-      {
-        u = (float)(n - 1U);
-      }
-      u0 = (uint32_t)u;
-      if (u0 >= (n - 1U))
-      {
-        u0 = n - 2U;
-      }
-      wu = u - (float)u0;
+        int32_t px = u0 - 1 + k;
 
-      /* coarse layout: index = theta_idx * n + phi_idx */
-      {
-        const float c00 = coarse_abs[(u0 * n) + v0];
-        const float c10 = coarse_abs[((u0 + 1U) * n) + v0];
-        const float c01 = coarse_abs[(u0 * n) + v0 + 1U];
-        const float c11 = coarse_abs[((u0 + 1U) * n) + v0 + 1U];
-        const float top = c00 + (wu * (c10 - c00));
-        const float bottom = c01 + (wu * (c11 - c01));
-        sample = top + (wv * (bottom - top));
+        if (px < 0)
+        {
+          px = 0;
+        }
+        if (px > (n - 1))
+        {
+          px = n - 1;
+        }
+        sample += wu[k] * row_taps[px];
       }
 
+      /* Catmull-Rom overshoots near sharp peaks; heat power is
+       * non-negative by construction. */
+      if (sample < 0.0f)
+      {
+        sample = 0.0f;
+      }
       s_field_work[(fy * APP_ACOUSTIC_SERVICE_FIELD_W) + fx] = sample;
     }
   }
@@ -756,6 +837,79 @@ static void AppAcousticService_UpdatePerf(AppAcousticServiceSnapshot_t *snapshot
   snapshot->perf_load[4] = total_load;
 }
 
+/* Log-scaled display spectrum from the SRP reference-channel FFT.
+ * Peak tracking uses a slow-decay EMA so the bars stay readable across
+ * loud/quiet scenes without manual gain. */
+static void AppAcousticService_FillSpectrum(AppAcousticServiceSnapshot_t *snapshot)
+{
+  static float s_spectrum_peak_ema;
+  float mags[APP_ACOUSTIC_SERVICE_SPECTRUM_BINS + 1U];
+  float peak = 0.0f;
+  uint32_t got;
+  uint32_t peak_bin = 0U;
+
+  got = App_AcousticSrp_GetRefSpectrum(&s_srp_ctx, mags, APP_ACOUSTIC_SERVICE_SPECTRUM_BINS + 1U);
+  if (got <= 1U)
+  {
+    memset(snapshot->spectrum, 0, sizeof(snapshot->spectrum));
+    snapshot->spectrum_peak_bin = 0U;
+    return;
+  }
+
+  for (uint32_t bin = 1U; bin < got; bin++)
+  {
+    if (mags[bin] > peak)
+    {
+      peak = mags[bin];
+      peak_bin = bin;
+    }
+  }
+
+  if (peak > s_spectrum_peak_ema)
+  {
+    s_spectrum_peak_ema += 0.5f * (peak - s_spectrum_peak_ema);
+  }
+  else
+  {
+    s_spectrum_peak_ema += 0.02f * (peak - s_spectrum_peak_ema);
+  }
+  if (s_spectrum_peak_ema < 1.0e-9f)
+  {
+    memset(snapshot->spectrum, 0, sizeof(snapshot->spectrum));
+    snapshot->spectrum_peak_bin = 0U;
+    return;
+  }
+
+  for (uint32_t i = 0U; i < APP_ACOUSTIC_SERVICE_SPECTRUM_BINS; i++)
+  {
+    const uint32_t bin = i + 1U;
+    float norm = ((bin < got) ? mags[bin] : 0.0f) / s_spectrum_peak_ema;
+    float db;
+    float level;
+
+    if (norm <= 0.001f)
+    {
+      snapshot->spectrum[i] = 0U;
+      continue;
+    }
+    if (norm > 1.0f)
+    {
+      norm = 1.0f;
+    }
+
+    /* 60 dB display window. */
+    db = 20.0f * log10f(norm);
+    level = (db + 60.0f) * (1.0f / 60.0f);
+    if (level < 0.0f)
+    {
+      level = 0.0f;
+    }
+    snapshot->spectrum[i] = (uint8_t)((level * 255.0f) + 0.5f);
+  }
+
+  snapshot->spectrum_peak_bin = (uint8_t)((peak_bin <= 255U) ? peak_bin : 255U);
+}
+
 static void AppAcousticService_UpdateFps(AppAcousticServiceSnapshot_t *snapshot)
 {
   uint32_t now_ms = HAL_GetTick();
@@ -947,6 +1101,8 @@ static uint8_t AppAcousticService_SyncRuntimeConfig(AppAcousticServiceSnapshot_t
       (s_active_mode == s_requested_mode) &&
       (s_active_scene == s_requested_scene) &&
       (s_active_temperature_c == s_requested_temperature_c) &&
+      (s_active_band_lo_bin == s_requested_band_lo_bin) &&
+      (s_active_band_hi_bin == s_requested_band_hi_bin) &&
       (s_srp_ctx.config.bin_policy ==
        App_AcousticImaging_ResolveBinPolicy(s_requested_profile, s_requested_bin_policy)))
   {
@@ -1023,6 +1179,7 @@ static AppAcousticImagingStatus_t AppAcousticService_ProcessFrame(AppAcousticSer
     s_have_input_seq = 1U;
     s_last_input_seq = frame_seq;
     AppAcousticService_FillVisSnapshot(snapshot, &s_vis_frame, &s_srp_ctx);
+    AppAcousticService_FillSpectrum(snapshot);
     App_AcousticSrp_GetPerf(&s_srp_ctx, &snapshot->perf);
     AppAcousticService_UpdatePerf(snapshot, &snapshot->perf, *elapsed_ms);
     AppAcousticService_UpdateFps(snapshot);
@@ -1163,9 +1320,48 @@ AppAcousticImagingStatus_t AppAcousticService_SetScene(AppAcousticScene_t scene)
     return APP_ACOUSTIC_IMAGING_INVALID_ARGUMENT;
   }
 
-  /* Scene switch re-baselines the rendering parameters to the preset. */
+  /* Scene switch re-baselines the rendering parameters to the preset and
+   * drops any custom band from the spectrum panel. */
   AppAcousticService_SetFieldParams(&s_scene_presets[scene].params);
+  s_requested_band_lo_bin = 0U;
+  s_requested_band_hi_bin = 0U;
   s_requested_scene = scene;
+  s_profile_change_pending = 1U;
+
+  return APP_ACOUSTIC_IMAGING_OK;
+}
+
+AppAcousticImagingStatus_t AppAcousticService_SetBandHz(uint16_t lo_hz, uint16_t hi_hz)
+{
+  /* Observable range of the Wide32/48k pipeline: bins 3..42. */
+  const uint16_t bin_min = 3U;
+  const uint16_t bin_max = 42U;
+  uint16_t lo_bin;
+  uint16_t hi_bin;
+
+  if (lo_hz >= hi_hz)
+  {
+    return APP_ACOUSTIC_IMAGING_INVALID_ARGUMENT;
+  }
+
+  lo_bin = (uint16_t)(((float)lo_hz / APP_ACOUSTIC_SERVICE_BIN_HZ) + 0.5f);
+  hi_bin = (uint16_t)(((float)hi_hz / APP_ACOUSTIC_SERVICE_BIN_HZ) + 0.5f);
+  if (lo_bin < bin_min)
+  {
+    lo_bin = bin_min;
+  }
+  if (hi_bin > bin_max)
+  {
+    hi_bin = bin_max;
+  }
+  /* Keep a usable window: at least 4 bins (~750 Hz). */
+  if ((hi_bin <= lo_bin) || ((uint16_t)(hi_bin - lo_bin) < 3U))
+  {
+    return APP_ACOUSTIC_IMAGING_INVALID_ARGUMENT;
+  }
+
+  s_requested_band_lo_bin = lo_bin;
+  s_requested_band_hi_bin = hi_bin;
   s_profile_change_pending = 1U;
 
   return APP_ACOUSTIC_IMAGING_OK;

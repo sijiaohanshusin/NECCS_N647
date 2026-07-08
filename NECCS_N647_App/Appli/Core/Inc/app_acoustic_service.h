@@ -26,6 +26,10 @@ extern "C" {
   (APP_ACOUSTIC_SERVICE_FIELD_W * APP_ACOUSTIC_SERVICE_FIELD_H)
 #define APP_ACOUSTIC_SERVICE_CAND_MAX         3U
 
+/* Display spectrum: log-scaled magnitudes of FFT bins 1..64
+ * (187.5 Hz per bin -> the panel spans 187.5 Hz .. 12 kHz). */
+#define APP_ACOUSTIC_SERVICE_SPECTRUM_BINS    64U
+
 typedef enum
 {
   APP_ACOUSTIC_SERVICE_STATUS_OK = 0,
@@ -96,6 +100,8 @@ typedef struct
   int16_t cand_theta[APP_ACOUSTIC_SERVICE_CAND_MAX];
   int16_t cand_phi[APP_ACOUSTIC_SERVICE_CAND_MAX];
   uint8_t cand_strength[APP_ACOUSTIC_SERVICE_CAND_MAX];
+  uint8_t spectrum[APP_ACOUSTIC_SERVICE_SPECTRUM_BINS];
+  uint8_t spectrum_peak_bin;
   uint8_t field[APP_ACOUSTIC_SERVICE_FIELD_COUNT];
   uint8_t perf_load[5];
   AppAcousticSrpPerf_t perf;
@@ -117,6 +123,11 @@ AppAcousticImagingStatus_t AppAcousticService_SetBinPolicy(AppAcousticImagingBin
 
 /* Scene preset: frequency band (SRP re-init) + field parameter bundle. */
 AppAcousticImagingStatus_t AppAcousticService_SetScene(AppAcousticScene_t scene);
+
+/* Custom analysis band in Hz (from the spectrum panel drag handles).
+ * Clamped to the observable range (563..7875 Hz, bins 3..42); overrides the
+ * scene band until the next scene change. Triggers an SRP re-init. */
+AppAcousticImagingStatus_t AppAcousticService_SetBandHz(uint16_t lo_hz, uint16_t hi_hz);
 
 /* Ambient temperature -> speed of sound; triggers an SRP LUT re-init. */
 AppAcousticImagingStatus_t AppAcousticService_SetTemperature(int8_t temperature_c);

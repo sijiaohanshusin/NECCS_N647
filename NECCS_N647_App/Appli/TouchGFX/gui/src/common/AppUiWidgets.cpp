@@ -156,6 +156,15 @@ void AppTextLabel::setText(const char* value)
 
 void AppTextLabel::setColors(touchgfx::colortype foreground, touchgfx::colortype backgroundColorValue, bool opaqueBackground)
 {
+    /* Refresh paths re-apply colors on every UI update; skipping identical
+     * values avoids invalidating (and re-compositing) unchanged widgets. */
+    if ((foregroundColor == foreground) &&
+        (backgroundColor == backgroundColorValue) &&
+        (opaque == opaqueBackground))
+    {
+        return;
+    }
+
     foregroundColor = foreground;
     backgroundColor = backgroundColorValue;
     opaque = opaqueBackground;
@@ -468,6 +477,217 @@ int32_t isqrt32(int32_t value)
 }
 }
 
+AppSpectrumPanel::AppSpectrumPanel()
+    : bandChanged(0),
+      bandLoHz(563U),
+      bandHiHz(7875U),
+      peakBin(0U),
+      dragging(0U)
+{
+    (void)memset(bars, 0, sizeof(bars));
+    setTouchable(true);
+}
+
+void AppSpectrumPanel::setData(const uint8_t* newBars, uint16_t loHz, uint16_t hiHz, uint8_t newPeakBin)
+{
+    bool changed = false;
+
+    if ((newBars != 0) && (memcmp(bars, newBars, sizeof(bars)) != 0))
+    {
+        (void)memcpy(bars, newBars, sizeof(bars));
+        changed = true;
+    }
+    /* While the user drags a handle, the local band preview wins. */
+    if (dragging == 0U)
+    {
+        if ((bandLoHz != loHz) || (bandHiHz != hiHz))
+        {
+            bandLoHz = loHz;
+            bandHiHz = hiHz;
+            changed = true;
+        }
+    }
+    if (peakBin != newPeakBin)
+    {
+        peakBin = newPeakBin;
+        changed = true;
+    }
+
+    if (changed)
+    {
+        invalidate();
+    }
+}
+
+void AppSpectrumPanel::setBandChangedCallback(touchgfx::GenericCallback<uint16_t, uint16_t>& callback)
+{
+    bandChanged = &callback;
+}
+
+int16_t AppSpectrumPanel::binToX(uint32_t bin) const
+{
+    /* Bars span the full width; bin is 1-based (bin i drawn at slot i-1). */
+    if (bin < 1U)
+    {
+        bin = 1U;
+    }
+    return static_cast<int16_t>(((bin - 1U) * static_cast<uint32_t>(getWidth())) / Bins);
+}
+
+uint32_t AppSpectrumPanel::xToBin(int16_t x) const
+{
+    if (x < 0)
+    {
+        x = 0;
+    }
+    uint32_t bin = (static_cast<uint32_t>(x) * Bins) / static_cast<uint32_t>(getWidth()) + 1U;
+    if (bin > Bins)
+    {
+        bin = Bins;
+    }
+    return bin;
+}
+
+void AppSpectrumPanel::draw(const touchgfx::Rect& area) const
+{
+    const touchgfx::colortype colBg = touchgfx::Color::getColorFromRGB(10, 16, 24);
+    const touchgfx::colortype colBar = touchgfx::Color::getColorFromRGB(38, 74, 122);
+    const touchgfx::colortype colBarActive = touchgfx::Color::getColorFromRGB(61, 126, 255);
+    const touchgfx::colortype colBarPeak = touchgfx::Color::getColorFromRGB(120, 214, 255);
+    const touchgfx::colortype colShade = touchgfx::Color::getColorFromRGB(16, 26, 40);
+    const touchgfx::colortype colHandle = touchgfx::Color::getColorFromRGB(242, 245, 249);
+
+    const int16_t w = getWidth();
+    const int16_t h = getHeight();
+    const uint32_t loBin = (uint32_t)(((float)bandLoHz / BinHz) + 0.5f);
+    const uint32_t hiBin = (uint32_t)(((float)bandHiHz / BinHz) + 0.5f);
+    const int16_t loX = binToX(loBin);
+    const int16_t hiX = binToX(hiBin + 1U);
+
+    fillLocalRect(*this, area, touchgfx::Rect(0, 0, w, h), colBg);
+    /* Active band backdrop. */
+    fillLocalRect(*this, area, touchgfx::Rect(loX, 0, static_cast<int16_t>(hiX - loX), h), colShade);
+
+    /* Bars (bin i in slot i-1). */
+    const int16_t slotW = static_cast<int16_t>(w / (int16_t)Bins);
+    const int16_t barW = (slotW > 3) ? static_cast<int16_t>(slotW - 2) : slotW;
+    for (uint32_t i = 0U; i < Bins; ++i)
+    {
+        const uint32_t bin = i + 1U;
+        const int16_t barH = static_cast<int16_t>(((uint32_t)bars[i] * (uint32_t)(h - 4)) / 255U);
+        if (barH <= 0)
+        {
+            continue;
+        }
+
+        touchgfx::colortype color = colBar;
+        if ((bin >= loBin) && (bin <= hiBin))
+        {
+            color = (bin == peakBin) ? colBarPeak : colBarActive;
+        }
+        fillLocalRect(*this,
+                      area,
+                      touchgfx::Rect(static_cast<int16_t>(i * slotW + 1),
+                                     static_cast<int16_t>(h - 2 - barH),
+                                     barW,
+                                     barH),
+                      color);
+    }
+
+    /* Drag handles: vertical line + top tab. */
+    const int16_t handleX[2] = {loX, static_cast<int16_t>(hiX - 2)};
+    for (uint32_t i = 0U; i < 2U; ++i)
+    {
+        fillLocalRect(*this, area, touchgfx::Rect(handleX[i], 0, 2, h), colHandle);
+        fillLocalRect(*this,
+                      area,
+                      touchgfx::Rect(static_cast<int16_t>(handleX[i] - 5), 0, 12, 10),
+                      colHandle);
+    }
+}
+
+touchgfx::Rect AppSpectrumPanel::getSolidRect() const
+{
+    return touchgfx::Rect(0, 0, getWidth(), getHeight());
+}
+
+void AppSpectrumPanel::handleClickEvent(const touchgfx::ClickEvent& event)
+{
+    const uint32_t loBin = (uint32_t)(((float)bandLoHz / BinHz) + 0.5f);
+    const uint32_t hiBin = (uint32_t)(((float)bandHiHz / BinHz) + 0.5f);
+
+    if (event.getType() == touchgfx::ClickEvent::PRESSED)
+    {
+        const int16_t loX = binToX(loBin);
+        const int16_t hiX = binToX(hiBin + 1U);
+        const int16_t dLo = static_cast<int16_t>((event.getX() > loX) ? (event.getX() - loX) : (loX - event.getX()));
+        const int16_t dHi = static_cast<int16_t>((event.getX() > hiX) ? (event.getX() - hiX) : (hiX - event.getX()));
+
+        /* Grab the nearest handle; generous 60px capture radius. */
+        if ((dLo <= dHi) && (dLo < 60))
+        {
+            dragging = 1U;
+        }
+        else if (dHi < 60)
+        {
+            dragging = 2U;
+        }
+        else
+        {
+            dragging = 0U;
+        }
+    }
+    else if (event.getType() == touchgfx::ClickEvent::RELEASED)
+    {
+        if ((dragging != 0U) && (bandChanged != 0) && bandChanged->isValid())
+        {
+            bandChanged->execute(bandLoHz, bandHiHz);
+        }
+        dragging = 0U;
+    }
+}
+
+void AppSpectrumPanel::handleDragEvent(const touchgfx::DragEvent& event)
+{
+    if (dragging == 0U)
+    {
+        return;
+    }
+
+    const uint32_t bin = xToBin(event.getNewX());
+    uint32_t loBin = (uint32_t)(((float)bandLoHz / BinHz) + 0.5f);
+    uint32_t hiBin = (uint32_t)(((float)bandHiHz / BinHz) + 0.5f);
+
+    if (dragging == 1U)
+    {
+        loBin = bin;
+        if (loBin < 3U)
+        {
+            loBin = 3U;
+        }
+        if (loBin > (hiBin - 3U))
+        {
+            loBin = hiBin - 3U;
+        }
+        bandLoHz = static_cast<uint16_t>((float)loBin * BinHz);
+    }
+    else
+    {
+        hiBin = bin;
+        if (hiBin > 42U)
+        {
+            hiBin = 42U;
+        }
+        if (hiBin < (loBin + 3U))
+        {
+            hiBin = loBin + 3U;
+        }
+        bandHiHz = static_cast<uint16_t>((float)hiBin * BinHz);
+    }
+
+    invalidate();
+}
+
 AppRoundedPanel::AppRoundedPanel()
     : fillColor(touchgfx::Color::getColorFromRGB(15, 23, 35)),
       borderColor(touchgfx::Color::getColorFromRGB(36, 53, 74)),
@@ -485,6 +705,10 @@ void AppRoundedPanel::setStyle(touchgfx::colortype fill, uint8_t cornerRadius)
 
 void AppRoundedPanel::setBorder(touchgfx::colortype border, bool enabled)
 {
+    if ((borderColor == border) && (borderEnabled == enabled))
+    {
+        return;
+    }
     borderColor = border;
     borderEnabled = enabled;
     invalidate();

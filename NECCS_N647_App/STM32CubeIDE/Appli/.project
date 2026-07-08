@@ -1721,5 +1721,20 @@
 			<type>1</type>
 			<locationURI>PARENT-2-PROJECT_LOC/Appli/TouchGFX/generated/images/src/image_boot_ring.cpp</locationURI>
 		</link>
+		<link>
+			<name>Application/User/generated/image_deco_sonar.cpp</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/Appli/TouchGFX/generated/images/src/image_deco_sonar.cpp</locationURI>
+		</link>
+		<link>
+			<name>Application/User/generated/image_deco_wave.cpp</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/Appli/TouchGFX/generated/images/src/image_deco_wave.cpp</locationURI>
+		</link>
+		<link>
+			<name>Application/User/generated/image_deco_comp.cpp</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/Appli/TouchGFX/generated/images/src/image_deco_comp.cpp</locationURI>
+		</link>
 	</linkedResources>
 </projectDescription>

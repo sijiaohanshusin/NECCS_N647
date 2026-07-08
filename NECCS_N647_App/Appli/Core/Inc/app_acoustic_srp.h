@@ -85,6 +85,13 @@ AppAcousticImagingStatus_t App_AcousticSrp_ProcessFrame(AppAcousticSrpContext_t 
 void App_AcousticSrp_GetPerf(const AppAcousticSrpContext_t *ctx,
                              AppAcousticSrpPerf_t *perf_out);
 
+/* Magnitude spectrum of the first active channel from the last processed
+ * frame (bins 0..mag_count-1, bin width = sample_rate / nfft). Returns the
+ * number of bins written. Service-thread only. */
+uint32_t App_AcousticSrp_GetRefSpectrum(const AppAcousticSrpContext_t *ctx,
+                                        float *mags,
+                                        uint32_t mag_count);
+
 AppAcousticImagingStatus_t App_AcousticSrp_RunSelfTest(AppAcousticSrpContext_t *ctx,
                                                        AppAcousticImagingVisFrame_t *vis_frame);
 

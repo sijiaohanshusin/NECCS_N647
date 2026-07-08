@@ -197,12 +197,19 @@ struct AppUiSnapshot
     uint16_t mediaEncodeMs;
     uint8_t triggerArmed;
     uint8_t trailEnabled;
+    uint8_t spectrum[64];
+    uint8_t spectrumPeakBin;
     uint8_t heatPalette;
     uint8_t acousticScene;
     int8_t acousticTempC;
     uint16_t acousticBandLoHz;
     uint16_t acousticBandHiHz;
     uint16_t acousticSpeedX10;
+    /* Heat-field rendering parameters (settings page steppers). */
+    int8_t fieldDbFloor;
+    uint16_t fieldGammaX100;
+    uint8_t fieldNoiseGateX100;
+    uint8_t fieldSmoothPasses;
     uint8_t micLevel[32];
     int8_t micDbfs[32];
     int8_t pcmdRawPeakDbfs;
@@ -250,6 +257,9 @@ public:
     void cycleHeatPalette();
     void cycleScene();
     void adjustTemperature(int8_t deltaC);
+    void setBandHz(uint16_t loHz, uint16_t hiHz);
+    /* param: 0=db_floor 1=gamma 2=noise_gate 3=smooth_passes; dir: -1/+1 */
+    void adjustFieldParam(uint8_t param, int8_t dir);
     void toggleTrigger();
     void toggleTrail();
     void requestScreenshot();

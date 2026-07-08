@@ -2,8 +2,11 @@
 #define APP_UI_WIDGETS_HPP
 
 #include <touchgfx/hal/Types.hpp>
+#include <touchgfx/Callback.hpp>
 #include <touchgfx/Unicode.hpp>
 #include <touchgfx/containers/Container.hpp>
+#include <touchgfx/events/ClickEvent.hpp>
+#include <touchgfx/events/DragEvent.hpp>
 #include <touchgfx/widgets/Box.hpp>
 #include <touchgfx/widgets/TextAreaWithWildcard.hpp>
 #include <touchgfx/widgets/Widget.hpp>
@@ -104,6 +107,40 @@ private:
     touchgfx::colortype backgroundColor;
     touchgfx::colortype borderColor;
     bool sourceValid;
+};
+
+/** Interactive FFT spectrum panel: 64 log-magnitude bars, the active
+ * analysis band highlighted, and two draggable handles that select the
+ * band's lower/upper edge. Fires bandChanged(loHz, hiHz) on release. */
+class AppSpectrumPanel : public touchgfx::Widget
+{
+public:
+    static const uint32_t Bins = 64U;
+    /** Frequency per bin (Wide32/48k pipeline: 48000/256). */
+    static constexpr float BinHz = 187.5f;
+
+    AppSpectrumPanel();
+
+    /** New spectrum + active band from the snapshot (no-op while dragging). */
+    void setData(const uint8_t* bars, uint16_t bandLoHz, uint16_t bandHiHz, uint8_t peakBin);
+    void setBandChangedCallback(touchgfx::GenericCallback<uint16_t, uint16_t>& callback);
+
+    virtual void draw(const touchgfx::Rect& area) const;
+    virtual touchgfx::Rect getSolidRect() const;
+    virtual void handleClickEvent(const touchgfx::ClickEvent& event);
+    virtual void handleDragEvent(const touchgfx::DragEvent& event);
+
+private:
+    int16_t binToX(uint32_t bin) const;
+    uint32_t xToBin(int16_t x) const;
+
+    uint8_t bars[Bins];
+    touchgfx::GenericCallback<uint16_t, uint16_t>* bandChanged;
+    uint16_t bandLoHz;
+    uint16_t bandHiHz;
+    uint8_t peakBin;
+    /* 0 = none, 1 = low handle, 2 = high handle */
+    uint8_t dragging;
 };
 
 /** Flat panel with software-drawn rounded corners and optional 1px border. */

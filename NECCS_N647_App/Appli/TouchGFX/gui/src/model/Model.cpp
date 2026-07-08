@@ -196,6 +196,7 @@ typedef enum
 #define APP_ACOUSTIC_SERVICE_FIELD_H 72U
 #define APP_ACOUSTIC_SERVICE_FIELD_COUNT (APP_ACOUSTIC_SERVICE_FIELD_W * APP_ACOUSTIC_SERVICE_FIELD_H)
 #define APP_ACOUSTIC_SERVICE_CAND_MAX 3U
+#define APP_ACOUSTIC_SERVICE_SPECTRUM_BINS 64U
 #define APP_ACOUSTIC_SERVICE_CAMERA_HFOV_DEG 77.0f
 #define APP_ACOUSTIC_SERVICE_CAMERA_VFOV_DEG 61.1f
 
@@ -231,6 +232,8 @@ typedef struct
     int16_t cand_theta[APP_ACOUSTIC_SERVICE_CAND_MAX];
     int16_t cand_phi[APP_ACOUSTIC_SERVICE_CAND_MAX];
     uint8_t cand_strength[APP_ACOUSTIC_SERVICE_CAND_MAX];
+    uint8_t spectrum[APP_ACOUSTIC_SERVICE_SPECTRUM_BINS];
+    uint8_t spectrum_peak_bin;
     uint8_t field[APP_ACOUSTIC_SERVICE_FIELD_COUNT];
     uint8_t perf_load[5];
 } AppAcousticServiceSnapshot_t;
@@ -269,6 +272,40 @@ static int32_t AppAcousticService_SetTemperature(int8_t temperatureC)
 {
     (void)temperatureC;
     return 0;
+}
+
+static int32_t AppAcousticService_SetBandHz(uint16_t loHz, uint16_t hiHz)
+{
+    (void)loHz;
+    (void)hiHz;
+    return 0;
+}
+
+typedef struct
+{
+    float db_floor;
+    float gamma;
+    float noise_gate;
+    float bg_gain;
+    uint32_t smooth_passes;
+} AppAcousticFieldParams_t;
+
+static AppAcousticFieldParams_t s_sim_field_params = {-15.0f, 1.10f, 0.10f, 1.45f, 2U};
+
+static void AppAcousticService_GetFieldParams(AppAcousticFieldParams_t* params)
+{
+    if (params != 0)
+    {
+        *params = s_sim_field_params;
+    }
+}
+
+static void AppAcousticService_SetFieldParams(const AppAcousticFieldParams_t* params)
+{
+    if (params != 0)
+    {
+        s_sim_field_params = *params;
+    }
 }
 
 typedef struct
@@ -488,6 +525,17 @@ void pollAcoustic(AppUiSnapshot& snapshot)
     snapshot.acousticBandLoHz = acoustic.band_lo_hz;
     snapshot.acousticBandHiHz = acoustic.band_hi_hz;
     snapshot.acousticSpeedX10 = acoustic.speed_mps_x10;
+    memcpy(snapshot.spectrum, acoustic.spectrum, sizeof(snapshot.spectrum));
+    snapshot.spectrumPeakBin = acoustic.spectrum_peak_bin;
+
+    {
+        AppAcousticFieldParams_t fieldParams;
+        AppAcousticService_GetFieldParams(&fieldParams);
+        snapshot.fieldDbFloor = (int8_t)(fieldParams.db_floor - 0.5f);
+        snapshot.fieldGammaX100 = (uint16_t)((fieldParams.gamma * 100.0f) + 0.5f);
+        snapshot.fieldNoiseGateX100 = (uint8_t)((fieldParams.noise_gate * 100.0f) + 0.5f);
+        snapshot.fieldSmoothPasses = (uint8_t)fieldParams.smooth_passes;
+    }
 
     /* DEBUG preview keeps the overlay path exercised only until the first
      * real SRP frame lands (the field is all-zero until then, so the draw
@@ -890,6 +938,51 @@ void Model::cycleHeatPalette()
     const uint8_t next = static_cast<uint8_t>((AppCameraDisplay_GetHeatPalette() + 1U) % 3U);
     AppCameraDisplay_SetHeatPalette(next);
     snapshot.heatPalette = next;
+    if (modelListener != 0)
+    {
+        modelListener->uiSnapshotUpdated(snapshot);
+    }
+}
+
+void Model::setBandHz(uint16_t loHz, uint16_t hiHz)
+{
+    (void)AppAcousticService_SetBandHz(loHz, hiHz);
+    if (modelListener != 0)
+    {
+        modelListener->uiSnapshotUpdated(snapshot);
+    }
+}
+
+void Model::adjustFieldParam(uint8_t param, int8_t dir)
+{
+    AppAcousticFieldParams_t params;
+    const float step = (dir < 0) ? -1.0f : 1.0f;
+
+    AppAcousticService_GetFieldParams(&params);
+    switch (param)
+    {
+    case 0U:
+        params.db_floor += step * 1.0f;
+        break;
+    case 1U:
+        params.gamma += step * 0.05f;
+        break;
+    case 2U:
+        params.noise_gate += step * 0.02f;
+        break;
+    case 3U:
+    default:
+        if ((dir < 0) && (params.smooth_passes == 0U))
+        {
+            return;
+        }
+        params.smooth_passes = (dir < 0) ? (params.smooth_passes - 1U)
+                                         : (params.smooth_passes + 1U);
+        break;
+    }
+    /* The service clamps every field to its valid range. */
+    AppAcousticService_SetFieldParams(&params);
+    pollAcoustic(snapshot);
     if (modelListener != 0)
     {
         modelListener->uiSnapshotUpdated(snapshot);

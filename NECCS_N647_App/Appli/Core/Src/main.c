@@ -307,6 +307,18 @@ int main(void)
     memset(&_sextram, 0, (size_t)(&_eextram - &_sextram));
   }
 
+  /* Clear the UI framebuffer to black before the panel/backlight comes up:
+   * fresh HyperRAM holds garbage and would flash on screen for the first
+   * few hundred ms until TouchGFX renders its first frame. */
+  memset((void *)APP_CAMERA_DISPLAY_UI_FB_ADDR,
+         0,
+         APP_CAMERA_DISPLAY_SCREEN_WIDTH * APP_CAMERA_DISPLAY_SCREEN_HEIGHT *
+           APP_CAMERA_DISPLAY_BYTES_PER_PIXEL);
+  SCB_CleanDCache_by_Addr((void *)APP_CAMERA_DISPLAY_UI_FB_ADDR,
+                          (int32_t)(APP_CAMERA_DISPLAY_SCREEN_WIDTH *
+                                    APP_CAMERA_DISPLAY_SCREEN_HEIGHT *
+                                    APP_CAMERA_DISPLAY_BYTES_PER_PIXEL));
+
   /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
