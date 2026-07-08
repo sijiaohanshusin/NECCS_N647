@@ -1,6 +1,7 @@
 #include <gui/template_screen/TemplateView.hpp>
 
 #include <images/BitmapDatabase.hpp>
+#include <touchgfx/Application.hpp>
 #include <touchgfx/Color.hpp>
 
 #include <stdio.h>
@@ -691,6 +692,22 @@ void TemplateView::setupBootPage()
 /* animation                                                           */
 /* ------------------------------------------------------------------ */
 
+void TemplateView::invalidateRingBand(int16_t x, int16_t y, int16_t diameter)
+{
+    /* The ring artwork is a thin circle: only the outline strips need a
+     * redraw. Strip thickness covers the ring stroke plus its soft glow. */
+    const int16_t band = static_cast<int16_t>(10 + (diameter / 8));
+    touchgfx::Rect top(x, y, diameter, band);
+    touchgfx::Rect bottom(x, static_cast<int16_t>(y + diameter - band), diameter, band);
+    touchgfx::Rect left(x, static_cast<int16_t>(y + band), band, static_cast<int16_t>(diameter - (2 * band)));
+    touchgfx::Rect right(static_cast<int16_t>(x + diameter - band), static_cast<int16_t>(y + band), band, static_cast<int16_t>(diameter - (2 * band)));
+
+    touchgfx::Application::getInstance()->invalidateArea(top);
+    touchgfx::Application::getInstance()->invalidateArea(bottom);
+    touchgfx::Application::getInstance()->invalidateArea(left);
+    touchgfx::Application::getInstance()->invalidateArea(right);
+}
+
 void TemplateView::handleTickEvent()
 {
     if (activeScreen != APP_UI_SCREEN_BOOT)
@@ -698,7 +715,10 @@ void TemplateView::handleTickEvent()
         return;
     }
 
-    /* Expanding sonar rings around the emblem centre (512, 192). */
+    /* Expanding sonar rings around the emblem centre (512, 192).
+     * Only the ring band (four edge strips of the bounding box) is
+     * invalidated: a full-rect invalidate would redraw the emblem region
+     * every tick and made the logo visibly flicker on the panel. */
     constexpr uint16_t Period = 96U;
     constexpr int16_t RingCx = 512;
     constexpr int16_t RingCy = 192;
@@ -710,13 +730,13 @@ void TemplateView::handleTickEvent()
         const uint32_t fade = Period - offset;
         const uint8_t alpha = static_cast<uint8_t>((170U * fade * fade) / (Period * Period));
 
-        bootRing[i].invalidate();
+        invalidateRingBand(bootRing[i].getX(), bootRing[i].getY(), bootRing[i].getWidth());
         bootRing[i].setPosition(static_cast<int16_t>(RingCx - (diameter / 2)),
                                 static_cast<int16_t>(RingCy - (diameter / 2)),
                                 diameter,
                                 diameter);
         bootRing[i].setAlpha(alpha);
-        bootRing[i].invalidate();
+        invalidateRingBand(bootRing[i].getX(), bootRing[i].getY(), diameter);
     }
 
     if (bootEmblemAlpha < 255U)

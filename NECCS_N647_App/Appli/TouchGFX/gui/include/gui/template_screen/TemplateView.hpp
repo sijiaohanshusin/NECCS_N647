@@ -73,6 +73,9 @@ private:
     void onProfilePressed(const touchgfx::AbstractButton& source);
     void onParamsPressed(const touchgfx::AbstractButton& source);
     void onMediaPressed(const touchgfx::AbstractButton& source);
+    /* Invalidate only the ring outline strips of a boot ring bounding box,
+     * keeping the emblem region untouched (prevents logo flicker). */
+    void invalidateRingBand(int16_t x, int16_t y, int16_t diameter);
 
     /* ---- chrome ---- */
     touchgfx::Box background;
