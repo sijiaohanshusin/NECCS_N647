@@ -174,8 +174,23 @@ void TouchGFXGeneratedHAL::InvalidateTextureCache()
 
 extern "C"
 {
+    /* NECCS fix: HAL_LTDC_ProgramLineEvent() takes the LTDC HAL lock. When the
+     * camera bring-up thread is inside HAL_LTDC_ConfigLayer/ConfigColorKeying
+     * (AppCameraDisplay_InitLayers) at the moment this ISR fires, the locked
+     * call returns HAL_BUSY without re-enabling the line interrupt - vsync
+     * dies permanently and the TouchGFX thread blocks forever on the frame
+     * buffer semaphore. Re-arm the line event with direct register writes
+     * instead; the HAL IRQ handler has already disabled/cleared LI for us. */
+    static inline void programLineEventFromIsr(uint16_t line)
+    {
+        LTDC->LIPCR = line;
+        LTDC->ICR2 = LTDC_ICR2_CLIF;
+        LTDC->IER2 |= LTDC_IER2_LIE;
+    }
+
     void HAL_LTDC_LineEventCallback(LTDC_HandleTypeDef* hltdc)
     {
+        (void)hltdc;
         if (!HAL::getInstance())
         {
             return;
@@ -184,7 +199,7 @@ extern "C"
         if (LTDC->LIPCR == lcd_int_active_line)
         {
             //entering active area
-            HAL_LTDC_ProgramLineEvent(hltdc, lcd_int_porch_line);
+            programLineEventFromIsr(lcd_int_porch_line);
             HAL::getInstance()->vSync();
             OSWrappers::signalVSync();
 
@@ -197,7 +212,7 @@ extern "C"
         else
         {
             //exiting active area
-            HAL_LTDC_ProgramLineEvent(hltdc, lcd_int_active_line);
+            programLineEventFromIsr(lcd_int_active_line);
 
             // Signal to the framework that display update has finished.
             HAL::getInstance()->frontPorchEntered();
