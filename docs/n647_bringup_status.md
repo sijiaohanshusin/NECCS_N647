@@ -6,15 +6,50 @@ the same failures.
 
 ## Current Checkpoint
 
-- Repository checkpoint: `c830892b fix(pcmd): add software I2C backend and full-status verification`.
+- Repository checkpoint: `c7869b53` (UI product line P0-P7 complete: boot
+  splash + full UI redesign, heat-field overlay pipeline, scene/params
+  runtime control, media completion, competition extras, perf targets met).
 - Hardware reference for PCMD/SAI timing: `7e12d5d fix(pcmd3180): lock SDOUT edge timing`.
 - Current target: `Wide32 @ 48 kHz`, 4 x PCMD3180, SAI1 A/B, 16 slots per bus,
   256 samples per audio frame.
-- PCMD config I2C now uses the software bit-bang backend on `PD14/PD4`
+- PCMD config I2C uses the software bit-bang backend on `PD14/PD4`
   (`APP_PCMD_CAPTURE_I2C_BACKEND_SW` default). Board-verified 2026-07-07:
   `present=0xf cfg=0xf statusok=0xf`, raw audio valid, zero SAI/DMA errors.
-  The old `statusok=0x3` follow-up is closed by this backend change plus the
-  full-register status verification in `PCMD3180_ReadStatus`.
+- Release bundle with the new UI flashed + verified 2026-07-08 (575 KB,
+  `0x70000000 = STM2`, App SP/PC vectors sane). Cold-boot visual check
+  pending BOOT1 strap flip to GND.
+- Performance baseline (Debug, RAM, 60-80 s window, 2026-07-08):
+  SRP 9.0 ms/frame, acoustic 9.6 fps, camera 15.3 fps, PCMD 149 fps
+  (statusok=0xf), heat overlay draw 0.2-1.2 ms, UI tick ~48-60 fps.
+- PCMD bring-up time varies: 0xf can arrive in ~15 s or take up to ~60 s
+  (camera-first gate + 8 s atomic config + retries). Not a regression;
+  watch during Release cold-boot validation.
+
+## UI Product State (2026-07-08)
+
+- Boot: sonar-ring + emblem splash (flicker fixed by ring-band-only
+  invalidation), live self-check list from `g_app_bringup_snapshot`,
+  auto-enter imaging page (min 2.8 s, cap 5 s).
+- Pages: imaging (camera + heat field overlay + quick actions + data rail),
+  array (32-mic dBFS grid), params (display profile chips, scene, band,
+  temperature steppers, palette, trail toggle), media (preview gallery,
+  play/pause), system (SRP perf bars + info incl. overlay/encode ms).
+- Heat overlay: 48x36 field, EMA + smoothing + dB window in service;
+  palette LUT (iron/rainbow/contrast) + 2x2 bilinear + alpha blend in
+  display worker; primary crosshair with dBFS label, secondary markers,
+  optional fading trail.
+- Media: composited captures (camera+overlay through color key), color
+  MJPEG via hardware JPEG codec (gray software fallback), timed AVI
+  playback, screenshot/record from imaging page or media page.
+- Trigger mode: armed via imaging quick button; auto-screenshot on
+  valid-detection rising edge (quality >= 12%, peak >= -32 dBFS, 6 s
+  cooldown), counter on system page.
+- GDB hooks: `g_app_ui_request_screen` (page switch), DEBUG-only
+  `g_app_media_test_request` (media commands), `g_app_ui_debug[4]`.
+- Known cosmetic debt (P9): heat field can look blocky at 48x36 with
+  visible steps on large sources; Fluke-style visual pass planned;
+  Core16/192k path is spec-only (see docs/knowledge architecture study,
+  work items in repo history 2026-07-08).
 
 ## Known Bugs
 
