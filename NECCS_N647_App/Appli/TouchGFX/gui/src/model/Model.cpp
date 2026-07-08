@@ -130,6 +130,11 @@ static uint32_t AppMedia_RequestReadSelected()
     return 0U;
 }
 
+static uint32_t AppMedia_RequestPlayToggle()
+{
+    return 0U;
+}
+
 static void AppMedia_GetStatus(AppMediaStatus_t* status)
 {
     if (status != 0)
@@ -797,6 +802,11 @@ void Model::selectNextMedia()
 void Model::readSelectedMedia()
 {
     (void)AppMedia_RequestReadSelected();
+}
+
+void Model::playToggleMedia()
+{
+    (void)AppMedia_RequestPlayToggle();
 }
 
 void Model::setActiveProfile(uint8_t profile)

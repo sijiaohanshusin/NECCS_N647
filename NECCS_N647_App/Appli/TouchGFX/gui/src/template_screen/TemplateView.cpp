@@ -592,7 +592,7 @@ void TemplateView::setupMediaPage()
         add(mediaInfoValue[i]);
     }
 
-    static const char* actions[MediaActionCount] = {"截屏", "录像", "下一个", "读取", "同步"};
+    static const char* actions[MediaActionCount] = {"截屏", "录像", "下一个", "播放", "同步"};
     static const uint16_t icons[MediaActionCount] = {
         BITMAP_UI_SNAPSHOT_ID,
         BITMAP_UI_RECORD_ID,
@@ -1347,6 +1347,10 @@ void TemplateView::refreshMediaPage(const AppUiSnapshot& snapshot)
 {
     char text[64];
 
+    const bool playing = (snapshot.mediaFlags & APP_UI_MEDIA_FLAG_PLAYING) != 0U;
+    mediaButtonLabel[3].setText(playing ? "暂停" : "播放");
+    mediaButtonLabel[3].setColors(playing ? ColorBlue : ColorText, ColorBg, false);
+
     const bool sdReady = (snapshot.mediaFlags & APP_UI_MEDIA_FLAG_SD_READY) != 0U;
     mediaInfoValue[0].setColors(sdReady ? ColorGreen : ColorAmber, ColorBg, false);
     mediaInfoValue[0].setText(sdReady ? "正常" : "等待");
@@ -1515,7 +1519,7 @@ void TemplateView::onMediaPressed(const touchgfx::AbstractButton& source)
     }
     else if (&source == &mediaTouch[3])
     {
-        presenter->readSelectedMedia();
+        presenter->playToggleMedia();
     }
     else if (&source == &mediaTouch[4])
     {

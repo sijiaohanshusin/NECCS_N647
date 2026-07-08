@@ -147,25 +147,6 @@ static void AppCameraDisplay_InvalidateDCache(uint32_t address, uint32_t size)
   __ISB();
 }
 
-static void AppCameraDisplay_CleanInvalidateDCache(uint32_t address, uint32_t size)
-{
-  uint32_t aligned_addr;
-  uint32_t end_addr;
-
-  if ((size == 0U) || ((SCB->CCR & SCB_CCR_DC_Msk) == 0U))
-  {
-    return;
-  }
-
-  aligned_addr = address & ~(APP_CAMERA_DISPLAY_DCACHE_LINE_BYTES - 1U);
-  end_addr = (address + size + APP_CAMERA_DISPLAY_DCACHE_LINE_BYTES - 1U) &
-             ~(APP_CAMERA_DISPLAY_DCACHE_LINE_BYTES - 1U);
-
-  SCB_CleanInvalidateDCache_by_Addr((void *)aligned_addr, (int32_t)(end_addr - aligned_addr));
-  __DSB();
-  __ISB();
-}
-
 static uint32_t AppCameraDisplay_GetUiFramebufferAddr(void)
 {
   uint32_t address = LTDC_Layer2->CFBAR;
@@ -1004,6 +985,26 @@ void AppCameraDisplay_WorkerThreadEntry(ULONG thread_input)
       }
     }
   }
+}
+
+uint8_t AppCameraDisplay_CopyDisplayedFrame(uint16_t *dst)
+{
+  const uint32_t frame_addr = g_app_camera_display_addr;
+  const uint32_t frame_bytes =
+    APP_CAMERA_DISPLAY_WIDTH * APP_CAMERA_DISPLAY_HEIGHT * APP_CAMERA_DISPLAY_BYTES_PER_PIXEL;
+
+  if ((dst == 0) ||
+      ((g_app_camera_display_flags & APP_CAMERA_DISPLAY_FLAG_VISIBLE) == 0U) ||
+      (frame_addr == 0U))
+  {
+    return 0U;
+  }
+
+  /* The frame was produced by DCMIPP DMA plus the overlay worker; drop any
+   * stale cache lines before the CPU reads it. */
+  AppCameraDisplay_InvalidateDCache(frame_addr, frame_bytes);
+  memcpy(dst, (const void *)frame_addr, frame_bytes);
+  return 1U;
 }
 
 void AppCameraDisplay_GetStatus(AppCameraDisplayStatus_t *status)

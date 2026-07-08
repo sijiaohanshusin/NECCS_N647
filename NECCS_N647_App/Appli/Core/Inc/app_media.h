@@ -27,6 +27,7 @@ extern "C" {
 #define APP_MEDIA_FLAG_RECORDING       0x00000010UL
 #define APP_MEDIA_FLAG_BUSY            0x00000020UL
 #define APP_MEDIA_FLAG_PREVIEW_VALID   0x00000040UL
+#define APP_MEDIA_FLAG_PLAYING         0x00000080UL
 
 typedef enum
 {
@@ -107,6 +108,8 @@ uint32_t AppMedia_RequestRecordStop(void);
 uint32_t AppMedia_RequestRefresh(void);
 uint32_t AppMedia_RequestSelectNext(void);
 uint32_t AppMedia_RequestReadSelected(void);
+/* Toggle timed AVI playback of the selected video (5 fps frame stepping). */
+uint32_t AppMedia_RequestPlayToggle(void);
 void AppMedia_GetStatus(AppMediaStatus_t *status);
 const uint16_t *AppMedia_GetPreviewBuffer(AppMediaPreviewInfo_t *info);
 

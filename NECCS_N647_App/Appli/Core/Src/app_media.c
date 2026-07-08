@@ -7,6 +7,7 @@
 
 #include "app_media.h"
 
+#include "app_camera_display.h"
 #include "app_media_jpeg.h"
 #include "main.h"
 #include "./SD_NAND/sd_nand.h"
@@ -31,7 +32,11 @@
 #define APP_MEDIA_RECORD_FPS              5U
 #define APP_MEDIA_RECORD_PERIOD_TICKS     (TX_TIMER_TICKS_PER_SECOND / APP_MEDIA_RECORD_FPS)
 #define APP_MEDIA_JPEG_MAX_BYTES          (384U * 1024U)
-#define APP_MEDIA_JPEG_DECODE_MAX_BYTES   (APP_MEDIA_PREVIEW_WIDTH * APP_MEDIA_PREVIEW_HEIGHT)
+/* Large enough for 4:2:0 MCU streams of a full preview-sized frame
+ * (512x304 x 1.5 bytes/px). Grayscale streams are smaller. */
+#define APP_MEDIA_JPEG_DECODE_MAX_BYTES   ((APP_MEDIA_PREVIEW_WIDTH * APP_MEDIA_PREVIEW_HEIGHT * 3U) / 2U)
+#define APP_MEDIA_JPEG_QUALITY            80U
+#define APP_MEDIA_MCU_BYTES_420           384U
 #define APP_MEDIA_JPEG_TIMEOUT_MS         1000U
 #define APP_MEDIA_MAX_VIDEO_FRAMES        1800U
 #define APP_MEDIA_BMP_ROWS_PER_WRITE      64U
@@ -49,7 +54,8 @@ typedef enum
   APP_MEDIA_CMD_RECORD_START = 3,
   APP_MEDIA_CMD_RECORD_STOP = 4,
   APP_MEDIA_CMD_SELECT_NEXT = 5,
-  APP_MEDIA_CMD_READ_SELECTED = 6
+  APP_MEDIA_CMD_READ_SELECTED = 6,
+  APP_MEDIA_CMD_PLAY_TOGGLE = 7
 } AppMediaCommand_t;
 
 typedef struct
@@ -82,6 +88,10 @@ static uint8_t s_bmp_row[APP_MEDIA_FB_WIDTH * 3U * APP_MEDIA_BMP_ROWS_PER_WRITE]
 static uint8_t s_jpeg_buffer[APP_MEDIA_JPEG_MAX_BYTES] __attribute__((aligned(32)));
 static uint8_t s_jpeg_decode_buffer[APP_MEDIA_JPEG_DECODE_MAX_BYTES] __attribute__((section(".EXTRAM"), aligned(32)));
 static uint16_t s_preview_buffer[APP_MEDIA_PREVIEW_WIDTH * APP_MEDIA_PREVIEW_HEIGHT] __attribute__((section(".EXTRAM"), aligned(32)));
+/* Snapshot of the displayed camera frame (with heat overlay) taken at
+ * screenshot/record time so captures include the camera window content
+ * instead of the LTDC color-key hole. */
+static uint16_t s_capture_cam_frame[APP_CAMERA_DISPLAY_WIDTH * APP_CAMERA_DISPLAY_HEIGHT] __attribute__((section(".EXTRAM"), aligned(32)));
 /* CPU-only FileX/AVI metadata (14 KB); lives in cached external RAM to keep
  * internal SRAM free for thread stacks. Only touched by the media thread,
  * well after HyperRAM is up. */
@@ -92,6 +102,16 @@ static JPEG_HandleTypeDef s_jpeg_handle;
 static uint32_t s_media_mounted = 0U;
 static uint32_t s_jpeg_ready = 0U;
 static uint32_t s_recording = 0U;
+static uint32_t s_playing = 0U;
+/* Hardware JPEG encode plumbing (polling mode). The HAL reports the
+ * compressed size through HAL_JPEG_DataReadyCallback and requests input
+ * through HAL_JPEG_GetDataCallback; both are shared with the decode path,
+ * so the encode-specific behaviour is gated by s_jpeg_encode_active. */
+static volatile uint32_t s_jpeg_encode_active = 0U;
+static volatile uint32_t s_jpeg_encode_in_total = 0U;
+static volatile uint32_t s_jpeg_encode_out_size = 0U;
+static uint32_t s_jpeg_encode_configured = 0U;
+static uint32_t s_jpeg_hw_encode_disabled = 0U;
 static uint32_t s_next_screenshot = 1U;
 static uint32_t s_next_video = 1U;
 static uint32_t s_video_play_frame = 0U;
@@ -106,8 +126,16 @@ static uint32_t s_avi_movi_size_offset = 0U;
 static uint32_t s_avi_movi_data_start = 0U;
 static char s_video_play_path[APP_MEDIA_FILE_NAME_LEN];
 
+#ifdef DEBUG
+/* Per-stage timing of the last recorded frame, in ms (GDB probes). */
+volatile uint32_t g_app_media_perf_compose_ms;
+volatile uint32_t g_app_media_perf_encode_ms;
+volatile uint32_t g_app_media_perf_write_ms;
+#endif
+
 static void AppMedia_ThreadEntry(ULONG thread_input);
 static void AppMedia_FileXDriver(FX_MEDIA *media_ptr);
+static uint32_t read_selected_file(void);
 
 static void status_lock(void)
 {
@@ -638,6 +666,41 @@ static void clean_framebuffer_cache(const uint16_t *framebuffer)
   __DSB();
 }
 
+/* Build a full-screen capture frame: UI framebuffer with the LTDC color-key
+ * hole replaced by the displayed camera frame (camera + heat overlay), i.e.
+ * what the user actually sees on the panel. Returns the staging buffer. */
+static uint16_t s_capture_screen[APP_MEDIA_FB_WIDTH * APP_MEDIA_FB_HEIGHT] __attribute__((section(".EXTRAM"), aligned(32)));
+
+static const uint16_t *capture_compose_screen(void)
+{
+  const uint16_t *framebuffer = framebuffer_ptr();
+  const uint8_t cam_ok = AppCameraDisplay_CopyDisplayedFrame(s_capture_cam_frame);
+
+  clean_framebuffer_cache(framebuffer);
+  SCB_InvalidateDCache_by_Addr((void *)framebuffer, (int32_t)APP_MEDIA_FB_BYTES);
+  memcpy(s_capture_screen, framebuffer, APP_MEDIA_FB_BYTES);
+
+  if (cam_ok != 0U)
+  {
+    for (uint32_t row = 0U; row < APP_CAMERA_DISPLAY_HEIGHT; ++row)
+    {
+      uint16_t *dst = &s_capture_screen[((APP_CAMERA_DISPLAY_Y0 + row) * APP_MEDIA_FB_WIDTH) +
+                                        APP_CAMERA_DISPLAY_X0];
+      const uint16_t *cam = &s_capture_cam_frame[row * APP_CAMERA_DISPLAY_WIDTH];
+
+      for (uint32_t col = 0U; col < APP_CAMERA_DISPLAY_WIDTH; ++col)
+      {
+        if (dst[col] == APP_CAMERA_DISPLAY_COLOR_KEY_RGB565)
+        {
+          dst[col] = cam[col];
+        }
+      }
+    }
+  }
+
+  return s_capture_screen;
+}
+
 static uint32_t ensure_jpeg_ready(void)
 {
   if (s_jpeg_ready != 0U)
@@ -661,12 +724,166 @@ static uint32_t ensure_jpeg_ready(void)
   return APP_MEDIA_ERROR_NONE;
 }
 
+/* ------------------------------------------------------------------ */
+/* Hardware JPEG encode (color MJPEG frames)                            */
+/* ------------------------------------------------------------------ */
+
+void HAL_JPEG_GetDataCallback(JPEG_HandleTypeDef *hjpeg, uint32_t NbDecodedData)
+{
+  /* Encode feeds one complete MCU buffer: once it is consumed, stop the
+   * input stage instead of letting the HAL re-feed from the start. The
+   * decode path keeps the historical no-op behaviour. */
+  if ((s_jpeg_encode_active != 0U) && (NbDecodedData >= s_jpeg_encode_in_total))
+  {
+    (void)HAL_JPEG_Pause(hjpeg, JPEG_PAUSE_RESUME_INPUT);
+  }
+}
+
+void HAL_JPEG_DataReadyCallback(JPEG_HandleTypeDef *hjpeg, uint8_t *pDataOut, uint32_t OutDataLength)
+{
+  (void)hjpeg;
+  (void)pDataOut;
+  if (s_jpeg_encode_active != 0U)
+  {
+    s_jpeg_encode_out_size += OutDataLength;
+  }
+}
+
+static uint32_t ensure_jpeg_encode_config(void)
+{
+  JPEG_ConfTypeDef conf;
+
+  if (s_jpeg_encode_configured != 0U)
+  {
+    return APP_MEDIA_ERROR_NONE;
+  }
+
+  memset(&conf, 0, sizeof(conf));
+  conf.ColorSpace = JPEG_YCBCR_COLORSPACE;
+  conf.ChromaSubsampling = JPEG_420_SUBSAMPLING;
+  conf.ImageWidth = APP_MEDIA_RECORD_WIDTH;
+  conf.ImageHeight = APP_MEDIA_RECORD_HEIGHT;
+  conf.ImageQuality = APP_MEDIA_JPEG_QUALITY;
+  if (HAL_JPEG_ConfigEncoding(&s_jpeg_handle, &conf) != HAL_OK)
+  {
+    return APP_MEDIA_ERROR_JPEG;
+  }
+
+  s_jpeg_encode_configured = 1U;
+  return APP_MEDIA_ERROR_NONE;
+}
+
+/* Downscale the composed 1024x600 screen to 512x304 and pack it as
+ * YCbCr 4:2:0 MCU blocks (Y0 Y1 Y2 Y3 Cb Cr, 384 bytes per 16x16 MCU)
+ * into s_jpeg_decode_buffer, ready for the hardware encoder. */
+static uint32_t media_pack_mcu420(const uint16_t *screen)
+{
+  const uint32_t mcu_cols = APP_MEDIA_RECORD_WIDTH / 16U;
+  const uint32_t mcu_rows = APP_MEDIA_RECORD_HEIGHT / 16U;
+  uint8_t *out = s_jpeg_decode_buffer;
+
+  for (uint32_t my = 0U; my < mcu_rows; ++my)
+  {
+    for (uint32_t mx = 0U; mx < mcu_cols; ++mx)
+    {
+      uint16_t cb_acc[64];
+      uint16_t cr_acc[64];
+
+      memset(cb_acc, 0, sizeof(cb_acc));
+      memset(cr_acc, 0, sizeof(cr_acc));
+
+      for (uint32_t by = 0U; by < 16U; ++by)
+      {
+        const uint32_t py = (my * 16U) + by;
+        const uint32_t src_y = (py * APP_MEDIA_FB_HEIGHT) / APP_MEDIA_RECORD_HEIGHT;
+        const uint16_t *src_row = &screen[src_y * APP_MEDIA_FB_WIDTH];
+
+        for (uint32_t bx = 0U; bx < 16U; ++bx)
+        {
+          const uint32_t px = (mx * 16U) + bx;
+          const uint32_t src_x = (px * APP_MEDIA_FB_WIDTH) / APP_MEDIA_RECORD_WIDTH;
+          const uint16_t pixel = src_row[src_x];
+          const int32_t r = (int32_t)((pixel >> 8) & 0xF8U) | ((pixel >> 13) & 0x07U);
+          const int32_t g = (int32_t)((pixel >> 3) & 0xFCU) | ((pixel >> 9) & 0x03U);
+          const int32_t b = (int32_t)((pixel << 3) & 0xF8U) | ((pixel >> 2) & 0x07U);
+
+          int32_t y = ((77 * r) + (150 * g) + (29 * b)) >> 8;
+          int32_t cb = (((-43 * r) - (85 * g) + (128 * b)) >> 8) + 128;
+          int32_t cr = (((128 * r) - (107 * g) - (21 * b)) >> 8) + 128;
+
+          if (y < 0) { y = 0; } else if (y > 255) { y = 255; }
+          if (cb < 0) { cb = 0; } else if (cb > 255) { cb = 255; }
+          if (cr < 0) { cr = 0; } else if (cr > 255) { cr = 255; }
+
+          const uint32_t block_id = ((by >> 3) * 2U) + (bx >> 3);
+          out[(block_id * 64U) + ((by & 7U) * 8U) + (bx & 7U)] = (uint8_t)y;
+
+          const uint32_t cidx = ((by >> 1) * 8U) + (bx >> 1);
+          cb_acc[cidx] = (uint16_t)(cb_acc[cidx] + (uint16_t)cb);
+          cr_acc[cidx] = (uint16_t)(cr_acc[cidx] + (uint16_t)cr);
+        }
+      }
+
+      for (uint32_t i = 0U; i < 64U; ++i)
+      {
+        out[(4U * 64U) + i] = (uint8_t)((cb_acc[i] + 2U) >> 2);
+        out[(5U * 64U) + i] = (uint8_t)((cr_acc[i] + 2U) >> 2);
+      }
+
+      out += APP_MEDIA_MCU_BYTES_420;
+    }
+  }
+
+  return (uint32_t)(out - s_jpeg_decode_buffer);
+}
+
+/* Encode one composed screen frame to color JPEG using the hardware codec.
+ * Returns APP_MEDIA_ERROR_NONE and the byte size in *out_size on success. */
+static uint32_t media_hw_encode_color(const uint16_t *screen, uint32_t *out_size)
+{
+  uint32_t mcu_bytes;
+  HAL_StatusTypeDef status;
+
+  if (ensure_jpeg_ready() != APP_MEDIA_ERROR_NONE)
+  {
+    return APP_MEDIA_ERROR_JPEG;
+  }
+  if (ensure_jpeg_encode_config() != APP_MEDIA_ERROR_NONE)
+  {
+    return APP_MEDIA_ERROR_JPEG;
+  }
+
+  mcu_bytes = media_pack_mcu420(screen);
+
+  s_jpeg_encode_in_total = mcu_bytes;
+  s_jpeg_encode_out_size = 0U;
+  s_jpeg_encode_active = 1U;
+  status = HAL_JPEG_Encode(&s_jpeg_handle,
+                           s_jpeg_decode_buffer,
+                           mcu_bytes,
+                           s_jpeg_buffer,
+                           sizeof(s_jpeg_buffer),
+                           APP_MEDIA_JPEG_TIMEOUT_MS);
+  s_jpeg_encode_active = 0U;
+
+  if ((status != HAL_OK) || (s_jpeg_encode_out_size == 0U) ||
+      (s_jpeg_encode_out_size > sizeof(s_jpeg_buffer)))
+  {
+    (void)HAL_JPEG_Abort(&s_jpeg_handle);
+    s_jpeg_encode_configured = 0U;
+    return APP_MEDIA_ERROR_JPEG;
+  }
+
+  *out_size = s_jpeg_encode_out_size;
+  return APP_MEDIA_ERROR_NONE;
+}
+
 static uint32_t write_bmp_screenshot(void)
 {
   char path[APP_MEDIA_FILE_NAME_LEN];
   uint8_t header[54];
   UINT status;
-  const uint16_t *framebuffer = framebuffer_ptr();
+  const uint16_t *framebuffer;
   const uint32_t row_bytes = APP_MEDIA_FB_WIDTH * 3U;
   const uint32_t pixel_bytes = row_bytes * APP_MEDIA_FB_HEIGHT;
   const uint32_t file_bytes = sizeof(header) + pixel_bytes;
@@ -711,7 +928,7 @@ static uint32_t write_bmp_screenshot(void)
   put_u16_le(&header[28], 24U);
   put_u32_le(&header[34], pixel_bytes);
 
-  clean_framebuffer_cache(framebuffer);
+  framebuffer = capture_compose_screen();
 
   status = fx_file_write(&s_work_file, header, sizeof(header));
   if (status == FX_SUCCESS)
@@ -930,29 +1147,63 @@ static UINT avi_append_frame(void)
 {
   uint32_t jpeg_size = 0U;
   uint32_t chunk_start;
+  uint32_t encode_ok = 0U;
   UINT status;
-  const uint16_t *framebuffer = framebuffer_ptr();
+  const uint16_t *framebuffer;
 
   if (s_status.record_frames >= APP_MEDIA_MAX_VIDEO_FRAMES)
   {
     return FX_SUCCESS;
   }
 
-  clean_framebuffer_cache(framebuffer);
-  if (AppMediaJpeg_EncodeGrayFromRgb565(framebuffer,
-                                        APP_MEDIA_FB_WIDTH,
-                                        APP_MEDIA_FB_HEIGHT,
-                                        APP_MEDIA_RECORD_WIDTH,
-                                        APP_MEDIA_RECORD_HEIGHT,
-                                        s_jpeg_buffer,
-                                        sizeof(s_jpeg_buffer),
-                                        &jpeg_size) != APP_MEDIA_JPEG_OK)
+#ifdef DEBUG
   {
-    status_lock();
-    s_status.dropped_frames++;
-    status_unlock();
-    status_set_error(APP_MEDIA_ERROR_JPEG);
-    return FX_SUCCESS;
+    const uint32_t t0 = HAL_GetTick();
+    framebuffer = capture_compose_screen();
+    g_app_media_perf_compose_ms = HAL_GetTick() - t0;
+  }
+#else
+  framebuffer = capture_compose_screen();
+#endif
+
+  /* Color via the hardware codec; grayscale software encode as fallback.
+   * A hardware failure disables the color path for the session so a broken
+   * codec cannot stall the recording cadence. */
+  if (s_jpeg_hw_encode_disabled == 0U)
+  {
+#ifdef DEBUG
+    const uint32_t t0 = HAL_GetTick();
+#endif
+    if (media_hw_encode_color(framebuffer, &jpeg_size) == APP_MEDIA_ERROR_NONE)
+    {
+      encode_ok = 1U;
+    }
+    else
+    {
+      s_jpeg_hw_encode_disabled = 1U;
+    }
+#ifdef DEBUG
+    g_app_media_perf_encode_ms = HAL_GetTick() - t0;
+#endif
+  }
+
+  if (encode_ok == 0U)
+  {
+    if (AppMediaJpeg_EncodeGrayFromRgb565(framebuffer,
+                                          APP_MEDIA_FB_WIDTH,
+                                          APP_MEDIA_FB_HEIGHT,
+                                          APP_MEDIA_RECORD_WIDTH,
+                                          APP_MEDIA_RECORD_HEIGHT,
+                                          s_jpeg_buffer,
+                                          sizeof(s_jpeg_buffer),
+                                          &jpeg_size) != APP_MEDIA_JPEG_OK)
+    {
+      status_lock();
+      s_status.dropped_frames++;
+      status_unlock();
+      status_set_error(APP_MEDIA_ERROR_JPEG);
+      return FX_SUCCESS;
+    }
   }
 
   chunk_start = s_record_file_pos;
@@ -1173,6 +1424,51 @@ static void process_record_tick(void)
   }
 }
 
+static void set_playing(uint32_t playing)
+{
+  s_playing = playing;
+  status_lock();
+  if (playing != 0U)
+  {
+    s_status.flags |= APP_MEDIA_FLAG_PLAYING;
+  }
+  else
+  {
+    s_status.flags &= ~APP_MEDIA_FLAG_PLAYING;
+  }
+  status_unlock();
+}
+
+/* Timed AVI playback: step one frame per record period while playing. */
+static void process_play_tick(void)
+{
+  static uint32_t s_play_last_tick = 0U;
+  const uint32_t now = tx_time_get();
+
+  if (s_playing == 0U)
+  {
+    return;
+  }
+
+  if ((s_recording != 0U) ||
+      (s_media_mounted == 0U) ||
+      (s_status.selected_type != APP_MEDIA_SELECTED_VIDEO))
+  {
+    set_playing(0U);
+    return;
+  }
+
+  if ((s_play_last_tick == 0U) ||
+      ((now - s_play_last_tick) >= APP_MEDIA_RECORD_PERIOD_TICKS))
+  {
+    s_play_last_tick = now;
+    if (read_selected_file() != APP_MEDIA_ERROR_NONE)
+    {
+      set_playing(0U);
+    }
+  }
+}
+
 static uint32_t select_next_file(void)
 {
   char path[APP_MEDIA_FILE_NAME_LEN];
@@ -1289,6 +1585,23 @@ static uint32_t jpeg_parse_info(const uint8_t *data, uint32_t size, AppMediaJpeg
   return APP_MEDIA_ERROR_INVALID_MEDIA;
 }
 
+static uint16_t media_ycbcr_to_rgb565(int32_t y, int32_t cb, int32_t cr)
+{
+  const int32_t c = cb - 128;
+  const int32_t d = cr - 128;
+  int32_t r = y + ((359 * d) >> 8);
+  int32_t g = y - ((88 * c) >> 8) - ((183 * d) >> 8);
+  int32_t b = y + ((454 * c) >> 8);
+
+  if (r < 0) { r = 0; } else if (r > 255) { r = 255; }
+  if (g < 0) { g = 0; } else if (g > 255) { g = 255; }
+  if (b < 0) { b = 0; } else if (b > 255) { b = 255; }
+
+  return (uint16_t)((((uint32_t)r & 0xF8U) << 8) |
+                    (((uint32_t)g & 0xFCU) << 3) |
+                    ((uint32_t)b >> 3));
+}
+
 static uint32_t decode_jpeg_preview(uint32_t jpeg_size, uint32_t frame_index, uint32_t frame_count)
 {
   AppMediaJpegInfo_t info;
@@ -1298,6 +1611,7 @@ static uint32_t decode_jpeg_preview(uint32_t jpeg_size, uint32_t frame_index, ui
   uint32_t output_bytes;
   uint32_t dst_x0;
   uint32_t dst_y0;
+  uint32_t is_color;
   const uint8_t *src;
 
   if (jpeg_parse_info(s_jpeg_buffer, jpeg_size, &info) != APP_MEDIA_ERROR_NONE)
@@ -1307,13 +1621,15 @@ static uint32_t decode_jpeg_preview(uint32_t jpeg_size, uint32_t frame_index, ui
     return APP_MEDIA_ERROR_INVALID_MEDIA;
   }
 
-  if ((info.components != 1U) || (info.width == 0U) || (info.height == 0U) ||
+  if (((info.components != 1U) && (info.components != 3U)) ||
+      (info.width == 0U) || (info.height == 0U) ||
       (info.width > APP_MEDIA_PREVIEW_WIDTH) || (info.height > APP_MEDIA_PREVIEW_HEIGHT))
   {
     preview_clear();
     status_set_error(APP_MEDIA_ERROR_UNSUPPORTED_FORMAT);
     return APP_MEDIA_ERROR_UNSUPPORTED_FORMAT;
   }
+  is_color = (info.components == 3U) ? 1U : 0U;
 
   padded_size = (jpeg_size + 3U) & ~3UL;
   if (padded_size > APP_MEDIA_JPEG_MAX_BYTES)
@@ -1327,9 +1643,19 @@ static uint32_t decode_jpeg_preview(uint32_t jpeg_size, uint32_t frame_index, ui
     memset(&s_jpeg_buffer[jpeg_size], 0xFF, padded_size - jpeg_size);
   }
 
-  mcu_cols = (info.width + 7U) / 8U;
-  mcu_rows = (info.height + 7U) / 8U;
-  output_bytes = mcu_cols * mcu_rows * 64U;
+  if (is_color != 0U)
+  {
+    /* 4:2:0 MCUs are 16x16 pixels, 384 bytes each. */
+    mcu_cols = (info.width + 15U) / 16U;
+    mcu_rows = (info.height + 15U) / 16U;
+    output_bytes = mcu_cols * mcu_rows * APP_MEDIA_MCU_BYTES_420;
+  }
+  else
+  {
+    mcu_cols = (info.width + 7U) / 8U;
+    mcu_rows = (info.height + 7U) / 8U;
+    output_bytes = mcu_cols * mcu_rows * 64U;
+  }
   if ((output_bytes == 0U) || (output_bytes > sizeof(s_jpeg_decode_buffer)))
   {
     preview_clear();
@@ -1351,14 +1677,20 @@ static uint32_t decode_jpeg_preview(uint32_t jpeg_size, uint32_t frame_index, ui
                       output_bytes,
                       APP_MEDIA_JPEG_TIMEOUT_MS) != HAL_OK)
   {
+    s_jpeg_encode_configured = 0U;
     preview_clear();
     status_set_error(APP_MEDIA_ERROR_JPEG);
     return APP_MEDIA_ERROR_JPEG;
   }
+  /* Decoding reprograms the codec registers from the JFIF header, so the
+   * encoder configuration must be re-applied before the next encode. */
+  s_jpeg_encode_configured = 0U;
 
-  if ((s_jpeg_handle.Conf.ColorSpace != JPEG_GRAYSCALE_COLORSPACE) ||
-      (s_jpeg_handle.Conf.ImageWidth != info.width) ||
-      (s_jpeg_handle.Conf.ImageHeight != info.height))
+  if ((s_jpeg_handle.Conf.ImageWidth != info.width) ||
+      (s_jpeg_handle.Conf.ImageHeight != info.height) ||
+      ((is_color == 0U) && (s_jpeg_handle.Conf.ColorSpace != JPEG_GRAYSCALE_COLORSPACE)) ||
+      ((is_color != 0U) && ((s_jpeg_handle.Conf.ColorSpace != JPEG_YCBCR_COLORSPACE) ||
+                            (s_jpeg_handle.Conf.ChromaSubsampling != JPEG_420_SUBSAMPLING))))
   {
     preview_clear();
     status_set_error(APP_MEDIA_ERROR_UNSUPPORTED_FORMAT);
@@ -1369,29 +1701,69 @@ static uint32_t decode_jpeg_preview(uint32_t jpeg_size, uint32_t frame_index, ui
   dst_x0 = (APP_MEDIA_PREVIEW_WIDTH - info.width) / 2U;
   dst_y0 = (APP_MEDIA_PREVIEW_HEIGHT - info.height) / 2U;
   src = s_jpeg_decode_buffer;
-  for (uint32_t mcu_y = 0U; mcu_y < mcu_rows; ++mcu_y)
-  {
-    for (uint32_t mcu_x = 0U; mcu_x < mcu_cols; ++mcu_x)
-    {
-      for (uint32_t y = 0U; y < 8U; ++y)
-      {
-        const uint32_t dst_y = (mcu_y * 8U) + y;
-        if (dst_y >= info.height)
-        {
-          continue;
-        }
 
-        for (uint32_t x = 0U; x < 8U; ++x)
+  if (is_color != 0U)
+  {
+    for (uint32_t mcu_y = 0U; mcu_y < mcu_rows; ++mcu_y)
+    {
+      for (uint32_t mcu_x = 0U; mcu_x < mcu_cols; ++mcu_x)
+      {
+        for (uint32_t y = 0U; y < 16U; ++y)
         {
-          const uint32_t dst_x = (mcu_x * 8U) + x;
-          if (dst_x < info.width)
+          const uint32_t dst_y = (mcu_y * 16U) + y;
+          if (dst_y >= info.height)
           {
+            continue;
+          }
+
+          for (uint32_t x = 0U; x < 16U; ++x)
+          {
+            const uint32_t dst_x = (mcu_x * 16U) + x;
+            if (dst_x >= info.width)
+            {
+              continue;
+            }
+
+            const uint32_t block_id = ((y >> 3) * 2U) + (x >> 3);
+            const int32_t lum = src[(block_id * 64U) + ((y & 7U) * 8U) + (x & 7U)];
+            const uint32_t cidx = ((y >> 1) * 8U) + (x >> 1);
+            const int32_t cb = src[(4U * 64U) + cidx];
+            const int32_t cr = src[(5U * 64U) + cidx];
+
             s_preview_buffer[((dst_y0 + dst_y) * APP_MEDIA_PREVIEW_WIDTH) + dst_x0 + dst_x] =
-              gray_to_rgb565(src[(y * 8U) + x]);
+              media_ycbcr_to_rgb565(lum, cb, cr);
           }
         }
+        src += APP_MEDIA_MCU_BYTES_420;
       }
-      src += 64U;
+    }
+  }
+  else
+  {
+    for (uint32_t mcu_y = 0U; mcu_y < mcu_rows; ++mcu_y)
+    {
+      for (uint32_t mcu_x = 0U; mcu_x < mcu_cols; ++mcu_x)
+      {
+        for (uint32_t y = 0U; y < 8U; ++y)
+        {
+          const uint32_t dst_y = (mcu_y * 8U) + y;
+          if (dst_y >= info.height)
+          {
+            continue;
+          }
+
+          for (uint32_t x = 0U; x < 8U; ++x)
+          {
+            const uint32_t dst_x = (mcu_x * 8U) + x;
+            if (dst_x < info.width)
+            {
+              s_preview_buffer[((dst_y0 + dst_y) * APP_MEDIA_PREVIEW_WIDTH) + dst_x0 + dst_x] =
+                gray_to_rgb565(src[(y * 8U) + x]);
+            }
+          }
+        }
+        src += 64U;
+      }
     }
   }
 
@@ -1885,16 +2257,37 @@ static void process_command(AppMediaCommand_t command)
     (void)write_bmp_screenshot();
     break;
   case APP_MEDIA_CMD_RECORD_START:
+    set_playing(0U);
     (void)start_recording();
     break;
   case APP_MEDIA_CMD_RECORD_STOP:
     (void)stop_recording();
     break;
   case APP_MEDIA_CMD_SELECT_NEXT:
-    (void)select_next_file();
+    set_playing(0U);
+    if (select_next_file() == APP_MEDIA_ERROR_NONE)
+    {
+      /* Gallery behaviour: show the newly selected item immediately. */
+      (void)read_selected_file();
+    }
     break;
   case APP_MEDIA_CMD_READ_SELECTED:
     (void)read_selected_file();
+    break;
+  case APP_MEDIA_CMD_PLAY_TOGGLE:
+    if (s_playing != 0U)
+    {
+      set_playing(0U);
+    }
+    else if (s_status.selected_type == APP_MEDIA_SELECTED_VIDEO)
+    {
+      set_playing(1U);
+    }
+    else
+    {
+      /* Non-video selection: a single read shows the image. */
+      (void)read_selected_file();
+    }
     break;
   default:
     break;
@@ -1902,6 +2295,12 @@ static void process_command(AppMediaCommand_t command)
 
   status_set_busy(0U);
 }
+
+#ifdef DEBUG
+/* GDB test hook: writing a command id here (via debugger memory write) runs
+ * it on the media thread. Safer than GDB function calls on a live RTOS. */
+volatile uint32_t g_app_media_test_request = 0U;
+#endif
 
 static void AppMedia_ThreadEntry(ULONG thread_input)
 {
@@ -1919,7 +2318,18 @@ static void AppMedia_ThreadEntry(ULONG thread_input)
       process_command((AppMediaCommand_t)message);
     }
 
+#ifdef DEBUG
+    if (g_app_media_test_request != 0U)
+    {
+      const AppMediaCommand_t test_command = (AppMediaCommand_t)g_app_media_test_request;
+
+      g_app_media_test_request = 0U;
+      process_command(test_command);
+    }
+#endif
+
     process_record_tick();
+    process_play_tick();
   }
 }
 
@@ -2106,6 +2516,11 @@ uint32_t AppMedia_RequestSelectNext(void)
 uint32_t AppMedia_RequestReadSelected(void)
 {
   return post_command(APP_MEDIA_CMD_READ_SELECTED);
+}
+
+uint32_t AppMedia_RequestPlayToggle(void)
+{
+  return post_command(APP_MEDIA_CMD_PLAY_TOGGLE);
 }
 
 void AppMedia_GetStatus(AppMediaStatus_t *status)

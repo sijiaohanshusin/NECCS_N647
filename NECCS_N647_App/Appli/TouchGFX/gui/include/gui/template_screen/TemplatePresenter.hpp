@@ -53,6 +53,7 @@ public:
     void refreshMedia();
     void selectNextMedia();
     void readSelectedMedia();
+    void playToggleMedia();
     virtual void uiSnapshotUpdated(const AppUiSnapshot& snapshot);
 
     virtual ~TemplatePresenter()

@@ -72,7 +72,8 @@ enum AppUiMediaFlag
     APP_UI_MEDIA_FLAG_FORMATTED = 0x00000008UL,
     APP_UI_MEDIA_FLAG_RECORDING = 0x00000010UL,
     APP_UI_MEDIA_FLAG_BUSY = 0x00000020UL,
-    APP_UI_MEDIA_FLAG_PREVIEW_VALID = 0x00000040UL
+    APP_UI_MEDIA_FLAG_PREVIEW_VALID = 0x00000040UL,
+    APP_UI_MEDIA_FLAG_PLAYING = 0x00000080UL
 };
 
 enum AppUiPcmdFlag
@@ -249,6 +250,7 @@ public:
     void refreshMedia();
     void selectNextMedia();
     void readSelectedMedia();
+    void playToggleMedia();
 
     const AppUiSnapshot& getSnapshot() const
     {

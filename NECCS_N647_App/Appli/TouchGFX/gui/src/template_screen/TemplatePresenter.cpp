@@ -77,6 +77,11 @@ void TemplatePresenter::readSelectedMedia()
     model->readSelectedMedia();
 }
 
+void TemplatePresenter::playToggleMedia()
+{
+    model->playToggleMedia();
+}
+
 void TemplatePresenter::uiSnapshotUpdated(const AppUiSnapshot& snapshot)
 {
     view.updateSnapshot(snapshot);

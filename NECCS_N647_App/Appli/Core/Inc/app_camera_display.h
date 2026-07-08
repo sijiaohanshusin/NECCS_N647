@@ -104,6 +104,10 @@ void AppCameraDisplay_SetAcousticField(const uint8_t *field,
                                        uint8_t enabled);
 void AppCameraDisplay_SetHeatPalette(uint8_t palette);
 uint8_t AppCameraDisplay_GetHeatPalette(void);
+/* Copy the currently displayed camera frame (with heat overlay) into dst
+ * (APP_CAMERA_DISPLAY_WIDTH x HEIGHT RGB565). Returns 1 when the layer is
+ * visible and a frame was copied; used by the screenshot compositor. */
+uint8_t AppCameraDisplay_CopyDisplayedFrame(uint16_t *dst);
 void AppCameraDisplay_RequestSwap(uint32_t frame_addr);
 /* Swap worker thread: does the compose/overlay/LTDC work queued by
  * RequestSwap (which is ISR-safe and only records the newest frame). */
