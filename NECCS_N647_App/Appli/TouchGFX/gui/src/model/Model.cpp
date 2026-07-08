@@ -608,6 +608,12 @@ void pollMedia(AppUiSnapshot& snapshot)
     snapshot.mediaLastReadBytes = media.last_read_bytes;
     snapshot.mediaFreeMb = static_cast<uint32_t>(media.free_bytes / (1024ULL * 1024ULL));
     snapshot.mediaTotalMb = static_cast<uint32_t>(media.total_bytes / (1024ULL * 1024ULL));
+    /* FileX occasionally reports a bogus huge available-cluster count right
+     * after mount; clamp so the UI never shows free > total. */
+    if (snapshot.mediaFreeMb > snapshot.mediaTotalMb)
+    {
+        snapshot.mediaFreeMb = snapshot.mediaTotalMb;
+    }
     snapshot.mediaSelectedType = static_cast<uint8_t>(media.selected_type);
     copyFileName(snapshot.mediaLastFile, media.last_file, sizeof(snapshot.mediaLastFile));
     copyFileName(snapshot.mediaSelectedFile, media.selected_file, sizeof(snapshot.mediaSelectedFile));
@@ -643,6 +649,10 @@ constexpr uint32_t APP_UI_BOOT_WATCHED_MASK =
 
 /* GDB-visible probe: {tickCount, bootTicks, activeScreen, bringup summary}. */
 volatile uint32_t g_app_ui_debug[4];
+
+/* GDB remote control: write 0..4 to switch pages (also used for scripted
+ * demo runs); the Model consumes the request and resets it to 0xFF. */
+volatile uint32_t g_app_ui_request_screen = 0xFFU;
 
 Model::Model()
     : modelListener(0),
@@ -692,6 +702,14 @@ void Model::tick()
     g_app_ui_debug[1] = bootTicks;
     g_app_ui_debug[2] = snapshot.activeScreen;
     g_app_ui_debug[3] = (snapshot.bringupEnabledMask << 16) | (snapshot.bringupReadyMask & 0xFFFFU);
+
+    if ((g_app_ui_request_screen <= APP_UI_SCREEN_MEDIA) &&
+        (snapshot.activeScreen != APP_UI_SCREEN_BOOT))
+    {
+        const uint8_t requested = static_cast<uint8_t>(g_app_ui_request_screen);
+        g_app_ui_request_screen = 0xFFU;
+        setActiveScreen(requested);
+    }
 
     if ((modelListener != 0) && ((tickCount % 3U) == 0U))
     {

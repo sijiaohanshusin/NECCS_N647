@@ -10,7 +10,13 @@
   (LTDC_ISR2_FUWIF | LTDC_ISR2_TERRIF | LTDC_ISR2_FUIF | LTDC_ISR2_CRCIF)
 #define APP_CAMERA_DISPLAY_DCACHE_LINE_BYTES 32U
 #define APP_CAMERA_DISPLAY_COMPOSE_ENABLE          1U
-#define APP_CAMERA_DISPLAY_DMA2D_COPY_ENABLE       1U
+/* DMA2D is owned by the TouchGFX render pipeline (STM32DMA, interrupt mode).
+ * Driving the same handle from the camera thread in polling mode races the
+ * UI blits: PollForTransfer clears flags/state and can swallow the TC
+ * interrupt of an in-flight TouchGFX transfer, deadlocking the render loop.
+ * The compose copy therefore uses the CPU path (fast memcpy, ~1-3 ms/frame
+ * at 15 fps). Do not re-enable without adding a DMA2D arbiter. */
+#define APP_CAMERA_DISPLAY_DMA2D_COPY_ENABLE       0U
 #define APP_CAMERA_DISPLAY_DMA2D_TIMEOUT_MS        10U
 
 /* Heat overlay rendering: normalized values below this stay fully

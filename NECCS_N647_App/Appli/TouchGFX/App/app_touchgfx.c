@@ -29,7 +29,8 @@
 /* USER CODE END Includes */
 
 /* Private define ------------------------------------------------------------*/
-#define TOUCHGFX_STACK_SIZE          (4080)
+/* 12 KB: the redesigned UI overflowed the original 4080-byte stack. */
+#define TOUCHGFX_STACK_SIZE          (12240)
 
 /* USER CODE BEGIN PD */
 

@@ -172,6 +172,10 @@ void TouchGFXGeneratedHAL::InvalidateTextureCache()
     HAL_ICACHE_Invalidate();
 }
 
+/* ISR probe: [0]=entries [1]=vsync branch [2]=porch branch [3]=null-HAL. */
+extern "C" volatile uint32_t g_tgfx_isr_probe[4];
+volatile uint32_t g_tgfx_isr_probe[4];
+
 extern "C"
 {
     /* NECCS fix: HAL_LTDC_ProgramLineEvent() takes the LTDC HAL lock. When the
@@ -191,14 +195,17 @@ extern "C"
     void HAL_LTDC_LineEventCallback(LTDC_HandleTypeDef* hltdc)
     {
         (void)hltdc;
+        g_tgfx_isr_probe[0]++;
         if (!HAL::getInstance())
         {
+            g_tgfx_isr_probe[3]++;
             return;
         }
 
         if (LTDC->LIPCR == lcd_int_active_line)
         {
             //entering active area
+            g_tgfx_isr_probe[1]++;
             programLineEventFromIsr(lcd_int_porch_line);
             HAL::getInstance()->vSync();
             OSWrappers::signalVSync();
@@ -212,6 +219,7 @@ extern "C"
         else
         {
             //exiting active area
+            g_tgfx_isr_probe[2]++;
             programLineEventFromIsr(lcd_int_active_line);
 
             // Signal to the framework that display update has finished.

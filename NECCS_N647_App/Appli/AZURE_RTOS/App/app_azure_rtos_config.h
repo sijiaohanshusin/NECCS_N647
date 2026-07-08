@@ -45,7 +45,10 @@ extern "C" {
 
 #define TX_APP_MEM_POOL_SIZE                     1024
 
-#define TOUCHGFX_APP_MEM_POOL_SIZE               8192
+/* Pool feeds the TouchGFX thread stack; the redesigned UI (rounded panels,
+ * boot animation, deeper draw chains) overflowed the original 4 KB stack
+ * (UFSR.STKOF hard fault), so both pool and stack were enlarged. */
+#define TOUCHGFX_APP_MEM_POOL_SIZE               12800
 
 /* USER CODE BEGIN EC */
 
