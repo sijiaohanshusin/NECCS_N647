@@ -16,10 +16,11 @@
 #endif
 
 #ifndef PCMD3180_HAL_SW_I2C_HALF_PERIOD_US
-/* 5 us half period = ~100 kHz SCL (standard-mode I2C, well inside the
- * PCMD3180 spec). The earlier 20 us (25 kHz) was bring-up caution and made
- * the 4-device config pass take multiple seconds by itself. */
-#define PCMD3180_HAL_SW_I2C_HALF_PERIOD_US 5U
+/* 20 us half period (~25 kHz). Tried 5 us/100 kHz on 2026-07-09: config
+ * ACKs and status reads still passed, but the second device on each TDM bus
+ * stopped driving its slots (persistent rail fault, no audio). The bus has
+ * weak pull-ups and a long harness - keep the conservative timing. */
+#define PCMD3180_HAL_SW_I2C_HALF_PERIOD_US 20U
 #endif
 
 static uint8_t s_pcmd3180_dwt_delay_ready;

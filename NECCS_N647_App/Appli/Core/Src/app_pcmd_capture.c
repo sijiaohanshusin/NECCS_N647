@@ -16,18 +16,24 @@
 #define APP_PCMD_CAPTURE_DMA_WORDS           (APP_PCMD_CAPTURE_DMA_WORDS_PER_HALF * APP_PCMD_CAPTURE_DMA_HALVES)
 #define APP_PCMD_CAPTURE_AUDIO_SCALE         APP_MIC_ARRAY_Q15_TO_FLOAT_SCALE
 #define APP_PCMD_CAPTURE_I2C_TIMEOUT_MS      100U
-/* Startup budget: PCMD3180 needs ~10 ms in reset and ~1 ms wake; the old
- * 100/10/1000/1000 ms values were bring-up paranoia that stretched boot to
- * tens of seconds. Verified datasheet minimums with margin. */
-#define APP_PCMD_CAPTURE_RESET_LOW_MS        20U
-#define APP_PCMD_CAPTURE_RESET_SETTLE_MS     5U
-#define APP_PCMD_CAPTURE_CLOCK_SETTLE_MS     150U
+/* Bring-up timing: these are the values validated on this board (P7 run,
+ * 149 fps publish). A faster budget (20/5/150/200 ms) was tried on
+ * 2026-07-09 and broke TDM output on the second device of each bus while
+ * I2C config/status still read back clean - do not shrink these again
+ * without re-validating raw slot data on hardware. */
+#define APP_PCMD_CAPTURE_RESET_LOW_MS        100U
+#define APP_PCMD_CAPTURE_RESET_SETTLE_MS     10U
+#define APP_PCMD_CAPTURE_CLOCK_SETTLE_MS     1000U
 #define APP_PCMD_CAPTURE_CONFIG_LOCK_MS      3000U
-#define APP_PCMD_CAPTURE_RETRY_DELAY_MS      200U
+#define APP_PCMD_CAPTURE_RETRY_DELAY_MS      500U
 #define APP_PCMD_CAPTURE_CONFIG_ATTEMPTS     3U
 #define APP_PCMD_CAPTURE_CONFIG_RETRY_MS     20U
-#define APP_PCMD_CAPTURE_POST_CONFIG_SETTLE_MS  200U
+#define APP_PCMD_CAPTURE_POST_CONFIG_SETTLE_MS  1000U
 #define APP_PCMD_CAPTURE_POST_CONFIG_DISCARD_HALVES  16U
+/* Rail-fault restart hysteresis: require persistence before tearing the
+ * pipeline down (transient rails must not cost a 2 s reconfig). */
+#define APP_PCMD_CAPTURE_RAIL_FAULT_POLLS    8U
+#define APP_PCMD_CAPTURE_RAIL_GRACE_MS       2000U
 #define APP_PCMD_CAPTURE_POST_CONFIG_STATUS_KICK  1U
 #define APP_PCMD_CAPTURE_KEEP_SW_I2C_ACTIVE  0U
 #define APP_PCMD_CAPTURE_EVENT_HALF0         0x00000001UL
@@ -91,7 +97,7 @@ static volatile int16_t s_raw_slot_last_sample[APP_PCMD_CAPTURE_BUS_COUNT][APP_P
 static volatile uint32_t s_raw_rail_sample_count;
 static volatile uint32_t s_raw_total_sample_count;
 static volatile uint8_t s_raw_accum_enabled;
-static volatile uint8_t s_dma_discard_halves_remaining[APP_PCMD_CAPTURE_BUS_COUNT];
+static volatile uint16_t s_dma_discard_halves_remaining[APP_PCMD_CAPTURE_BUS_COUNT];
 static uint8_t s_i2c_force_software_backend;
 
 static void AppPcmdCapture_UpdateMicLevels(void);
@@ -1017,7 +1023,7 @@ static void AppPcmdCapture_RequestRestart(uint32_t reason)
   App_BringUpStatus_Fail(APP_BRINGUP_MODULE_AUDIO_FRAME, (int32_t)reason);
 }
 
-static void AppPcmdCapture_ArmDiscardHalves(uint8_t discard_halves)
+static void AppPcmdCapture_ArmDiscardHalves(uint16_t discard_halves)
 {
   uint32_t primask = __get_PRIMASK();
 
@@ -1072,7 +1078,7 @@ static HAL_StatusTypeDef AppPcmdCapture_StartSaiBlockA(void)
   return hal_status;
 }
 
-static HAL_StatusTypeDef AppPcmdCapture_StartSaiDma(uint8_t discard_halves,
+static HAL_StatusTypeDef AppPcmdCapture_StartSaiDma(uint16_t discard_halves,
                                                     uint8_t slave_first)
 {
   HAL_StatusTypeDef hal_status;
@@ -1359,13 +1365,12 @@ void AppPcmdCapture_ThreadEntry(ULONG thread_input)
 
   (void)thread_input;
 
-  /* Short camera yield: the PCMD config path runs on its own software I2C
-   * pins (PD14/PD4), so there is no bus conflict with the camera on I2C2.
-   * A brief head start still helps the IMX219's timing-sensitive D-PHY
-   * bring-up win the CPU during its first seconds, but gating on full
-   * camera streaming (up to 20 s) is what made PCMD boot feel broken.
-   * Cap the wait at ~1.5 s. */
-  for (uint32_t i = 0U; i < 15U; i++)
+  /* Camera-first gate, capped at 6 s: PCMD config holds the I2C2 lock for
+   * seconds at a time (the soft-I2C pins are separate, but the lock is
+   * shared); letting the camera stream first keeps its bring-up off the
+   * contended window. The cap keeps a broken camera from blocking audio
+   * forever (the old uncapped wait was 20 s+). */
+  for (uint32_t i = 0U; i < 60U; i++)
   {
     AppBringUpSnapshot_t bringup;
     const uint32_t camera_bit = 1UL << APP_BRINGUP_MODULE_CAMERA;
@@ -1382,6 +1387,8 @@ void AppPcmdCapture_ThreadEntry(ULONG thread_input)
 
   uint32_t last_seq = 0U;
   uint32_t stall_ticks = 0U;
+  uint32_t rail_polls = 0U;
+  uint32_t started_ms = 0U;
 
   while (1)
   {
@@ -1409,6 +1416,8 @@ void AppPcmdCapture_ThreadEntry(ULONG thread_input)
       s_snapshot.recovering = 0U;
       last_seq = s_snapshot.latest_seq;
       stall_ticks = 0U;
+      rail_polls = 0U;
+      started_ms = HAL_GetTick();
     }
 
     if ((boosted != 0U) && (self != TX_NULL))
@@ -1420,14 +1429,34 @@ void AppPcmdCapture_ThreadEntry(ULONG thread_input)
     }
 
     (void)AppPcmdCapture_Poll(TX_TIMER_TICKS_PER_SECOND / 10U);
-    if ((s_snapshot.started != 0U) &&
-        ((s_snapshot.raw_quality_flags & APP_PCMD_CAPTURE_RAW_FLAG_RAIL_FAULT) != 0U))
+
+    /* Rail-fault restart, with hysteresis: the flag must persist for
+     * several consecutive polls outside the post-start grace window.
+     * Transients (mic filter settling tail, mechanical knocks pinning the
+     * membrane) previously caused restart loops that presented as "PCMD
+     * takes forever to start". */
+    if (s_snapshot.started != 0U)
     {
-      s_snapshot.watchdog_restart_count++;
-      s_snapshot.recovering = 1U;
-      AppPcmdCapture_RequestRestart((uint32_t)s_snapshot.raw_quality_flags);
-      AppPcmdCapture_DelayMs(APP_PCMD_CAPTURE_RETRY_DELAY_MS);
-      continue;
+      if ((s_snapshot.raw_quality_flags & APP_PCMD_CAPTURE_RAW_FLAG_RAIL_FAULT) != 0U)
+      {
+        if ((HAL_GetTick() - started_ms) >= APP_PCMD_CAPTURE_RAIL_GRACE_MS)
+        {
+          rail_polls++;
+        }
+        if (rail_polls >= APP_PCMD_CAPTURE_RAIL_FAULT_POLLS)
+        {
+          rail_polls = 0U;
+          s_snapshot.watchdog_restart_count++;
+          s_snapshot.recovering = 1U;
+          AppPcmdCapture_RequestRestart((uint32_t)s_snapshot.raw_quality_flags);
+          AppPcmdCapture_DelayMs(APP_PCMD_CAPTURE_RETRY_DELAY_MS);
+          continue;
+        }
+      }
+      else
+      {
+        rail_polls = 0U;
+      }
     }
 
     /* Frame-stall watchdog: SAI/DMA can wedge silently (e.g. cable brownout
