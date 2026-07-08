@@ -16,7 +16,10 @@
 #endif
 
 #ifndef PCMD3180_HAL_SW_I2C_HALF_PERIOD_US
-#define PCMD3180_HAL_SW_I2C_HALF_PERIOD_US 20U
+/* 5 us half period = ~100 kHz SCL (standard-mode I2C, well inside the
+ * PCMD3180 spec). The earlier 20 us (25 kHz) was bring-up caution and made
+ * the 4-device config pass take multiple seconds by itself. */
+#define PCMD3180_HAL_SW_I2C_HALF_PERIOD_US 5U
 #endif
 
 static uint8_t s_pcmd3180_dwt_delay_ready;

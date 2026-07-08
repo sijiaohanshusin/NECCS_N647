@@ -87,6 +87,10 @@ typedef struct
   uint32_t latest_seq;
   uint32_t stale_event_flush_count;
   uint32_t raw_quality_flags;
+  /* Frame-stall watchdog: automatic restarts since boot and whether a
+   * recovery is currently in progress (drives the UI reconnect banner). */
+  uint32_t watchdog_restart_count;
+  uint8_t recovering;
   uint32_t raw_rail_sample_count;
   uint32_t raw_total_sample_count;
   uint16_t published_fps_x10;

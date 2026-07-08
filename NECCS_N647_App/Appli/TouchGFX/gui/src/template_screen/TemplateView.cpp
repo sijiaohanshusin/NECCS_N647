@@ -185,6 +185,17 @@ void TemplateView::setupScreen()
     setupMediaPage();
     setupStatusBar();
     setupBootPage();
+
+    /* Mic-array reconnect toast: overlays pages (but sits under the menu). */
+    alertBanner.setPosition(312, 52, 400, 36);
+    alertBanner.setStyle(rgb(64, 34, 20), 18U);
+    alertBanner.setBorder(ColorAmber, true);
+    alertBanner.setVisible(false);
+    add(alertBanner);
+    setupLabel(alertLabel, 312, 60, 400, 22, 1, "", ColorAmber, AppTextLabel::ALIGN_CENTER);
+    alertLabel.setVisible(false);
+    add(alertLabel);
+
     /* Menu popup last: it overlays everything. */
     setupNavigation();
 
@@ -1199,6 +1210,30 @@ void TemplateView::refreshStatusBar(const AppUiSnapshot& snapshot)
         (void)snprintf(text, sizeof(text), "热图 --");
     }
     fpsLabel.setText(text);
+
+    /* Mic-array health toast: reconnecting while the watchdog cycles, a
+     * persistent failure message if it keeps failing. Hidden on boot page. */
+    const bool onBoot = (activeScreen == APP_UI_SCREEN_BOOT);
+    const bool recovering = (snapshot.pcmdFlags & APP_UI_PCMD_FLAG_RECOVERING) != 0U;
+    const bool show = recovering && !onBoot;
+    if (show)
+    {
+        if (snapshot.pcmdWatchdogRestarts >= 3U)
+        {
+            alertLabel.setText("麦克风阵列异常, 请检查连接");
+        }
+        else
+        {
+            alertLabel.setText("麦克风阵列重连中...");
+        }
+    }
+    if (show != alertBanner.isVisible())
+    {
+        alertBanner.setVisible(show);
+        alertLabel.setVisible(show);
+        alertBanner.invalidate();
+        alertLabel.invalidate();
+    }
 }
 
 void TemplateView::refreshBootPage(const AppUiSnapshot& snapshot)

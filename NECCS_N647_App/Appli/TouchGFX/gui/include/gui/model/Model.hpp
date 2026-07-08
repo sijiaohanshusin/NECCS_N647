@@ -83,7 +83,8 @@ enum AppUiPcmdFlag
     APP_UI_PCMD_FLAG_FRAME_VALID = 0x00000004UL,
     APP_UI_PCMD_FLAG_DEBUG_ENABLED = 0x00000008UL,
     APP_UI_PCMD_FLAG_RAW_VALID = 0x00000010UL,
-    APP_UI_PCMD_FLAG_RAW_FAULT = 0x00000020UL
+    APP_UI_PCMD_FLAG_RAW_FAULT = 0x00000020UL,
+    APP_UI_PCMD_FLAG_RECOVERING = 0x00000040UL
 };
 
 enum AppUiPcmdRawQualityFlag
@@ -135,6 +136,7 @@ struct AppUiSnapshot
     uint32_t pcmdRawQualityFlags;
     uint32_t pcmdRawRailSampleCount;
     uint32_t pcmdRawTotalSampleCount;
+    uint32_t pcmdWatchdogRestarts;
     uint32_t acousticFlags;
     uint32_t acousticInputSeq;
     uint32_t acousticOutputSeq;

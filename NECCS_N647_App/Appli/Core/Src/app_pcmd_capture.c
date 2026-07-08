@@ -16,14 +16,17 @@
 #define APP_PCMD_CAPTURE_DMA_WORDS           (APP_PCMD_CAPTURE_DMA_WORDS_PER_HALF * APP_PCMD_CAPTURE_DMA_HALVES)
 #define APP_PCMD_CAPTURE_AUDIO_SCALE         APP_MIC_ARRAY_Q15_TO_FLOAT_SCALE
 #define APP_PCMD_CAPTURE_I2C_TIMEOUT_MS      100U
-#define APP_PCMD_CAPTURE_RESET_LOW_MS        100U
-#define APP_PCMD_CAPTURE_RESET_SETTLE_MS     10U
-#define APP_PCMD_CAPTURE_CLOCK_SETTLE_MS     1000U
+/* Startup budget: PCMD3180 needs ~10 ms in reset and ~1 ms wake; the old
+ * 100/10/1000/1000 ms values were bring-up paranoia that stretched boot to
+ * tens of seconds. Verified datasheet minimums with margin. */
+#define APP_PCMD_CAPTURE_RESET_LOW_MS        20U
+#define APP_PCMD_CAPTURE_RESET_SETTLE_MS     5U
+#define APP_PCMD_CAPTURE_CLOCK_SETTLE_MS     150U
 #define APP_PCMD_CAPTURE_CONFIG_LOCK_MS      3000U
-#define APP_PCMD_CAPTURE_RETRY_DELAY_MS      500U
+#define APP_PCMD_CAPTURE_RETRY_DELAY_MS      200U
 #define APP_PCMD_CAPTURE_CONFIG_ATTEMPTS     3U
 #define APP_PCMD_CAPTURE_CONFIG_RETRY_MS     20U
-#define APP_PCMD_CAPTURE_POST_CONFIG_SETTLE_MS  1000U
+#define APP_PCMD_CAPTURE_POST_CONFIG_SETTLE_MS  200U
 #define APP_PCMD_CAPTURE_POST_CONFIG_DISCARD_HALVES  16U
 #define APP_PCMD_CAPTURE_POST_CONFIG_STATUS_KICK  1U
 #define APP_PCMD_CAPTURE_KEEP_SW_I2C_ACTIVE  0U
@@ -1356,14 +1359,13 @@ void AppPcmdCapture_ThreadEntry(ULONG thread_input)
 
   (void)thread_input;
 
-  /* Deterministic bring-up order: let the camera stream first (~3-5 s incl.
-   * the D-PHY retry, all short I2C bursts), then run our ~8 s atomic config
-   * hold. Interleaving the two makes both erratic: the camera restart used
-   * to die on the held bus, and camera restarts stretched our config into
-   * tens of seconds of verify retries. The IMX219 driver additionally waits
-   * out long bus holds now (12 s lock acquire) as a safety net for restarts
-   * that happen after this gate. */
-  for (uint32_t i = 0U; i < 200U; i++)
+  /* Short camera yield: the PCMD config path runs on its own software I2C
+   * pins (PD14/PD4), so there is no bus conflict with the camera on I2C2.
+   * A brief head start still helps the IMX219's timing-sensitive D-PHY
+   * bring-up win the CPU during its first seconds, but gating on full
+   * camera streaming (up to 20 s) is what made PCMD boot feel broken.
+   * Cap the wait at ~1.5 s. */
+  for (uint32_t i = 0U; i < 15U; i++)
   {
     AppBringUpSnapshot_t bringup;
     const uint32_t camera_bit = 1UL << APP_BRINGUP_MODULE_CAMERA;
@@ -1377,6 +1379,9 @@ void AppPcmdCapture_ThreadEntry(ULONG thread_input)
     }
     tx_thread_sleep(TX_TIMER_TICKS_PER_SECOND / 10U);
   }
+
+  uint32_t last_seq = 0U;
+  uint32_t stall_ticks = 0U;
 
   while (1)
   {
@@ -1397,9 +1402,13 @@ void AppPcmdCapture_ThreadEntry(ULONG thread_input)
       (void)AppPcmdCapture_Start();
       if (s_snapshot.started == 0U)
       {
+        s_snapshot.recovering = 1U;
         AppPcmdCapture_DelayMs(APP_PCMD_CAPTURE_RETRY_DELAY_MS);
         continue;
       }
+      s_snapshot.recovering = 0U;
+      last_seq = s_snapshot.latest_seq;
+      stall_ticks = 0U;
     }
 
     if ((boosted != 0U) && (self != TX_NULL))
@@ -1414,8 +1423,30 @@ void AppPcmdCapture_ThreadEntry(ULONG thread_input)
     if ((s_snapshot.started != 0U) &&
         ((s_snapshot.raw_quality_flags & APP_PCMD_CAPTURE_RAW_FLAG_RAIL_FAULT) != 0U))
     {
+      s_snapshot.watchdog_restart_count++;
+      s_snapshot.recovering = 1U;
       AppPcmdCapture_RequestRestart((uint32_t)s_snapshot.raw_quality_flags);
       AppPcmdCapture_DelayMs(APP_PCMD_CAPTURE_RETRY_DELAY_MS);
+      continue;
+    }
+
+    /* Frame-stall watchdog: SAI/DMA can wedge silently (e.g. cable brownout
+     * on the mic array) - the loop keeps polling but latest_seq freezes.
+     * ~2 s without a new frame triggers a full stop/reconfig cycle. */
+    if (s_snapshot.started != 0U)
+    {
+      if (s_snapshot.latest_seq != last_seq)
+      {
+        last_seq = s_snapshot.latest_seq;
+        stall_ticks = 0U;
+      }
+      else if (++stall_ticks >= 20U)
+      {
+        stall_ticks = 0U;
+        s_snapshot.watchdog_restart_count++;
+        s_snapshot.recovering = 1U;
+        AppPcmdCapture_RequestRestart((uint32_t)APP_PCMD_CAPTURE_PCMD_ERROR);
+      }
     }
   }
 }

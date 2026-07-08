@@ -93,6 +93,8 @@ private:
     AppTextLabel sdLabel;
     AppTextLabel battLabel;
     AppTextLabel fpsLabel;
+    AppRoundedPanel alertBanner;    /* mic-array reconnect / failure toast */
+    AppTextLabel alertLabel;
 
     /* ---- popup navigation menu (opens from the brand area) ---- */
     touchgfx::TouchArea menuTouch;

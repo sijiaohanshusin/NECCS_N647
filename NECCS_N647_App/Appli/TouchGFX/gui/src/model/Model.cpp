@@ -633,6 +633,11 @@ void pollPcmd(AppUiSnapshot& snapshot)
     {
         snapshot.pcmdFlags |= APP_UI_PCMD_FLAG_RAW_FAULT;
     }
+    if (pcmd.recovering != 0U)
+    {
+        snapshot.pcmdFlags |= APP_UI_PCMD_FLAG_RECOVERING;
+    }
+    snapshot.pcmdWatchdogRestarts = pcmd.watchdog_restart_count;
     snapshot.pcmdDebugEnabled = pcmd.debug_ui_enabled;
     snapshot.pcmdDevicePresentMask = pcmd.device_present_mask;
     snapshot.pcmdDeviceConfigOkMask = pcmd.device_config_ok_mask;
