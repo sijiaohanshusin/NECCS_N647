@@ -162,8 +162,13 @@ TemplateView::TemplateView()
       bootBarWidth(0),
       bootBarTarget(0),
       mediaPreviewGeneration(0U),
+      mediaThumbGeneration(0U),
+      thumbPage(0U),
+      thumbPageCount(1U),
       recActive(false),
-      menuOpen(false)
+      menuOpen(false),
+      viewerOpen(false),
+      selectedSlot(0U)
 {
 }
 
@@ -679,29 +684,58 @@ void TemplateView::setupParamsPage()
 
 void TemplateView::setupMediaPage()
 {
-    setupLabel(mediaTitle, ContentX + 24, 64, 400, 26, 2, "媒体", ColorText);
+    setupLabel(mediaTitle, ContentX + 24, 64, 220, 26, 2, "媒体中心", ColorText);
     add(mediaTitle);
 
-    mediaPreview.setPosition(ContentX + 24, 108, 512, 304);
-    mediaPreview.setColors(rgb(10, 16, 24), ColorLine);
-    add(mediaPreview);
+    setupLabel(mediaCountLabel, ContentX + 400, 68, 516, 22, 1, "", ColorMuted, AppTextLabel::ALIGN_RIGHT);
+    add(mediaCountLabel);
 
-    mediaInfoCard.setPosition(ContentX + 560, 108, 356, 304);
-    mediaInfoCard.setStyle(ColorPanel, 12U);
-    mediaInfoCard.setBorder(ColorLine, true);
-    add(mediaInfoCard);
-
-    static const char* infoNames[MediaInfoCount] = {"SD", "文件系统", "空间", "截屏", "录像", "选择", "读取", "状态"};
-    for (uint32_t i = 0U; i < MediaInfoCount; ++i)
+    /* 4x2 thumbnail grid, tiles at the sidecar's native 16:9 shape. */
+    for (uint32_t i = 0U; i < MediaThumbSlots; ++i)
     {
-        const int16_t y = static_cast<int16_t>(130 + (i * 34));
-        setupLabel(mediaInfoName[i], ContentX + 584, y, 90, 22, 1, infoNames[i], ColorMuted);
-        setupLabel(mediaInfoValue[i], ContentX + 674, y, 218, 22, 1, "--", ColorText, AppTextLabel::ALIGN_RIGHT);
-        add(mediaInfoName[i]);
-        add(mediaInfoValue[i]);
+        const int16_t x = static_cast<int16_t>(ContentX + 24 + ((i % 4U) * 226));
+        const int16_t y = static_cast<int16_t>(104 + ((i / 4U) * 156));
+
+        mediaThumb[i].setPosition(x, y, 210, 120);
+        mediaThumb[i].setColors(rgb(10, 16, 24), ColorLine);
+        add(mediaThumb[i]);
+
+        mediaThumbBadge[i].setPosition(static_cast<int16_t>(x + 4), static_cast<int16_t>(y + 4), 44, 18);
+        mediaThumbBadge[i].setColor(ColorRed);
+        mediaThumbBadge[i].setVisible(false);
+        add(mediaThumbBadge[i]);
+
+        setupLabel(mediaThumbLabel[i], x, static_cast<int16_t>(y + 124), 210, 20, 1, "", ColorMuted, AppTextLabel::ALIGN_CENTER);
+        add(mediaThumbLabel[i]);
+
+        mediaThumbTouch[i].setPosition(x, y, 210, 144);
+        mediaThumbTouch[i].setAction(mediaPressedCallback);
+        add(mediaThumbTouch[i]);
     }
 
-    static const char* actions[MediaActionCount] = {"截屏", "录像", "下一个", "播放", "同步"};
+    setupLabel(mediaEmptyLabel, ContentX + 24, 240, 892, 26, 2, "暂无媒体文件, 请先截屏或录像", ColorMuted, AppTextLabel::ALIGN_CENTER);
+    mediaEmptyLabel.setVisible(false);
+    add(mediaEmptyLabel);
+
+    /* page navigation */
+    static const char* pageLabels[2] = {"上一页", "下一页"};
+    for (uint32_t i = 0U; i < 2U; ++i)
+    {
+        const int16_t x = static_cast<int16_t>(ContentX + 24 + (i * 780));
+        mediaPageBtn[i].setPosition(x, 420, 112, 40);
+        mediaPageBtn[i].setStyle(ColorPanel2, 12U);
+        mediaPageBtn[i].setBorder(ColorLine, true);
+        add(mediaPageBtn[i]);
+
+        setupLabel(mediaPageBtnLabel[i], x, 430, 112, 22, 1, pageLabels[i], ColorText, AppTextLabel::ALIGN_CENTER);
+        add(mediaPageBtnLabel[i]);
+
+        mediaPageTouch[i].setPosition(x, 420, 112, 40);
+        mediaPageTouch[i].setAction(mediaPressedCallback);
+        add(mediaPageTouch[i]);
+    }
+
+    static const char* actions[MediaActionCount] = {"截屏", "录像", "播放", "查看", "同步"};
     static const uint16_t icons[MediaActionCount] = {
         BITMAP_UI_SNAPSHOT_ID,
         BITMAP_UI_RECORD_ID,
@@ -712,22 +746,42 @@ void TemplateView::setupMediaPage()
     for (uint32_t i = 0U; i < MediaActionCount; ++i)
     {
         const int16_t x = static_cast<int16_t>(ContentX + 24 + (i * 150));
-        mediaButton[i].setPosition(x, 452, 134, 52);
+        mediaButton[i].setPosition(x, 480, 134, 52);
         mediaButton[i].setStyle(ColorPanel2, 12U);
         mediaButton[i].setBorder(ColorLine, true);
         add(mediaButton[i]);
 
         mediaButtonIcon[i].setBitmap(touchgfx::Bitmap(icons[i]));
-        mediaButtonIcon[i].setPosition(static_cast<int16_t>(x + 18), 466, 24, 24);
+        mediaButtonIcon[i].setPosition(static_cast<int16_t>(x + 18), 494, 24, 24);
         add(mediaButtonIcon[i]);
 
-        setupLabel(mediaButtonLabel[i], static_cast<int16_t>(x + 48), 467, 78, 22, 1, actions[i], ColorText);
+        setupLabel(mediaButtonLabel[i], static_cast<int16_t>(x + 48), 495, 78, 22, 1, actions[i], ColorText);
         add(mediaButtonLabel[i]);
 
-        mediaTouch[i].setPosition(x, 452, 134, 52);
+        mediaTouch[i].setPosition(x, 480, 134, 52);
         mediaTouch[i].setAction(mediaPressedCallback);
         add(mediaTouch[i]);
     }
+
+    /* fullscreen viewer overlay (scrim + scaled preview + caption) */
+    viewerScrim.setPosition(0, 0, ScreenW, ScreenH);
+    viewerScrim.setColor(rgb(2, 4, 8));
+    viewerScrim.setVisible(false);
+    add(viewerScrim);
+
+    mediaPreview.setPosition(62, 70, 900, 466);
+    mediaPreview.setColors(rgb(10, 16, 24), ColorLine);
+    mediaPreview.setVisible(false);
+    add(mediaPreview);
+
+    setupLabel(viewerCaption, 62, 548, 900, 22, 1, "", ColorMuted, AppTextLabel::ALIGN_CENTER);
+    viewerCaption.setVisible(false);
+    add(viewerCaption);
+
+    viewerTouch.setPosition(0, 0, ScreenW, ScreenH);
+    viewerTouch.setAction(mediaPressedCallback);
+    viewerTouch.setVisible(false);
+    add(viewerTouch);
 }
 
 void TemplateView::setupBootPage()
@@ -1097,21 +1151,38 @@ void TemplateView::refreshVisibility()
     }
 
     /* media */
-    mediaTitle.setVisible(mediaVisible);
-    mediaPreview.setVisible(mediaVisible);
-    mediaInfoCard.setVisible(mediaVisible);
-    for (uint32_t i = 0U; i < MediaInfoCount; ++i)
+    if (!mediaVisible && viewerOpen)
     {
-        mediaInfoName[i].setVisible(mediaVisible);
-        mediaInfoValue[i].setVisible(mediaVisible);
+        viewerOpen = false;
+    }
+    mediaTitle.setVisible(mediaVisible && !viewerOpen);
+    mediaCountLabel.setVisible(mediaVisible && !viewerOpen);
+    mediaEmptyLabel.setVisible(false); /* refreshMediaPage decides */
+    for (uint32_t i = 0U; i < MediaThumbSlots; ++i)
+    {
+        /* refreshMediaPage re-shows used tiles */
+        mediaThumb[i].setVisible(false);
+        mediaThumbLabel[i].setVisible(false);
+        mediaThumbBadge[i].setVisible(false);
+        mediaThumbTouch[i].setVisible(false);
+    }
+    for (uint32_t i = 0U; i < 2U; ++i)
+    {
+        mediaPageBtn[i].setVisible(mediaVisible && !viewerOpen);
+        mediaPageBtnLabel[i].setVisible(mediaVisible && !viewerOpen);
+        mediaPageTouch[i].setVisible(mediaVisible && !viewerOpen);
     }
     for (uint32_t i = 0U; i < MediaActionCount; ++i)
     {
-        mediaButton[i].setVisible(mediaVisible);
-        mediaButtonIcon[i].setVisible(mediaVisible);
-        mediaButtonLabel[i].setVisible(mediaVisible);
-        mediaTouch[i].setVisible(mediaVisible);
+        mediaButton[i].setVisible(mediaVisible && !viewerOpen);
+        mediaButtonIcon[i].setVisible(mediaVisible && !viewerOpen);
+        mediaButtonLabel[i].setVisible(mediaVisible && !viewerOpen);
+        mediaTouch[i].setVisible(mediaVisible && !viewerOpen);
     }
+    viewerScrim.setVisible(mediaVisible && viewerOpen);
+    mediaPreview.setVisible(mediaVisible && viewerOpen);
+    viewerCaption.setVisible(mediaVisible && viewerOpen);
+    viewerTouch.setVisible(mediaVisible && viewerOpen);
 
     invalidate();
 }
@@ -1611,73 +1682,100 @@ void TemplateView::refreshParamsPage(const AppUiSnapshot& snapshot)
 
 void TemplateView::refreshMediaPage(const AppUiSnapshot& snapshot)
 {
-    char text[64];
+    char text[96];
 
     const bool playing = (snapshot.mediaFlags & APP_UI_MEDIA_FLAG_PLAYING) != 0U;
-    mediaButtonLabel[3].setText(playing ? "暂停" : "播放");
-    mediaButtonLabel[3].setColors(playing ? ColorBlue : ColorText, ColorBg, false);
+    mediaButtonLabel[2].setText(playing ? "暂停" : "播放");
+    mediaButtonLabel[2].setColors(playing ? ColorBlue : ColorText, ColorBg, false);
 
-    const bool sdReady = (snapshot.mediaFlags & APP_UI_MEDIA_FLAG_SD_READY) != 0U;
-    mediaInfoValue[0].setColors(sdReady ? ColorGreen : ColorAmber, ColorBg, false);
-    mediaInfoValue[0].setText(sdReady ? "正常" : "等待");
+    const bool recording = (snapshot.mediaFlags & APP_UI_MEDIA_FLAG_RECORDING) != 0U;
+    mediaButtonLabel[1].setText(recording ? "停止" : "录像");
+    mediaButtonLabel[1].setColors(recording ? ColorRed : ColorText, ColorBg, false);
 
+    thumbPage = snapshot.mediaThumbPage;
+    thumbPageCount = snapshot.mediaThumbPageCount;
+    for (uint32_t i = 0U; i < MediaThumbSlots; ++i)
+    {
+        thumbTypes[i] = snapshot.mediaThumbType[i];
+    }
+
+    /* header: counts + page + fs state */
     const bool mounted = (snapshot.mediaFlags & APP_UI_MEDIA_FLAG_FS_MOUNTED) != 0U;
-    mediaInfoValue[1].setColors(mounted ? ColorGreen : ColorAmber, ColorBg, false);
-    mediaInfoValue[1].setText(mounted ? "已挂载" : "未挂载");
-
-    (void)snprintf(text, sizeof(text), "%lu / %lu MB",
-                   static_cast<unsigned long>(snapshot.mediaFreeMb),
-                   static_cast<unsigned long>(snapshot.mediaTotalMb));
-    mediaInfoValue[2].setText(text);
-
-    (void)snprintf(text, sizeof(text), "%lu 张", static_cast<unsigned long>(snapshot.mediaScreenshots));
-    mediaInfoValue[3].setText(text);
-
-    if ((snapshot.mediaFlags & APP_UI_MEDIA_FLAG_RECORDING) != 0U)
+    if (!mounted)
     {
-        (void)snprintf(text, sizeof(text), "录制中 %02lu:%02lu",
-                       static_cast<unsigned long>(snapshot.mediaRecordSeconds / 60U),
-                       static_cast<unsigned long>(snapshot.mediaRecordSeconds % 60U));
-        mediaInfoValue[4].setColors(ColorRed, ColorBg, false);
+        (void)snprintf(text, sizeof(text), "SD 未挂载");
     }
     else
     {
-        (void)snprintf(text, sizeof(text), "%lu 段", static_cast<unsigned long>(snapshot.mediaVideos));
-        mediaInfoValue[4].setColors(ColorText, ColorBg, false);
+        (void)snprintf(text, sizeof(text), "%lu 张 · %lu 段 · 第 %lu/%lu 页 · 剩余 %luMB",
+                       static_cast<unsigned long>(snapshot.mediaScreenshots),
+                       static_cast<unsigned long>(snapshot.mediaVideos),
+                       static_cast<unsigned long>(snapshot.mediaThumbPage + 1U),
+                       static_cast<unsigned long>(snapshot.mediaThumbPageCount),
+                       static_cast<unsigned long>(snapshot.mediaFreeMb));
     }
-    mediaInfoValue[4].setText(text);
+    mediaCountLabel.setText(text);
 
-    mediaInfoValue[5].setText((snapshot.mediaSelectedFile[0] != '\0') ? snapshot.mediaSelectedFile : "--");
+    /* thumbnail grid */
+    const bool empty = (snapshot.mediaThumbTotal == 0U);
+    if (empty != mediaEmptyLabel.isVisible())
+    {
+        mediaEmptyLabel.setVisible(empty);
+        mediaEmptyLabel.invalidate();
+    }
 
-    if (snapshot.mediaPreviewFrameCount > 1U)
+    const bool thumbsChanged = (snapshot.mediaThumbGeneration != mediaThumbGeneration);
+    for (uint32_t i = 0U; i < MediaThumbSlots; ++i)
     {
-        (void)snprintf(text, sizeof(text), "帧 %lu/%lu",
-                       static_cast<unsigned long>(snapshot.mediaPreviewFrameIndex + 1U),
-                       static_cast<unsigned long>(snapshot.mediaPreviewFrameCount));
-    }
-    else
-    {
-        (void)snprintf(text, sizeof(text), "%lu B", static_cast<unsigned long>(snapshot.mediaLastReadBytes));
-    }
-    mediaInfoValue[6].setText(text);
+        const bool used = (snapshot.mediaThumbUsed[i] != 0U);
+        const bool tileVisible = used && (activeScreen == APP_UI_SCREEN_MEDIA) && !viewerOpen;
 
-    if (snapshot.mediaLastError != 0U)
-    {
-        (void)snprintf(text, sizeof(text), "错误 %lu", static_cast<unsigned long>(snapshot.mediaLastError));
-        mediaInfoValue[7].setColors(ColorRed, ColorBg, false);
-    }
-    else if ((snapshot.mediaFlags & APP_UI_MEDIA_FLAG_BUSY) != 0U)
-    {
-        (void)snprintf(text, sizeof(text), "忙");
-        mediaInfoValue[7].setColors(ColorAmber, ColorBg, false);
-    }
-    else
-    {
-        (void)snprintf(text, sizeof(text), "空闲");
-        mediaInfoValue[7].setColors(ColorMuted, ColorBg, false);
-    }
-    mediaInfoValue[7].setText(text);
+        if (thumbsChanged)
+        {
+            mediaThumb[i].setSource(snapshot.mediaThumbPixels[i],
+                                    176U,
+                                    99U,
+                                    used && (snapshot.mediaThumbValid[i] != 0U));
+            if (used)
+            {
+                (void)snprintf(text, sizeof(text), "%s%05lu",
+                               (snapshot.mediaThumbType[i] == 2U) ? "VID" : "SCR",
+                               static_cast<unsigned long>(snapshot.mediaThumbIndex[i]));
+                mediaThumbLabel[i].setText(text);
+            }
+            else
+            {
+                mediaThumbLabel[i].setText("");
+            }
+        }
+        const bool highlight = tileVisible && (i == selectedSlot);
+        mediaThumb[i].setColors(rgb(10, 16, 24), highlight ? ColorBlue : ColorLine);
 
+        if (tileVisible != mediaThumb[i].isVisible())
+        {
+            mediaThumb[i].setVisible(tileVisible);
+            mediaThumb[i].invalidate();
+            mediaThumbLabel[i].setVisible(tileVisible);
+            mediaThumbLabel[i].invalidate();
+        }
+        mediaThumbTouch[i].setVisible(tileVisible);
+        const bool badgeVisible = tileVisible && (snapshot.mediaThumbType[i] == 2U);
+        if (badgeVisible != mediaThumbBadge[i].isVisible())
+        {
+            mediaThumbBadge[i].setVisible(badgeVisible);
+            mediaThumbBadge[i].invalidate();
+        }
+        if (thumbsChanged && tileVisible)
+        {
+            mediaThumb[i].invalidate();
+        }
+    }
+    if (thumbsChanged)
+    {
+        mediaThumbGeneration = snapshot.mediaThumbGeneration;
+    }
+
+    /* viewer overlay content */
     mediaPreview.setSource(snapshot.mediaPreviewPixels,
                            snapshot.mediaPreviewWidth,
                            snapshot.mediaPreviewHeight,
@@ -1685,7 +1783,29 @@ void TemplateView::refreshMediaPage(const AppUiSnapshot& snapshot)
     if (snapshot.mediaPreviewGeneration != mediaPreviewGeneration)
     {
         mediaPreviewGeneration = snapshot.mediaPreviewGeneration;
-        mediaPreview.invalidate();
+        if (viewerOpen)
+        {
+            mediaPreview.invalidate();
+        }
+    }
+    if (viewerOpen)
+    {
+        if (snapshot.mediaPreviewFrameCount > 1U)
+        {
+            (void)snprintf(text, sizeof(text), "%s · 帧 %lu/%lu · 点按空白处返回",
+                           snapshot.mediaSelectedFile,
+                           static_cast<unsigned long>(snapshot.mediaPreviewFrameIndex + 1U),
+                           static_cast<unsigned long>(snapshot.mediaPreviewFrameCount));
+        }
+        else if ((snapshot.mediaFlags & APP_UI_MEDIA_FLAG_BUSY) != 0U)
+        {
+            (void)snprintf(text, sizeof(text), "加载中...");
+        }
+        else
+        {
+            (void)snprintf(text, sizeof(text), "%s · 点按空白处返回", snapshot.mediaSelectedFile);
+        }
+        viewerCaption.setText(text);
     }
 }
 
@@ -1709,6 +1829,11 @@ void TemplateView::onNavPressed(const touchgfx::AbstractButton& source)
         {
             setMenuOpen(false);
             presenter->selectScreen(navScreens[i]);
+            if (navScreens[i] == APP_UI_SCREEN_MEDIA)
+            {
+                /* fresh gallery page on entry */
+                presenter->requestThumbPage(0U);
+            }
             return;
         }
     }
@@ -1806,6 +1931,46 @@ void TemplateView::onParamsPressed(const touchgfx::AbstractButton& source)
 
 void TemplateView::onMediaPressed(const touchgfx::AbstractButton& source)
 {
+    /* viewer overlay: any tap closes it */
+    if (&source == &viewerTouch)
+    {
+        setViewerOpen(false);
+        return;
+    }
+
+    for (uint32_t i = 0U; i < MediaThumbSlots; ++i)
+    {
+        if (&source == &mediaThumbTouch[i])
+        {
+            selectedSlot = static_cast<uint8_t>(i);
+            presenter->selectMediaSlot(selectedSlot);
+            if (thumbTypes[i] == 2U)
+            {
+                /* videos auto-play in the viewer (queued after the select) */
+                presenter->playToggleMedia();
+            }
+            setViewerOpen(true);
+            return;
+        }
+    }
+
+    if (&source == &mediaPageTouch[0])
+    {
+        if (thumbPage > 0U)
+        {
+            presenter->requestThumbPage(thumbPage - 1U);
+        }
+        return;
+    }
+    if (&source == &mediaPageTouch[1])
+    {
+        if ((thumbPage + 1U) < thumbPageCount)
+        {
+            presenter->requestThumbPage(thumbPage + 1U);
+        }
+        return;
+    }
+
     if (&source == &mediaTouch[0])
     {
         presenter->requestScreenshot();
@@ -1816,14 +1981,31 @@ void TemplateView::onMediaPressed(const touchgfx::AbstractButton& source)
     }
     else if (&source == &mediaTouch[2])
     {
-        presenter->selectNextMedia();
+        presenter->playToggleMedia();
     }
     else if (&source == &mediaTouch[3])
     {
-        presenter->playToggleMedia();
+        /* open the currently selected item in the viewer */
+        presenter->readSelectedMedia();
+        setViewerOpen(true);
     }
     else if (&source == &mediaTouch[4])
     {
         presenter->refreshMedia();
     }
+}
+
+void TemplateView::setViewerOpen(bool open)
+{
+    if (viewerOpen == open)
+    {
+        return;
+    }
+    viewerOpen = open;
+    viewerScrim.setVisible(open);
+    mediaPreview.setVisible(open);
+    viewerCaption.setVisible(open);
+    viewerTouch.setVisible(open);
+    refreshVisibility();
+    invalidate();
 }

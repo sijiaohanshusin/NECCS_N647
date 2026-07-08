@@ -20,6 +20,12 @@ extern "C" {
 #define APP_MEDIA_PREVIEW_WIDTH        512U
 #define APP_MEDIA_PREVIEW_HEIGHT       304U
 
+/* Gallery thumbnails: raw RGB565 sidecar files (.THM) written at capture
+ * time, loaded page-by-page into slots for the media grid. */
+#define APP_MEDIA_THUMB_WIDTH          176U
+#define APP_MEDIA_THUMB_HEIGHT         99U
+#define APP_MEDIA_THUMB_SLOTS          8U
+
 #define APP_MEDIA_FLAG_CARD_PRESENT    0x00000001UL
 #define APP_MEDIA_FLAG_SD_READY        0x00000002UL
 #define APP_MEDIA_FLAG_FS_MOUNTED      0x00000004UL
@@ -73,6 +79,18 @@ typedef struct
 
 typedef struct
 {
+  uint32_t generation;      /* bumped whenever slot contents change */
+  uint32_t total_items;     /* screenshots + videos */
+  uint32_t page;            /* 0-based page currently loaded */
+  uint32_t page_count;
+  uint8_t slot_used[APP_MEDIA_THUMB_SLOTS];   /* item exists on this page */
+  uint8_t slot_valid[APP_MEDIA_THUMB_SLOTS];  /* thumb pixels loaded */
+  uint8_t slot_type[APP_MEDIA_THUMB_SLOTS];   /* AppMediaSelectedType_t */
+  uint32_t slot_index[APP_MEDIA_THUMB_SLOTS]; /* 1-based file index */
+} AppMediaThumbInfo_t;
+
+typedef struct
+{
   uint32_t flags;
   uint32_t last_error;
   uint32_t sd_status;
@@ -117,8 +135,14 @@ uint32_t AppMedia_RequestSelectNext(void);
 uint32_t AppMedia_RequestReadSelected(void);
 /* Toggle timed AVI playback of the selected video (5 fps frame stepping). */
 uint32_t AppMedia_RequestPlayToggle(void);
+/* Load one gallery page of thumbnails (newest first) into the slot buffers. */
+uint32_t AppMedia_RequestThumbPage(uint32_t page);
+/* Select a specific file (type/1-based index) and read it for preview. */
+uint32_t AppMedia_RequestSelectItem(uint32_t type, uint32_t index);
 void AppMedia_GetStatus(AppMediaStatus_t *status);
 const uint16_t *AppMedia_GetPreviewBuffer(AppMediaPreviewInfo_t *info);
+/* Slot pixel buffer (THUMB_W x THUMB_H RGB565); info optionally filled. */
+const uint16_t *AppMedia_GetThumbBuffer(uint32_t slot, AppMediaThumbInfo_t *info);
 
 #ifdef __cplusplus
 }

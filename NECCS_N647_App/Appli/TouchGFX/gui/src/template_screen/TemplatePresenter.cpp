@@ -82,6 +82,16 @@ void TemplatePresenter::playToggleMedia()
     model->playToggleMedia();
 }
 
+void TemplatePresenter::requestThumbPage(uint32_t page)
+{
+    model->requestThumbPage(page);
+}
+
+void TemplatePresenter::selectMediaSlot(uint8_t slot)
+{
+    model->selectMediaSlot(slot);
+}
+
 void TemplatePresenter::toggleTrigger()
 {
     model->toggleTrigger();

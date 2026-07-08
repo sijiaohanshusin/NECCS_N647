@@ -44,7 +44,6 @@ private:
     static const uint32_t SysInfoCount = 10U;
     static const uint32_t ProfileCount = 3U;
     static const uint32_t ParamRowCount = 5U;
-    static const uint32_t MediaInfoCount = 8U;
     static const uint32_t MediaActionCount = 5U;
     static const uint32_t BootItemCount = 5U;
 
@@ -72,6 +71,7 @@ private:
     void onProfilePressed(const touchgfx::AbstractButton& source);
     void onParamsPressed(const touchgfx::AbstractButton& source);
     void onMediaPressed(const touchgfx::AbstractButton& source);
+    void setViewerOpen(bool open);
     void onMenuPressed(const touchgfx::AbstractButton& source);
     void onBandChanged(uint16_t loHz, uint16_t hiHz);
     void setMenuOpen(bool open);
@@ -175,16 +175,27 @@ private:
     AppTextLabel renderStepLabel[RenderRowCount * 2U];
     touchgfx::TouchArea renderStepTouch[RenderRowCount * 2U];
 
-    /* ---- media page ---- */
+    /* ---- media page (gallery grid + fullscreen viewer overlay) ---- */
+    static const uint32_t MediaThumbSlots = 8U;
     AppTextLabel mediaTitle;
-    AppRgb565Preview mediaPreview;
-    AppRoundedPanel mediaInfoCard;
-    AppTextLabel mediaInfoName[MediaInfoCount];
-    AppTextLabel mediaInfoValue[MediaInfoCount];
+    AppTextLabel mediaCountLabel;
+    AppRgb565Preview mediaThumb[MediaThumbSlots];
+    AppTextLabel mediaThumbLabel[MediaThumbSlots];
+    touchgfx::Box mediaThumbBadge[MediaThumbSlots];  /* video marker strip */
+    touchgfx::TouchArea mediaThumbTouch[MediaThumbSlots];
+    AppRoundedPanel mediaPageBtn[2];
+    AppTextLabel mediaPageBtnLabel[2];
+    touchgfx::TouchArea mediaPageTouch[2];
+    AppTextLabel mediaEmptyLabel;
     AppRoundedPanel mediaButton[MediaActionCount];
     touchgfx::Image mediaButtonIcon[MediaActionCount];
     AppTextLabel mediaButtonLabel[MediaActionCount];
     touchgfx::TouchArea mediaTouch[MediaActionCount];
+    /* viewer overlay */
+    touchgfx::Box viewerScrim;
+    AppRgb565Preview mediaPreview;
+    AppTextLabel viewerCaption;
+    touchgfx::TouchArea viewerTouch;
 
     /* ---- boot page ---- */
     static const uint32_t BootRingCount = 3U;
@@ -218,8 +229,14 @@ private:
     int16_t bootBarWidth;
     int16_t bootBarTarget;
     uint32_t mediaPreviewGeneration;
+    uint32_t mediaThumbGeneration;
+    uint32_t thumbPage;
+    uint32_t thumbPageCount;
+    uint8_t thumbTypes[MediaThumbSlots];
     bool recActive;
     bool menuOpen;
+    bool viewerOpen;
+    uint8_t selectedSlot;
 };
 
 #endif // TEMPLATE_VIEW_HPP

@@ -55,8 +55,13 @@ typedef enum
   APP_MEDIA_CMD_RECORD_STOP = 4,
   APP_MEDIA_CMD_SELECT_NEXT = 5,
   APP_MEDIA_CMD_READ_SELECTED = 6,
-  APP_MEDIA_CMD_PLAY_TOGGLE = 7
+  APP_MEDIA_CMD_PLAY_TOGGLE = 7,
+  APP_MEDIA_CMD_THUMB_PAGE = 8,   /* arg = page */
+  APP_MEDIA_CMD_SELECT_ITEM = 9   /* arg = type | (index << 4) */
 } AppMediaCommand_t;
+
+/* Queue messages carry the command in the low byte and an argument above. */
+#define APP_MEDIA_CMD_ARG_SHIFT 8U
 
 typedef struct
 {
@@ -99,6 +104,11 @@ static uint16_t s_capture_cam_frame[APP_CAMERA_DISPLAY_WIDTH * APP_CAMERA_DISPLA
  * internal SRAM free for thread stacks. Only touched by the media thread,
  * well after HyperRAM is up. */
 static AppMediaAviIndex_t s_avi_index[APP_MEDIA_MAX_VIDEO_FRAMES] __attribute__((section(".EXTRAM"), aligned(32)));
+/* Gallery thumbnail page: 8 slots of 176x99 RGB565 (~279 KB, HyperRAM). */
+static uint16_t s_thumb_buffer[APP_MEDIA_THUMB_SLOTS]
+                              [APP_MEDIA_THUMB_WIDTH * APP_MEDIA_THUMB_HEIGHT]
+    __attribute__((section(".EXTRAM"), aligned(32)));
+static AppMediaThumbInfo_t s_thumb_info;
 
 static AppMediaStatus_t s_status;
 static JPEG_HandleTypeDef s_jpeg_handle;
@@ -139,6 +149,7 @@ volatile uint32_t g_app_media_perf_write_ms;
 static void AppMedia_ThreadEntry(ULONG thread_input);
 static void AppMedia_FileXDriver(FX_MEDIA *media_ptr);
 static uint32_t read_selected_file(void);
+static void load_thumb_page(uint32_t page);
 
 static void status_lock(void)
 {
@@ -262,9 +273,9 @@ static UINT file_read_exact(FX_FILE *file, void *buffer, ULONG bytes, uint32_t *
   return (actual == bytes) ? FX_SUCCESS : FX_END_OF_FILE;
 }
 
-static uint32_t post_command(AppMediaCommand_t command)
+static uint32_t post_command_arg(AppMediaCommand_t command, uint32_t arg)
 {
-  ULONG message = (ULONG)command;
+  ULONG message = (ULONG)command | ((ULONG)arg << APP_MEDIA_CMD_ARG_SHIFT);
 
   if (tx_queue_send(&s_media_queue, &message, TX_NO_WAIT) != TX_SUCCESS)
   {
@@ -278,6 +289,11 @@ static uint32_t post_command(AppMediaCommand_t command)
   status_unlock();
 
   return APP_MEDIA_ERROR_NONE;
+}
+
+static uint32_t post_command(AppMediaCommand_t command)
+{
+  return post_command_arg(command, 0U);
 }
 
 static void put_u16_le(uint8_t *buffer, uint16_t value)
@@ -430,6 +446,18 @@ static void make_video_path(uint32_t index, char *path, uint32_t path_len)
   (void)snprintf(path, path_len, APP_MEDIA_VIDEO_DIR "/VID%05lu.AVI", (unsigned long)index);
 }
 
+static void make_thumb_path(uint32_t type, uint32_t index, char *path, uint32_t path_len)
+{
+  if (type == APP_MEDIA_SELECTED_VIDEO)
+  {
+    (void)snprintf(path, path_len, APP_MEDIA_VIDEO_DIR "/VID%05lu.THM", (unsigned long)index);
+  }
+  else
+  {
+    (void)snprintf(path, path_len, APP_MEDIA_SCREEN_DIR "/SCR%05lu.THM", (unsigned long)index);
+  }
+}
+
 static uint32_t file_exists(const char *path)
 {
   UINT status = fx_file_open(&s_media, &s_work_file, (CHAR *)path, FX_OPEN_FOR_READ);
@@ -512,6 +540,7 @@ static void scan_media_files(void)
   select_latest();
   reset_video_playback();
   preview_clear();
+  load_thumb_page(0U);
 }
 
 static UINT mount_or_format_media(void)
@@ -702,6 +731,183 @@ static const uint16_t *capture_compose_screen(void)
   }
 
   return s_capture_screen;
+}
+
+/* ------------------------------------------------------------------ */
+/* Gallery thumbnails                                                   */
+/* ------------------------------------------------------------------ */
+
+/* Write a THUMB_W x THUMB_H RGB565 sidecar next to the media file, sampled
+ * from the composed capture buffer (assumes capture_compose_screen was just
+ * run by the caller's capture path). Best effort: gallery falls back to a
+ * placeholder tile when the sidecar is missing. */
+static void write_thumb_sidecar(uint32_t type, uint32_t index)
+{
+  char path[APP_MEDIA_FILE_NAME_LEN];
+  UINT status;
+  /* Row staging reuses the BMP chunk buffer (media thread only). */
+  uint16_t *row = (uint16_t *)(void *)s_bmp_row;
+
+  make_thumb_path(type, index, path, sizeof(path));
+  (void)fx_file_delete(&s_media, (CHAR *)path);
+  status = fx_file_create(&s_media, (CHAR *)path);
+  if ((status != FX_SUCCESS) && (status != FX_ALREADY_CREATED))
+  {
+    return;
+  }
+  if (fx_file_open(&s_media, &s_work_file, (CHAR *)path, FX_OPEN_FOR_WRITE) != FX_SUCCESS)
+  {
+    return;
+  }
+
+  for (uint32_t ty = 0U; ty < APP_MEDIA_THUMB_HEIGHT; ++ty)
+  {
+    const uint32_t sy = (ty * APP_MEDIA_FB_HEIGHT) / APP_MEDIA_THUMB_HEIGHT;
+    const uint16_t *src = &s_capture_screen[sy * APP_MEDIA_FB_WIDTH];
+
+    for (uint32_t tx = 0U; tx < APP_MEDIA_THUMB_WIDTH; ++tx)
+    {
+      row[tx] = src[(tx * APP_MEDIA_FB_WIDTH) / APP_MEDIA_THUMB_WIDTH];
+    }
+    if (fx_file_write(&s_work_file, row, APP_MEDIA_THUMB_WIDTH * 2U) != FX_SUCCESS)
+    {
+      break;
+    }
+  }
+
+  (void)fx_file_close(&s_work_file);
+}
+
+/* Gallery ordering: newest first, screenshots before videos.
+ * Returns 0 when the item number is out of range. */
+static uint32_t thumb_item_resolve(uint32_t item, uint32_t *type, uint32_t *index)
+{
+  uint32_t screenshots;
+  uint32_t videos;
+
+  status_lock();
+  screenshots = s_status.screenshots;
+  videos = s_status.videos;
+  status_unlock();
+
+  if (item < screenshots)
+  {
+    *type = APP_MEDIA_SELECTED_SCREENSHOT;
+    *index = screenshots - item;
+    return 1U;
+  }
+  item -= screenshots;
+  if (item < videos)
+  {
+    *type = APP_MEDIA_SELECTED_VIDEO;
+    *index = videos - item;
+    return 1U;
+  }
+  return 0U;
+}
+
+static void load_thumb_page(uint32_t page)
+{
+  AppMediaThumbInfo_t info;
+  uint32_t screenshots;
+  uint32_t videos;
+
+  status_lock();
+  screenshots = s_status.screenshots;
+  videos = s_status.videos;
+  status_unlock();
+
+  memset(&info, 0, sizeof(info));
+  info.total_items = screenshots + videos;
+  info.page_count = (info.total_items + APP_MEDIA_THUMB_SLOTS - 1U) / APP_MEDIA_THUMB_SLOTS;
+  if (info.page_count == 0U)
+  {
+    info.page_count = 1U;
+  }
+  if (page >= info.page_count)
+  {
+    page = info.page_count - 1U;
+  }
+  info.page = page;
+
+  for (uint32_t slot = 0U; slot < APP_MEDIA_THUMB_SLOTS; ++slot)
+  {
+    char path[APP_MEDIA_FILE_NAME_LEN];
+    uint32_t type = 0U;
+    uint32_t index = 0U;
+    ULONG actual = 0U;
+
+    if (thumb_item_resolve((page * APP_MEDIA_THUMB_SLOTS) + slot, &type, &index) == 0U)
+    {
+      continue;
+    }
+    info.slot_used[slot] = 1U;
+    info.slot_type[slot] = (uint8_t)type;
+    info.slot_index[slot] = index;
+
+    make_thumb_path(type, index, path, sizeof(path));
+    if (fx_file_open(&s_media, &s_work_file, (CHAR *)path, FX_OPEN_FOR_READ) != FX_SUCCESS)
+    {
+      continue;
+    }
+    if ((fx_file_read(&s_work_file,
+                      s_thumb_buffer[slot],
+                      sizeof(s_thumb_buffer[slot]),
+                      &actual) == FX_SUCCESS) &&
+        (actual == sizeof(s_thumb_buffer[slot])))
+    {
+      SCB_CleanDCache_by_Addr((void *)s_thumb_buffer[slot],
+                              (int32_t)sizeof(s_thumb_buffer[slot]));
+      info.slot_valid[slot] = 1U;
+    }
+    (void)fx_file_close(&s_work_file);
+  }
+
+  __DSB();
+
+  status_lock();
+  const uint32_t generation = s_thumb_info.generation + 1U;
+  s_thumb_info = info;
+  s_thumb_info.generation = generation;
+  status_unlock();
+}
+
+static void select_item(uint32_t type, uint32_t index)
+{
+  char path[APP_MEDIA_FILE_NAME_LEN];
+  uint32_t screenshots;
+  uint32_t videos;
+
+  status_lock();
+  screenshots = s_status.screenshots;
+  videos = s_status.videos;
+  status_unlock();
+
+  if (((type == APP_MEDIA_SELECTED_SCREENSHOT) && ((index == 0U) || (index > screenshots))) ||
+      ((type == APP_MEDIA_SELECTED_VIDEO) && ((index == 0U) || (index > videos))) ||
+      ((type != APP_MEDIA_SELECTED_SCREENSHOT) && (type != APP_MEDIA_SELECTED_VIDEO)))
+  {
+    status_set_error(APP_MEDIA_ERROR_NO_SELECTION);
+    return;
+  }
+
+  if (type == APP_MEDIA_SELECTED_VIDEO)
+  {
+    make_video_path(index, path, sizeof(path));
+  }
+  else
+  {
+    make_screenshot_path(index, path, sizeof(path));
+  }
+
+  status_lock();
+  s_status.selected_type = type;
+  s_status.selected_index = index - 1U;
+  status_set_file(s_status.selected_file, path);
+  status_unlock();
+
+  reset_video_playback();
+  (void)read_selected_file();
 }
 
 static uint32_t ensure_jpeg_ready(void)
@@ -993,10 +1199,15 @@ static uint32_t write_bmp_screenshot(void)
   s_status.last_error = APP_MEDIA_ERROR_NONE;
   status_unlock();
 
+  /* Gallery sidecar from the same composed frame. */
+  write_thumb_sidecar(APP_MEDIA_SELECTED_SCREENSHOT, s_next_screenshot);
+
   reset_video_playback();
   preview_clear();
   s_next_screenshot++;
   update_space_status();
+  /* New newest item: reload the first gallery page. */
+  load_thumb_page(0U);
   return APP_MEDIA_ERROR_NONE;
 }
 
@@ -1400,10 +1611,15 @@ static uint32_t stop_recording(void)
   s_status.last_error = APP_MEDIA_ERROR_NONE;
   status_unlock();
 
+  /* Gallery sidecar: recompose the current screen as the video's cover. */
+  (void)capture_compose_screen();
+  write_thumb_sidecar(APP_MEDIA_SELECTED_VIDEO, s_next_video);
+
   reset_video_playback();
   preview_clear();
   s_next_video++;
   update_space_status();
+  load_thumb_page(0U);
   return APP_MEDIA_ERROR_NONE;
 }
 
@@ -2236,7 +2452,7 @@ static uint32_t read_selected_file(void)
   return error;
 }
 
-static void process_command(AppMediaCommand_t command)
+static void process_command(AppMediaCommand_t command, uint32_t arg)
 {
   status_set_busy(1U);
 
@@ -2292,6 +2508,14 @@ static void process_command(AppMediaCommand_t command)
       (void)read_selected_file();
     }
     break;
+  case APP_MEDIA_CMD_THUMB_PAGE:
+    load_thumb_page(arg);
+    status_set_error(APP_MEDIA_ERROR_NONE);
+    break;
+  case APP_MEDIA_CMD_SELECT_ITEM:
+    set_playing(0U);
+    select_item(arg & 0x0FU, arg >> 4);
+    break;
   default:
     break;
   }
@@ -2318,16 +2542,18 @@ static void AppMedia_ThreadEntry(ULONG thread_input)
   {
     if (tx_queue_receive(&s_media_queue, &message, APP_MEDIA_RECORD_PERIOD_TICKS) == TX_SUCCESS)
     {
-      process_command((AppMediaCommand_t)message);
+      process_command((AppMediaCommand_t)(message & 0xFFU),
+                      (uint32_t)(message >> APP_MEDIA_CMD_ARG_SHIFT));
     }
 
 #ifdef DEBUG
     if (g_app_media_test_request != 0U)
     {
-      const AppMediaCommand_t test_command = (AppMediaCommand_t)g_app_media_test_request;
+      const uint32_t test_message = g_app_media_test_request;
 
       g_app_media_test_request = 0U;
-      process_command(test_command);
+      process_command((AppMediaCommand_t)(test_message & 0xFFU),
+                      test_message >> APP_MEDIA_CMD_ARG_SHIFT);
     }
 #endif
 
@@ -2524,6 +2750,31 @@ uint32_t AppMedia_RequestReadSelected(void)
 uint32_t AppMedia_RequestPlayToggle(void)
 {
   return post_command(APP_MEDIA_CMD_PLAY_TOGGLE);
+}
+
+uint32_t AppMedia_RequestThumbPage(uint32_t page)
+{
+  return post_command_arg(APP_MEDIA_CMD_THUMB_PAGE, page);
+}
+
+uint32_t AppMedia_RequestSelectItem(uint32_t type, uint32_t index)
+{
+  return post_command_arg(APP_MEDIA_CMD_SELECT_ITEM, (type & 0x0FU) | (index << 4));
+}
+
+const uint16_t *AppMedia_GetThumbBuffer(uint32_t slot, AppMediaThumbInfo_t *info)
+{
+  if (info != NULL)
+  {
+    status_lock();
+    *info = s_thumb_info;
+    status_unlock();
+  }
+  if (slot >= APP_MEDIA_THUMB_SLOTS)
+  {
+    return NULL;
+  }
+  return s_thumb_buffer[slot];
 }
 
 void AppMedia_GetStatus(AppMediaStatus_t *status)

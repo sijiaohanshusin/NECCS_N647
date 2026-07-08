@@ -154,6 +154,38 @@ static const uint16_t* AppMedia_GetPreviewBuffer(AppMediaPreviewInfo_t* info)
 
 typedef struct
 {
+    uint32_t generation;
+    uint32_t total_items;
+    uint32_t page;
+    uint32_t page_count;
+    uint8_t slot_used[8];
+    uint8_t slot_valid[8];
+    uint8_t slot_type[8];
+    uint32_t slot_index[8];
+} AppMediaThumbInfo_t;
+
+static uint32_t AppMedia_RequestThumbPage(uint32_t)
+{
+    return 0U;
+}
+
+static uint32_t AppMedia_RequestSelectItem(uint32_t, uint32_t)
+{
+    return 0U;
+}
+
+static const uint16_t* AppMedia_GetThumbBuffer(uint32_t, AppMediaThumbInfo_t* info)
+{
+    if (info != 0)
+    {
+        memset(info, 0, sizeof(*info));
+        info->page_count = 1U;
+    }
+    return 0;
+}
+
+typedef struct
+{
     uint8_t initialized;
     uint8_t started;
     uint8_t latest_frame_valid;
@@ -753,6 +785,24 @@ void pollMedia(AppUiSnapshot& snapshot)
     snapshot.mediaPreviewHeight = static_cast<uint16_t>(preview.height);
     snapshot.mediaPreviewFrameIndex = preview.frame_index;
     snapshot.mediaPreviewFrameCount = preview.frame_count;
+
+    AppMediaThumbInfo_t thumbs;
+    memset(&thumbs, 0, sizeof(thumbs));
+    for (uint32_t slot = 0U; slot < 8U; ++slot)
+    {
+        snapshot.mediaThumbPixels[slot] = AppMedia_GetThumbBuffer(slot, (slot == 0U) ? &thumbs : 0);
+    }
+    snapshot.mediaThumbGeneration = thumbs.generation;
+    snapshot.mediaThumbTotal = thumbs.total_items;
+    snapshot.mediaThumbPage = thumbs.page;
+    snapshot.mediaThumbPageCount = thumbs.page_count;
+    for (uint32_t slot = 0U; slot < 8U; ++slot)
+    {
+        snapshot.mediaThumbUsed[slot] = thumbs.slot_used[slot];
+        snapshot.mediaThumbValid[slot] = thumbs.slot_valid[slot];
+        snapshot.mediaThumbType[slot] = thumbs.slot_type[slot];
+        snapshot.mediaThumbIndex[slot] = thumbs.slot_index[slot];
+    }
 }
 }
 
@@ -922,6 +972,20 @@ void Model::readSelectedMedia()
 void Model::playToggleMedia()
 {
     (void)AppMedia_RequestPlayToggle();
+}
+
+void Model::requestThumbPage(uint32_t page)
+{
+    (void)AppMedia_RequestThumbPage(page);
+}
+
+void Model::selectMediaSlot(uint8_t slot)
+{
+    if ((slot < 8U) && (snapshot.mediaThumbUsed[slot] != 0U))
+    {
+        (void)AppMedia_RequestSelectItem(snapshot.mediaThumbType[slot],
+                                         snapshot.mediaThumbIndex[slot]);
+    }
 }
 
 void Model::setActiveProfile(uint8_t profile)

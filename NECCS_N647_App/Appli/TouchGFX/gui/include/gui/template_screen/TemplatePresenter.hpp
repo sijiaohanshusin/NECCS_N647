@@ -58,6 +58,8 @@ public:
     void selectNextMedia();
     void readSelectedMedia();
     void playToggleMedia();
+    void requestThumbPage(uint32_t page);
+    void selectMediaSlot(uint8_t slot);
     virtual void uiSnapshotUpdated(const AppUiSnapshot& snapshot);
 
     virtual ~TemplatePresenter()

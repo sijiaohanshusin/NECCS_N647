@@ -129,6 +129,16 @@ struct AppUiSnapshot
     uint32_t mediaPreviewGeneration;
     uint32_t mediaPreviewFrameIndex;
     uint32_t mediaPreviewFrameCount;
+    /* Gallery grid (8 slots per page, 176x99 RGB565 thumbs). */
+    uint32_t mediaThumbGeneration;
+    uint32_t mediaThumbTotal;
+    uint32_t mediaThumbPage;
+    uint32_t mediaThumbPageCount;
+    const uint16_t* mediaThumbPixels[8];
+    uint8_t mediaThumbUsed[8];
+    uint8_t mediaThumbValid[8];
+    uint8_t mediaThumbType[8];
+    uint32_t mediaThumbIndex[8];
     uint32_t pcmdFlags;
     uint32_t pcmdPublishedFrames;
     uint32_t pcmdDroppedHalves;
@@ -270,6 +280,9 @@ public:
     void selectNextMedia();
     void readSelectedMedia();
     void playToggleMedia();
+    /* Gallery: page navigation and tile selection (slot 0..7). */
+    void requestThumbPage(uint32_t page);
+    void selectMediaSlot(uint8_t slot);
 
     const AppUiSnapshot& getSnapshot() const
     {
