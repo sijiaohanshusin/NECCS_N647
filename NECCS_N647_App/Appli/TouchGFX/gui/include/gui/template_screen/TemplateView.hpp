@@ -132,6 +132,14 @@ private:
     AppTextLabel railSceneValue;
     AppTextLabel railCandLabel[2];
     AppSpectrumPanel spectrumPanel;
+
+    /* AI acoustic-signature card (rail bottom) */
+    AppRoundedPanel aiCard;
+    AppTextLabel aiTitle;
+    AppTextLabel aiClassLabel;
+    AppTextLabel aiConfLabel;
+    touchgfx::Box aiConfTrack;
+    touchgfx::Box aiConfFill;
     AppTextLabel spectrumBandLabel;
 
     /* ---- array page ---- */

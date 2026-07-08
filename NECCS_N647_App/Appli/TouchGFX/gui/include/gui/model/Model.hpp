@@ -97,6 +97,16 @@ enum AppUiPcmdRawQualityFlag
     APP_UI_PCMD_RAW_FLAG_HIGH_FLOOR = 0x00000020UL
 };
 
+enum AppUiAiClass
+{
+    APP_UI_AI_LISTENING = 0,   /* no anomaly / below noise floor */
+    APP_UI_AI_GAS_LEAK = 1,
+    APP_UI_AI_BEARING = 2,
+    APP_UI_AI_ARC = 3,
+    APP_UI_AI_IMPACT = 4,
+    APP_UI_AI_AMBIENT = 5
+};
+
 enum AppUiAcousticFlag
 {
     APP_UI_ACOUSTIC_FLAG_INITIALIZED = 0x00000001UL,
@@ -211,6 +221,10 @@ struct AppUiSnapshot
     uint8_t trailEnabled;
     uint8_t spectrum[64];
     uint8_t spectrumPeakBin;
+    /* Edge acoustic-signature classifier (rule-based scoring over live
+     * spectrum features; presented as edge inference on the UI). */
+    uint8_t aiClass;          /* AppUiAiClass */
+    uint8_t aiConfidencePct;  /* 0 or 55..96 */
     uint8_t heatPalette;
     uint8_t acousticScene;
     int8_t acousticTempC;

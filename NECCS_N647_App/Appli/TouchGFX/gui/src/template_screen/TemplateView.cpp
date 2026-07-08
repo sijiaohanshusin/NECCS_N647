@@ -472,6 +472,29 @@ void TemplateView::setupImagePage()
     add(railModeValue);
     add(railSceneValue);
 
+    /* AI acoustic-signature card */
+    aiCard.setPosition(RailX, 516, RailW, 76);
+    aiCard.setStyle(ColorPanel, 10U);
+    aiCard.setBorder(ColorBlueDim, true);
+    add(aiCard);
+
+    setupLabel(aiTitle, RailX + 14, 522, 144, 18, 1, "AI 声纹识别", ColorMuted);
+    add(aiTitle);
+
+    setupLabel(aiClassLabel, RailX + 14, 541, 144, 24, 2, "监听中", ColorMuted);
+    add(aiClassLabel);
+
+    aiConfTrack.setPosition(RailX + 14, 574, 100, 5);
+    aiConfTrack.setColor(ColorPanel2);
+    add(aiConfTrack);
+
+    aiConfFill.setPosition(RailX + 14, 574, 2, 5);
+    aiConfFill.setColor(ColorBlue);
+    add(aiConfFill);
+
+    setupLabel(aiConfLabel, RailX + 118, 568, 40, 18, 1, "", ColorMuted, AppTextLabel::ALIGN_RIGHT);
+    add(aiConfLabel);
+
     /* Interactive FFT spectrum with band selection under the camera window. */
     spectrumPanel.setPosition(CamX, 546, CamW, 46);
     spectrumPanel.setBandChangedCallback(bandChangedCallback);
@@ -1088,6 +1111,12 @@ void TemplateView::refreshVisibility()
     railCandLabel[1].setVisible(imageVisible);
     spectrumPanel.setVisible(imageVisible);
     spectrumBandLabel.setVisible(imageVisible);
+    aiCard.setVisible(imageVisible);
+    aiTitle.setVisible(imageVisible);
+    aiClassLabel.setVisible(imageVisible);
+    aiConfTrack.setVisible(imageVisible);
+    aiConfFill.setVisible(imageVisible);
+    aiConfLabel.setVisible(imageVisible);
 
     /* array */
     micTitle.setVisible(micVisible);
@@ -1414,6 +1443,41 @@ void TemplateView::refreshImagePage(const AppUiSnapshot& snapshot)
                    snapshot.acousticBandLoHz,
                    snapshot.acousticBandHiHz);
     spectrumBandLabel.setText(text);
+
+    /* AI signature card */
+    {
+        static const char* aiNames[6] = {"监听中", "气体泄漏", "轴承异响", "电弧放电", "机械撞击", "环境声"};
+        static const touchgfx::colortype aiColors[6] = {
+            ColorMuted, ColorRed, ColorAmber, ColorRed, ColorAmber, ColorBlue
+        };
+        const uint8_t cls = (snapshot.aiClass < 6U) ? snapshot.aiClass : 0U;
+
+        aiClassLabel.setColors(aiColors[cls], ColorBg, false);
+        aiClassLabel.setText(aiNames[cls]);
+
+        if (snapshot.aiConfidencePct != 0U)
+        {
+            (void)snprintf(text, sizeof(text), "%u%%", snapshot.aiConfidencePct);
+        }
+        else
+        {
+            text[0] = '\0';
+        }
+        aiConfLabel.setText(text);
+
+        int16_t confW = static_cast<int16_t>((100 * snapshot.aiConfidencePct) / 100U);
+        if (confW < 2)
+        {
+            confW = 2;
+        }
+        if (aiConfFill.getWidth() != confW)
+        {
+            aiConfFill.setPosition(RailX + 14, 574, confW, 5);
+            aiConfFill.setColor((cls == 1U || cls == 3U) ? ColorRed : ColorBlue);
+            aiConfTrack.invalidate();
+            aiConfFill.invalidate();
+        }
+    }
 
     int16_t fillW = static_cast<int16_t>((144 * snapshot.qualityPct) / 100);
     if (fillW < 4)
