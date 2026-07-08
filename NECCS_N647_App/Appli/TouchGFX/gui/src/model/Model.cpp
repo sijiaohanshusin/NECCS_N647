@@ -438,11 +438,14 @@ void pollAcoustic(AppUiSnapshot& snapshot)
     }
     snapshot.heatPalette = AppCameraDisplay_GetHeatPalette();
 
-    const bool acousticOverlayHasFrame =
-        (acoustic.output_seq != 0U) || (acoustic.processed_frames != 0U);
+    /* DEBUG preview keeps the overlay path exercised only until the first
+     * real SRP frame lands (the field is all-zero until then, so the draw
+     * cost is negligible); afterwards the overlay strictly follows valid
+     * results. An always-on preview would re-blend a stale field at camera
+     * rate and starve the SRP thread outright. */
     const bool acousticOverlayPreview =
         APP_UI_ACOUSTIC_OVERLAY_PREVIEW_ENABLE &&
-        ((acoustic.running != 0U) || acousticOverlayHasFrame);
+        (acoustic.processed_frames == 0U);
     const bool acousticOverlayEnabled =
         (snapshot.activeScreen == APP_UI_SCREEN_IMAGE) &&
         (((acoustic.valid != 0U) &&

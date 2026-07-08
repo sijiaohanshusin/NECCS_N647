@@ -47,6 +47,7 @@ static volatile AppCameraStatus_t g_app_camera_status =
 static uint32_t g_app_camera_last_frame_poll;
 static uint32_t g_app_camera_no_frame_ms;
 static uint32_t g_app_camera_phy_retry_index;
+static uint32_t g_app_camera_stream_recover_attempts;
 static const uint32_t g_app_camera_phy_retry_list[] =
 {
   APP_CAMERA_PRIMARY_PHY,
@@ -598,6 +599,7 @@ int32_t AppCamera_Init(void)
   g_app_camera_last_frame_poll = 0U;
   g_app_camera_no_frame_ms = 0U;
   g_app_camera_phy_retry_index = 0U;
+  g_app_camera_stream_recover_attempts = 0U;
 
   sensor_config.width = APP_CAMERA_WIDTH;
   sensor_config.height = APP_CAMERA_HEIGHT;
@@ -800,6 +802,8 @@ void AppCamera_Poll(uint32_t elapsed_ms)
   {
     g_app_camera_last_frame_poll = g_app_camera_status.frame_count;
     g_app_camera_no_frame_ms = 0U;
+    /* Frames are flowing again: re-arm the stream recovery budget. */
+    g_app_camera_stream_recover_attempts = 0U;
   }
   else if ((g_app_camera_status.flags & APP_CAMERA_FLAG_STREAMING) != 0U)
   {
@@ -820,6 +824,22 @@ void AppCamera_Poll(uint32_t elapsed_ms)
     g_app_camera_phy_retry_index++;
     (void)AppCamera_RestartWithPhy(g_app_camera_phy_retry_list[g_app_camera_phy_retry_index]);
     g_app_camera_no_frame_ms = 0U;
+  }
+
+  /* A restart can fail transiently when another owner (PCMD config window,
+   * touch) holds the I2C2 lock for longer than the sensor-write timeout; the
+   * restart path stops the stream before the failing write, which would
+   * otherwise leave the camera dead. Re-attempt on the 1 Hz poll with a
+   * bounded budget instead of giving up permanently. */
+  if (((g_app_camera_status.flags & APP_CAMERA_FLAG_SENSOR_CONFIGURED) != 0U) &&
+      ((g_app_camera_status.flags & APP_CAMERA_FLAG_STREAMING) == 0U) &&
+      ((g_app_camera_status.flags & APP_CAMERA_FLAG_PREVIEW) != 0U) &&
+      (g_app_camera_stream_recover_attempts < 8U))
+  {
+    /* Budget resets only when frames actually flow (above), so a restart
+     * that "succeeds" without producing frames cannot loop forever. */
+    g_app_camera_stream_recover_attempts++;
+    (void)AppCamera_RestartWithPhy(g_app_camera_phy_retry_list[g_app_camera_phy_retry_index]);
   }
 
   AppCamera_MirrorGlobals();

@@ -29,6 +29,12 @@
 #define APP_ACOUSTIC_SERVICE_FIELD_EMA_ATTACK   0.65f
 #define APP_ACOUSTIC_SERVICE_FIELD_EMA_DECAY    0.12f
 #define APP_ACOUSTIC_SERVICE_FIELD_NOISE_GATE   0.10f
+/* Adaptive background subtraction (H7-style noise_adapt_gain): the display
+ * floor is the field mean scaled by this gain, so a diffuse ambient field
+ * stays dark and only sources standing out of the background light up.
+ * SRP-PHAT ambient fields are flat-ish; without this the per-frame peak
+ * normalisation would paint the whole camera window at ~mid heat. */
+#define APP_ACOUSTIC_SERVICE_FIELD_BG_GAIN      1.45f
 #define APP_ACOUSTIC_SERVICE_FIELD_FINE_GAIN    0.65f
 #define APP_ACOUSTIC_SERVICE_FIELD_FINE_SIGMA   1.35f
 #define APP_ACOUSTIC_SERVICE_FIELD_SMOOTH_PASSES 1U
@@ -511,11 +517,14 @@ static void AppAcousticService_SmoothField(void)
   }
 }
 
-/* Temporal EMA, dB windowing, gamma, then quantisation to 0..255. */
+/* Temporal EMA, adaptive background subtraction, dB windowing, gamma, then
+ * quantisation to 0..255. */
 static void AppAcousticService_NormalizeField(AppAcousticServiceSnapshot_t *snapshot)
 {
   float peak = 0.0f;
+  float mean = 0.0f;
   float floor_lin;
+  float bg_floor;
   float span_db = -APP_ACOUSTIC_SERVICE_FIELD_DB_FLOOR;
   float inv_span_db = 1.0f / span_db;
 
@@ -532,7 +541,9 @@ static void AppAcousticService_NormalizeField(AppAcousticServiceSnapshot_t *snap
     {
       peak = s_field_accum[i];
     }
+    mean += s_field_accum[i];
   }
+  mean *= (1.0f / (float)APP_ACOUSTIC_SERVICE_FIELD_COUNT);
 
   if (peak > s_field_peak_ema)
   {
@@ -550,6 +561,20 @@ static void AppAcousticService_NormalizeField(AppAcousticServiceSnapshot_t *snap
   }
 
   floor_lin = APP_ACOUSTIC_SERVICE_FIELD_NOISE_GATE * s_field_peak_ema;
+  bg_floor = mean * APP_ACOUSTIC_SERVICE_FIELD_BG_GAIN;
+  if (bg_floor > floor_lin)
+  {
+    floor_lin = bg_floor;
+  }
+
+  {
+  const float peak_effective = s_field_peak_ema - floor_lin;
+
+  if (peak_effective < 1.0e-12f)
+  {
+    memset(snapshot->field, 0, sizeof(snapshot->field));
+    return;
+  }
 
   for (uint32_t i = 0U; i < APP_ACOUSTIC_SERVICE_FIELD_COUNT; i++)
   {
@@ -563,7 +588,7 @@ static void AppAcousticService_NormalizeField(AppAcousticServiceSnapshot_t *snap
       continue;
     }
 
-    norm = effective / s_field_peak_ema;
+    norm = effective / peak_effective;
     if (norm > 1.0f)
     {
       norm = 1.0f;
@@ -580,6 +605,7 @@ static void AppAcousticService_NormalizeField(AppAcousticServiceSnapshot_t *snap
     norm = (db + span_db) * inv_span_db;
     norm = powf(norm, APP_ACOUSTIC_SERVICE_FIELD_GAMMA);
     snapshot->field[i] = (uint8_t)((norm * 255.0f) + 0.5f);
+  }
   }
 }
 

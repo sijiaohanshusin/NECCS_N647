@@ -7,6 +7,7 @@
 #include <touchgfx/lcd/LCD.hpp>
 
 #include <stddef.h>
+#include <string.h>
 
 namespace
 {
@@ -131,13 +132,25 @@ void AppTextLabel::setPosition(int16_t x, int16_t y, int16_t width, int16_t heig
 
 void AppTextLabel::setText(const char* value)
 {
+    touchgfx::Unicode::UnicodeChar next[MaxText];
+
     if (value == 0)
     {
         value = "";
     }
 
-    const uint16_t converted = touchgfx::Unicode::fromUTF8(reinterpret_cast<const uint8_t*>(value), wildcard, static_cast<uint16_t>(MaxText - 1U));
-    wildcard[converted] = 0U;
+    const uint16_t converted = touchgfx::Unicode::fromUTF8(reinterpret_cast<const uint8_t*>(value), next, static_cast<uint16_t>(MaxText - 1U));
+    next[converted] = 0U;
+
+    /* Skip the invalidate when the content is unchanged: the UI refreshes
+     * labels from the snapshot at a fixed rate and unconditional invalidates
+     * would keep the GPU2D busy full-time (starving low-priority DSP work). */
+    if (touchgfx::Unicode::strncmp(wildcard, next, MaxText) == 0)
+    {
+        return;
+    }
+
+    (void)memcpy(wildcard, next, sizeof(wildcard));
     textArea.invalidate();
 }
 

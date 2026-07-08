@@ -40,6 +40,7 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 /* Priority ladder (lower number = higher priority):
+ *   4  pcmd_capture (boot) - PCMD config window; drops to 12 once streaming
  *   5  TouchGFX          - event driven, must stay fluid
  *  11  bringup           - init + 1 Hz polling
  *  12  pcmd_capture      - hard real-time audio, must never starve
@@ -48,11 +49,13 @@
  *  12  media             - FileX, mostly blocked
  * SRP sits BELOW the camera worker on purpose: measured on-board, anything
  * else either freezes the preview (SRP saturates the core) or drops every
- * SAI half. */
+ * SAI half. The PCMD thread is CREATED at priority 4 and demotes itself
+ * (app_pcmd_capture.c): during the boot screen TouchGFX renders full-time,
+ * so a 12-priority thread would never run its I2C config sequence. */
 #define APP_BRINGUP_THREAD_STACK_SIZE  4096U
 #define APP_BRINGUP_THREAD_PRIORITY    11U
 #define APP_PCMD_THREAD_STACK_SIZE     8192U
-#define APP_PCMD_THREAD_PRIORITY       12U
+#define APP_PCMD_THREAD_PRIORITY       4U
 #define APP_ACOUSTIC_THREAD_STACK_SIZE 12288U
 #define APP_ACOUSTIC_THREAD_PRIORITY   14U
 #define APP_CAMDISP_THREAD_STACK_SIZE  4096U

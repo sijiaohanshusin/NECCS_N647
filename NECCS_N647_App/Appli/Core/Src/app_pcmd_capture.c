@@ -5,6 +5,7 @@
 
 #include "main.h"
 #include "app_bringup_thread.h"
+#include "app_camera.h"
 #include "app_i2c2_bus.h"
 #include "PCMD3180/pcmd3180_hal.h"
 
@@ -29,6 +30,10 @@
 #define APP_PCMD_CAPTURE_EVENT_HALF0         0x00000001UL
 #define APP_PCMD_CAPTURE_EVENT_HALF1         0x00000002UL
 #define APP_PCMD_CAPTURE_EVENT_MASK          (APP_PCMD_CAPTURE_EVENT_HALF0 | APP_PCMD_CAPTURE_EVENT_HALF1)
+/* Config-window priority (above TouchGFX) vs steady-state priority (the
+ * audio rung of the ladder in app_threadx.c). See ThreadEntry. */
+#define APP_PCMD_CAPTURE_THREAD_BOOST_PRIORITY 4U
+#define APP_PCMD_CAPTURE_THREAD_RUN_PRIORITY   12U
 #define APP_PCMD_CAPTURE_RAIL_ABS_LEVEL      32760
 #define APP_PCMD_CAPTURE_RAIL_FAULT_X10      1U
 #define APP_PCMD_CAPTURE_HIGH_FLOOR_DBFS     (-30)
@@ -1339,7 +1344,39 @@ AppPcmdCaptureStatus_t AppPcmdCapture_Poll(ULONG wait_ticks)
 
 void AppPcmdCapture_ThreadEntry(ULONG thread_input)
 {
+  /* The thread is created at a boosted priority (above TouchGFX): during the
+   * boot screen the UI renders continuously and a priority-12 thread does
+   * not get scheduled at all (observed run_count=0 after 8 s), so the boost
+   * cannot be done from inside this thread after creation. Once the array
+   * streams, drop to the steady-state priority so the render/DSP ladder in
+   * app_threadx.c applies; boost again only for restart config windows. */
+  TX_THREAD *self = tx_thread_identify();
+  UINT discard_priority;
+  uint8_t boosted = 1U;
+
   (void)thread_input;
+
+  /* Deterministic bring-up order: let the camera stream first (~3-5 s incl.
+   * the D-PHY retry, all short I2C bursts), then run our ~8 s atomic config
+   * hold. Interleaving the two makes both erratic: the camera restart used
+   * to die on the held bus, and camera restarts stretched our config into
+   * tens of seconds of verify retries. The IMX219 driver additionally waits
+   * out long bus holds now (12 s lock acquire) as a safety net for restarts
+   * that happen after this gate. */
+  for (uint32_t i = 0U; i < 200U; i++)
+  {
+    AppBringUpSnapshot_t bringup;
+    const uint32_t camera_bit = 1UL << APP_BRINGUP_MODULE_CAMERA;
+
+    App_BringUpStatus_GetSnapshot(&bringup);
+    if (((bringup.enabled_mask & camera_bit) == 0U) ||
+        (((bringup.failed_mask | bringup.skipped_mask) & camera_bit) != 0U) ||
+        (g_app_camera_frame_count >= 3U))
+    {
+      break;
+    }
+    tx_thread_sleep(TX_TIMER_TICKS_PER_SECOND / 10U);
+  }
 
   while (1)
   {
@@ -1350,12 +1387,27 @@ void AppPcmdCapture_ThreadEntry(ULONG thread_input)
 
     if (s_snapshot.started == 0U)
     {
+      if ((boosted == 0U) && (self != TX_NULL))
+      {
+        (void)tx_thread_priority_change(self,
+                                        APP_PCMD_CAPTURE_THREAD_BOOST_PRIORITY,
+                                        &discard_priority);
+        boosted = 1U;
+      }
       (void)AppPcmdCapture_Start();
       if (s_snapshot.started == 0U)
       {
         AppPcmdCapture_DelayMs(APP_PCMD_CAPTURE_RETRY_DELAY_MS);
         continue;
       }
+    }
+
+    if ((boosted != 0U) && (self != TX_NULL))
+    {
+      (void)tx_thread_priority_change(self,
+                                      APP_PCMD_CAPTURE_THREAD_RUN_PRIORITY,
+                                      &discard_priority);
+      boosted = 0U;
     }
 
     (void)AppPcmdCapture_Poll(TX_TIMER_TICKS_PER_SECOND / 10U);

@@ -1,4 +1,4 @@
-#include "app_camera_imx219.h"
+﻿#include "app_camera_imx219.h"
 
 #include "app_i2c2_bus.h"
 #include "main.h"
@@ -6,6 +6,10 @@
 #define IMX219_I2C_ADDR_7BIT          0x10U
 #define IMX219_I2C_ADDR_HAL           (IMX219_I2C_ADDR_7BIT << 1)
 #define IMX219_I2C_TIMEOUT_MS         100U
+/* Lock acquire wait is deliberately long: the PCMD array config window holds
+ * the shared I2C2 bus for ~8 s (one atomic hold, by design). The camera
+ * bring-up/restart must wait it out instead of failing the sensor stream. */
+#define IMX219_I2C_LOCK_WAIT_MS       12000U
 #define IMX219_CHIP_ID                0x0219U
 
 #define IMX219_REG_CHIP_ID            0x0000U
@@ -158,7 +162,7 @@ static int32_t IMX219_WriteReg(uint16_t reg, uint16_t value, uint8_t width)
   g_app_camera_imx219_last_hal_status = HAL_OK;
   g_app_camera_imx219_transfer_count++;
 
-  if (AppI2C2_Lock(IMX219_I2C_TIMEOUT_MS) == 0U)
+  if (AppI2C2_Lock(IMX219_I2C_LOCK_WAIT_MS) == 0U)
   {
     g_app_camera_imx219_last_error = APP_CAMERA_IMX219_ERROR_I2C_LOCK;
     return APP_CAMERA_IMX219_ERROR_I2C_LOCK;
@@ -206,7 +210,7 @@ static int32_t IMX219_ReadReg(uint16_t reg, uint8_t width, uint16_t *value)
     return APP_CAMERA_IMX219_ERROR_INVALID_ARG;
   }
 
-  if (AppI2C2_Lock(IMX219_I2C_TIMEOUT_MS) == 0U)
+  if (AppI2C2_Lock(IMX219_I2C_LOCK_WAIT_MS) == 0U)
   {
     g_app_camera_imx219_last_error = APP_CAMERA_IMX219_ERROR_I2C_LOCK;
     return APP_CAMERA_IMX219_ERROR_I2C_LOCK;
@@ -416,7 +420,7 @@ static void IMX219_RecordI2CScan(void)
   g_app_camera_imx219_scan_ack_mask[2] = 0U;
   g_app_camera_imx219_scan_ack_mask[3] = 0U;
 
-  if (AppI2C2_Lock(IMX219_I2C_TIMEOUT_MS) == 0U)
+  if (AppI2C2_Lock(IMX219_I2C_LOCK_WAIT_MS) == 0U)
   {
     return;
   }

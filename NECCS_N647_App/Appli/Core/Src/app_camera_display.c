@@ -19,8 +19,16 @@
  * lower-priority thread (SRP never finished a single frame). */
 
 /* Heat overlay rendering: normalized values below this stay fully
- * transparent; above, alpha ramps up to the (quality-scaled) maximum. */
-#define APP_CAMERA_DISPLAY_HEAT_ALPHA_MIN_VALUE 18U
+ * transparent; above, alpha ramps up to the (quality-scaled) maximum.
+ * The threshold also bounds the blend cost: every covered pixel is a
+ * read-modify-write against HyperRAM (~5 MB/s effective for CPU access),
+ * so diffuse low-value fields must stay transparent. */
+/* Only the strongest part of the normalised field is drawn (top ~8 dB of
+ * the -15 dB window). This matches real acoustic-camera behaviour (heat blob
+ * around sources, camera image elsewhere) and, just as importantly, keeps
+ * the HyperRAM read-modify-write footprint small: blending the whole
+ * 640x480 window against contended HyperRAM measured ~75 ms/frame. */
+#define APP_CAMERA_DISPLAY_HEAT_ALPHA_MIN_VALUE 84U
 #define APP_CAMERA_DISPLAY_HEAT_ALPHA_BASE      56U
 #define APP_CAMERA_DISPLAY_HEAT_ALPHA_MAX       208U
 #define APP_CAMERA_DISPLAY_MARKER_MIN_STRENGTH  64U
@@ -81,6 +89,10 @@ static uint16_t s_heat_u0[APP_CAMERA_DISPLAY_WIDTH / 2U] __attribute__((aligned(
 static uint8_t s_heat_wu[APP_CAMERA_DISPLAY_WIDTH / 2U] __attribute__((aligned(32)));
 static uint16_t s_heat_v0[APP_CAMERA_DISPLAY_HEIGHT / 2U] __attribute__((aligned(32)));
 static uint8_t s_heat_wv[APP_CAMERA_DISPLAY_HEIGHT / 2U] __attribute__((aligned(32)));
+/* Line-pair staging buffer: the blend must never read-modify-write HyperRAM
+ * per pixel (measured ~98 ms/frame that way). Rows are burst-copied here,
+ * blended in internal SRAM, then burst-copied back (~2.5 KB). */
+static uint16_t s_overlay_linebuf[2][APP_CAMERA_DISPLAY_WIDTH] __attribute__((aligned(32)));
 static volatile uint8_t s_heat_palette_index = 0U;
 static uint8_t s_heat_luts_ready = 0U;
 /* Scanline band touched by the last overlay draw (for targeted cache ops). */
@@ -451,11 +463,65 @@ static void AppCameraDisplay_DrawAcousticOverlay(uint32_t frame_addr)
       continue;
     }
 
-    /* DCMIPP wrote this frame via DMA: refresh the two destination lines in
-     * the cache before the read-modify-write blend, and remember the band
-     * for the post-draw clean. */
-    AppCameraDisplay_InvalidateDCache((uint32_t)dst0,
-                                      2U * APP_CAMERA_DISPLAY_CAMERA_LINE_BYTES);
+    /* Active horizontal span for this line pair: field cells feeding it via
+     * the bilinear u-map. Localized sources keep this a small fraction of
+     * the width, which directly cuts the HyperRAM traffic. */
+    uint32_t cell_min = APP_CAMERA_DISPLAY_FIELD_W;
+    uint32_t cell_max = 0U;
+    for (uint32_t i = 0U; i < APP_CAMERA_DISPLAY_FIELD_W; i++)
+    {
+      if ((row0[i] >= APP_CAMERA_DISPLAY_HEAT_ALPHA_MIN_VALUE) ||
+          (row1[i] >= APP_CAMERA_DISPLAY_HEAT_ALPHA_MIN_VALUE))
+      {
+        if (i < cell_min)
+        {
+          cell_min = i;
+        }
+        if (i > cell_max)
+        {
+          cell_max = i;
+        }
+      }
+    }
+    if (cell_min > cell_max)
+    {
+      continue;
+    }
+
+    uint32_t bx_min = APP_CAMERA_DISPLAY_WIDTH / 2U;
+    uint32_t bx_max = 0U;
+    for (uint32_t bx = 0U; bx < (APP_CAMERA_DISPLAY_WIDTH / 2U); bx++)
+    {
+      const uint32_t u0 = s_heat_u0[bx];
+      /* Bilinear taps u0 and u0+1: active when either sits in the span. */
+      if (((u0 + 1U) >= cell_min) && (u0 <= cell_max))
+      {
+        if (bx < bx_min)
+        {
+          bx_min = bx;
+        }
+        if (bx > bx_max)
+        {
+          bx_max = bx;
+        }
+      }
+    }
+    if (bx_min > bx_max)
+    {
+      continue;
+    }
+
+    const uint32_t px0 = bx_min * 2U;
+    const uint32_t px_count = ((bx_max + 1U) * 2U) - px0;
+    const uint32_t span_bytes = px_count * APP_CAMERA_DISPLAY_BYTES_PER_PIXEL;
+
+    /* DCMIPP wrote this frame via DMA: refresh the touched span in the
+     * cache, stage it in internal SRAM, blend there, then write back.
+     * Per-pixel RMW straight against HyperRAM costs ~15x more. */
+    AppCameraDisplay_InvalidateDCache((uint32_t)(dst0 + px0), span_bytes);
+    AppCameraDisplay_InvalidateDCache((uint32_t)(dst1 + px0), span_bytes);
+    (void)memcpy(&s_overlay_linebuf[0][px0], dst0 + px0, span_bytes);
+    (void)memcpy(&s_overlay_linebuf[1][px0], dst1 + px0, span_bytes);
     if ((int32_t)(by * 2U) < s_overlay_dirty_y0)
     {
       s_overlay_dirty_y0 = (int32_t)(by * 2U);
@@ -465,44 +531,43 @@ static void AppCameraDisplay_DrawAcousticOverlay(uint32_t frame_addr)
       s_overlay_dirty_y1 = (int32_t)((by * 2U) + 2U);
     }
 
-    for (uint32_t bx = 0U; bx < (APP_CAMERA_DISPLAY_WIDTH / 2U); bx++)
     {
-      const uint32_t u0 = s_heat_u0[bx];
-      const uint32_t wu = s_heat_wu[bx];
-      const uint32_t inv_wu = 255U - wu;
-      uint32_t top;
-      uint32_t bottom;
-      uint32_t value;
-      uint32_t alpha;
+      uint16_t *line0 = &s_overlay_linebuf[0][px0];
+      uint16_t *line1 = &s_overlay_linebuf[1][px0];
 
-      top = ((uint32_t)row0[u0] * inv_wu) + ((uint32_t)row0[u0 + 1U] * wu);
-      bottom = ((uint32_t)row1[u0] * inv_wu) + ((uint32_t)row1[u0 + 1U] * wu);
-      value = ((top * inv_wv) + (bottom * wv)) >> 16;
-
-      alpha = s_heat_alpha_lut[value & 0xFFU];
-      if (alpha == 0U)
+      for (uint32_t bx = bx_min; bx <= bx_max; bx++)
       {
-        dst0 += 2;
-        dst1 += 2;
-        continue;
+        const uint32_t u0 = s_heat_u0[bx];
+        const uint32_t wu = s_heat_wu[bx];
+        const uint32_t inv_wu = 255U - wu;
+        uint32_t top;
+        uint32_t bottom;
+        uint32_t value;
+        uint32_t alpha;
+
+        top = ((uint32_t)row0[u0] * inv_wu) + ((uint32_t)row0[u0 + 1U] * wu);
+        bottom = ((uint32_t)row1[u0] * inv_wu) + ((uint32_t)row1[u0 + 1U] * wu);
+        value = ((top * inv_wv) + (bottom * wv)) >> 16;
+
+        alpha = s_heat_alpha_lut[value & 0xFFU];
+        if (alpha != 0U)
+        {
+          const uint16_t color = palette[value & 0xFFU];
+          const uint8_t a = (uint8_t)((alpha * qscale) >> 8);
+
+          line0[0] = AppCameraDisplay_BlendRgb565(line0[0], color, a);
+          line0[1] = AppCameraDisplay_BlendRgb565(line0[1], color, a);
+          line1[0] = AppCameraDisplay_BlendRgb565(line1[0], color, a);
+          line1[1] = AppCameraDisplay_BlendRgb565(line1[1], color, a);
+        }
+
+        line0 += 2;
+        line1 += 2;
       }
-
-      alpha = (alpha * qscale) >> 8;
-
-      {
-        const uint16_t color = palette[value & 0xFFU];
-        const uint32_t x = bx * 2U;
-
-        dst0[0] = AppCameraDisplay_BlendRgb565(dst0[0], color, (uint8_t)alpha);
-        dst0[1] = AppCameraDisplay_BlendRgb565(dst0[1], color, (uint8_t)alpha);
-        dst1[0] = AppCameraDisplay_BlendRgb565(dst1[0], color, (uint8_t)alpha);
-        dst1[1] = AppCameraDisplay_BlendRgb565(dst1[1], color, (uint8_t)alpha);
-        (void)x;
-      }
-
-      dst0 += 2;
-      dst1 += 2;
     }
+
+    (void)memcpy(dst0 + px0, &s_overlay_linebuf[0][px0], span_bytes);
+    (void)memcpy(dst1 + px0, &s_overlay_linebuf[1][px0], span_bytes);
   }
 
   for (uint32_t i = 0U; i < overlay.marker_count; i++)
