@@ -25,6 +25,7 @@
 /* USER CODE BEGIN Includes */
 #include "app_bringup_thread.h"
 #include "app_acoustic_service.h"
+#include "app_camera_display.h"
 #include "app_i2c2_bus.h"
 #include "app_media.h"
 #include "app_pcmd_capture.h"
@@ -38,12 +39,24 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+/* Priority ladder (lower number = higher priority):
+ *   5  TouchGFX          - event driven, must stay fluid
+ *  11  bringup           - init + 1 Hz polling
+ *  12  pcmd_capture      - hard real-time audio, must never starve
+ *  13  camdisp worker    - compose+overlay ~2 ms per camera frame
+ *  14  acoustic (SRP)    - elastic CPU hog (~150 ms/frame), soaks leftover
+ *  12  media             - FileX, mostly blocked
+ * SRP sits BELOW the camera worker on purpose: measured on-board, anything
+ * else either freezes the preview (SRP saturates the core) or drops every
+ * SAI half. */
 #define APP_BRINGUP_THREAD_STACK_SIZE  4096U
 #define APP_BRINGUP_THREAD_PRIORITY    11U
 #define APP_PCMD_THREAD_STACK_SIZE     8192U
 #define APP_PCMD_THREAD_PRIORITY       12U
 #define APP_ACOUSTIC_THREAD_STACK_SIZE 12288U
-#define APP_ACOUSTIC_THREAD_PRIORITY   13U
+#define APP_ACOUSTIC_THREAD_PRIORITY   14U
+#define APP_CAMDISP_THREAD_STACK_SIZE  4096U
+#define APP_CAMDISP_THREAD_PRIORITY    13U
 
 /* USER CODE END PD */
 
@@ -60,6 +73,8 @@ static TX_THREAD app_pcmd_thread;
 static ULONG app_pcmd_thread_stack[APP_PCMD_THREAD_STACK_SIZE / sizeof(ULONG)];
 static TX_THREAD app_acoustic_thread;
 static ULONG app_acoustic_thread_stack[APP_ACOUSTIC_THREAD_STACK_SIZE / sizeof(ULONG)];
+static TX_THREAD app_camdisp_thread;
+static ULONG app_camdisp_thread_stack[APP_CAMDISP_THREAD_STACK_SIZE / sizeof(ULONG)];
 
 /* USER CODE END PV */
 
@@ -89,6 +104,27 @@ UINT App_ThreadX_Init(VOID *memory_ptr)
   else
   {
     App_BringUpStatus_Fail(APP_BRINGUP_MODULE_I2C, (int32_t)ret);
+  }
+  if (ret == TX_SUCCESS)
+  {
+    ret = AppCameraDisplay_WorkerInit();
+    if (ret == TX_SUCCESS)
+    {
+      ret = tx_thread_create(&app_camdisp_thread,
+                             "app_camdisp",
+                             AppCameraDisplay_WorkerThreadEntry,
+                             0U,
+                             app_camdisp_thread_stack,
+                             APP_CAMDISP_THREAD_STACK_SIZE,
+                             APP_CAMDISP_THREAD_PRIORITY,
+                             APP_CAMDISP_THREAD_PRIORITY,
+                             TX_NO_TIME_SLICE,
+                             TX_AUTO_START);
+    }
+    if (ret != TX_SUCCESS)
+    {
+      App_BringUpStatus_Fail(APP_BRINGUP_MODULE_DISPLAY, (int32_t)ret);
+    }
   }
   if (ret == TX_SUCCESS)
   {

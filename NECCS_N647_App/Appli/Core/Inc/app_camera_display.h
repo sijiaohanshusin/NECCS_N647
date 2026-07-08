@@ -7,6 +7,8 @@ extern "C" {
 
 #include <stdint.h>
 
+#include "tx_api.h"
+
 #define APP_CAMERA_DISPLAY_OK                 0
 #define APP_CAMERA_DISPLAY_ERROR_INVALID_ARG -1
 #define APP_CAMERA_DISPLAY_ERROR_LTDC        -2
@@ -103,6 +105,10 @@ void AppCameraDisplay_SetAcousticField(const uint8_t *field,
 void AppCameraDisplay_SetHeatPalette(uint8_t palette);
 uint8_t AppCameraDisplay_GetHeatPalette(void);
 void AppCameraDisplay_RequestSwap(uint32_t frame_addr);
+/* Swap worker thread: does the compose/overlay/LTDC work queued by
+ * RequestSwap (which is ISR-safe and only records the newest frame). */
+UINT AppCameraDisplay_WorkerInit(void);
+void AppCameraDisplay_WorkerThreadEntry(ULONG thread_input);
 void AppCameraDisplay_RefreshColorKeyHole(int32_t x,
                                           int32_t y,
                                           int32_t width,

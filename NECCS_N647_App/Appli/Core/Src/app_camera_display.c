@@ -2,6 +2,7 @@
 
 #include "app_camera.h"
 #include "main.h"
+#include "tx_api.h"
 #include <string.h>
 
 #define APP_CAMERA_DISPLAY_FLAG_READY (1UL << 0)
@@ -9,15 +10,13 @@
 #define APP_CAMERA_DISPLAY_LTDC_ERROR_MASK \
   (LTDC_ISR2_FUWIF | LTDC_ISR2_TERRIF | LTDC_ISR2_FUIF | LTDC_ISR2_CRCIF)
 #define APP_CAMERA_DISPLAY_DCACHE_LINE_BYTES 32U
-#define APP_CAMERA_DISPLAY_COMPOSE_ENABLE          1U
-/* DMA2D is owned by the TouchGFX render pipeline (STM32DMA, interrupt mode).
- * Driving the same handle from the camera thread in polling mode races the
- * UI blits: PollForTransfer clears flags/state and can swallow the TC
- * interrupt of an in-flight TouchGFX transfer, deadlocking the render loop.
- * The compose copy therefore uses the CPU path (fast memcpy, ~1-3 ms/frame
- * at 15 fps). Do not re-enable without adding a DMA2D arbiter. */
-#define APP_CAMERA_DISPLAY_DMA2D_COPY_ENABLE       0U
-#define APP_CAMERA_DISPLAY_DMA2D_TIMEOUT_MS        10U
+/* No compose copy: the DCMIPP ping-pongs FB0/FB1 and the LTDC flips to the
+ * completed buffer at vertical blanking (VBR reload), so scan-out never sees
+ * a partially written frame. The heat overlay draws directly into the
+ * completed buffer before the flip. The previous design copied each 614 KB
+ * frame into a HyperRAM compose buffer; with DCMIPP + LTDC + GPU2D already
+ * saturating HyperRAM, that memcpy measured ~130 ms/frame and starved every
+ * lower-priority thread (SRP never finished a single frame). */
 
 /* Heat overlay rendering: normalized values below this stay fully
  * transparent; above, alpha ramps up to the (quality-scaled) maximum. */
@@ -61,24 +60,32 @@ volatile uint32_t g_app_camera_dma2d_copy_count = 0U;
 volatile uint32_t g_app_camera_dma2d_fallback_count = 0U;
 volatile uint32_t g_app_camera_dma2d_error_code = 0U;
 
-/* CPU-only shared state; cached external RAM keeps internal SRAM for code.
- * Never read before first write (Set/Draw guard on the enabled flag). */
-static AppCameraDisplayAcousticOverlay_t s_acoustic_overlay
-  __attribute__((section(".EXTRAM"), aligned(32)));
-static uint16_t s_camera_display_compose_buffer[APP_CAMERA_DISPLAY_WIDTH * APP_CAMERA_DISPLAY_HEIGHT]
-  __attribute__((section(".EXTRAM"), aligned(32)));
+/* Swap worker: the DCMIPP frame ISR only queues the completed frame address;
+ * compose + overlay drawing runs on a low-priority thread so the ISR stays
+ * in the microsecond range (a full software overlay pass can take tens of
+ * milliseconds and previously starved the SAI/PCMD interrupts). */
+#define APP_CAMERA_DISPLAY_SWAP_EVENT 0x1UL
+static TX_EVENT_FLAGS_GROUP s_swap_events;
+static volatile uint32_t s_swap_pending_addr = 0U;
+static volatile uint8_t s_swap_worker_ready = 0U;
 
-/* Heat palettes (256-entry RGB565 LUTs) + fixed-point bilinear sample maps.
- * Built at runtime (never read before s_heat_luts_ready), CPU-only and small
- * enough to live in D-cache, so cached external RAM is fine. */
-static uint16_t s_heat_palette_lut[3][256] __attribute__((section(".EXTRAM"), aligned(32)));
-static uint8_t s_heat_alpha_lut[256] __attribute__((section(".EXTRAM"), aligned(32)));
-static uint16_t s_heat_u0[APP_CAMERA_DISPLAY_WIDTH / 2U] __attribute__((section(".EXTRAM"), aligned(32)));
-static uint8_t s_heat_wu[APP_CAMERA_DISPLAY_WIDTH / 2U] __attribute__((section(".EXTRAM"), aligned(32)));
-static uint16_t s_heat_v0[APP_CAMERA_DISPLAY_HEIGHT / 2U] __attribute__((section(".EXTRAM"), aligned(32)));
-static uint8_t s_heat_wv[APP_CAMERA_DISPLAY_HEIGHT / 2U] __attribute__((section(".EXTRAM"), aligned(32)));
+/* Overlay state and heat LUTs are the per-pixel hot path of the blend loop.
+ * They MUST live in internal SRAM: in external RAM the 614 KB destination
+ * stream evicts them from D-cache every frame and each access becomes a
+ * HyperRAM round-trip (measured 108 M cycles per overlay draw; ~6 M with
+ * the data internal). Total footprint ~8 KB. */
+static AppCameraDisplayAcousticOverlay_t s_acoustic_overlay __attribute__((aligned(32)));
+static uint16_t s_heat_palette_lut[3][256] __attribute__((aligned(32)));
+static uint8_t s_heat_alpha_lut[256] __attribute__((aligned(32)));
+static uint16_t s_heat_u0[APP_CAMERA_DISPLAY_WIDTH / 2U] __attribute__((aligned(32)));
+static uint8_t s_heat_wu[APP_CAMERA_DISPLAY_WIDTH / 2U] __attribute__((aligned(32)));
+static uint16_t s_heat_v0[APP_CAMERA_DISPLAY_HEIGHT / 2U] __attribute__((aligned(32)));
+static uint8_t s_heat_wv[APP_CAMERA_DISPLAY_HEIGHT / 2U] __attribute__((aligned(32)));
 static volatile uint8_t s_heat_palette_index = 0U;
 static uint8_t s_heat_luts_ready = 0U;
+/* Scanline band touched by the last overlay draw (for targeted cache ops). */
+static int32_t s_overlay_dirty_y0 = 0;
+static int32_t s_overlay_dirty_y1 = 0;
 
 static int32_t AppCameraDisplay_MaxI32(int32_t a, int32_t b)
 {
@@ -158,46 +165,6 @@ static uint32_t AppCameraDisplay_GetUiFramebufferAddr(void)
 
   g_app_camera_ui_fb_addr = address;
   return address;
-}
-
-static void AppCameraDisplay_FlushCameraRect(uint32_t frame_addr,
-                                             int32_t x0,
-                                             int32_t y0,
-                                             int32_t x1,
-                                             int32_t y1,
-                                             uint8_t invalidate)
-{
-  uint32_t address;
-  uint32_t bytes;
-  uint32_t width;
-  uint32_t height;
-
-  x0 = AppCameraDisplay_MaxI32(x0, 0);
-  y0 = AppCameraDisplay_MaxI32(y0, 0);
-  x1 = AppCameraDisplay_MinI32(x1, (int32_t)APP_CAMERA_DISPLAY_WIDTH);
-  y1 = AppCameraDisplay_MinI32(y1, (int32_t)APP_CAMERA_DISPLAY_HEIGHT);
-
-  if ((frame_addr == 0U) || (x1 <= x0) || (y1 <= y0))
-  {
-    return;
-  }
-
-  width = (uint32_t)(x1 - x0);
-  height = (uint32_t)(y1 - y0);
-  address = frame_addr +
-            ((uint32_t)y0 * APP_CAMERA_DISPLAY_CAMERA_LINE_BYTES) +
-            ((uint32_t)x0 * APP_CAMERA_DISPLAY_BYTES_PER_PIXEL);
-  bytes = (((height - 1U) * APP_CAMERA_DISPLAY_CAMERA_LINE_BYTES) +
-           (width * APP_CAMERA_DISPLAY_BYTES_PER_PIXEL));
-
-  if (invalidate != 0U)
-  {
-    AppCameraDisplay_CleanInvalidateDCache(address, bytes);
-  }
-  else
-  {
-    AppCameraDisplay_CleanDCache(address, bytes);
-  }
 }
 
 static uint16_t AppCameraDisplay_Rgb565(uint8_t r, uint8_t g, uint8_t b)
@@ -451,14 +418,9 @@ static void AppCameraDisplay_DrawAcousticOverlay(uint32_t frame_addr)
   /* Alpha confidence scaling: quality 0..100 -> qscale 168..255. */
   qscale = 168U + (((uint32_t)overlay.quality_pct * 87U) / 100U);
 
-  AppCameraDisplay_FlushCameraRect(frame_addr,
-                                   0,
-                                   0,
-                                   (int32_t)APP_CAMERA_DISPLAY_WIDTH,
-                                   (int32_t)APP_CAMERA_DISPLAY_HEIGHT,
-                                   1U);
-
   framebuffer = (uint16_t *)frame_addr;
+  s_overlay_dirty_y0 = (int32_t)APP_CAMERA_DISPLAY_HEIGHT;
+  s_overlay_dirty_y1 = 0;
 
   for (uint32_t by = 0U; by < (APP_CAMERA_DISPLAY_HEIGHT / 2U); by++)
   {
@@ -469,6 +431,39 @@ static void AppCameraDisplay_DrawAcousticOverlay(uint32_t frame_addr)
     const uint8_t *row1 = row0 + APP_CAMERA_DISPLAY_FIELD_W;
     uint16_t *dst0 = framebuffer + ((by * 2U) * APP_CAMERA_DISPLAY_WIDTH);
     uint16_t *dst1 = dst0 + APP_CAMERA_DISPLAY_WIDTH;
+    uint32_t row_max = 0U;
+
+    /* Skip whole scanline pairs when both source field rows stay below the
+     * transparency threshold - the common case for localized sources. */
+    for (uint32_t i = 0U; i < APP_CAMERA_DISPLAY_FIELD_W; i++)
+    {
+      if (row0[i] > row_max)
+      {
+        row_max = row0[i];
+      }
+      if (row1[i] > row_max)
+      {
+        row_max = row1[i];
+      }
+    }
+    if (row_max < APP_CAMERA_DISPLAY_HEAT_ALPHA_MIN_VALUE)
+    {
+      continue;
+    }
+
+    /* DCMIPP wrote this frame via DMA: refresh the two destination lines in
+     * the cache before the read-modify-write blend, and remember the band
+     * for the post-draw clean. */
+    AppCameraDisplay_InvalidateDCache((uint32_t)dst0,
+                                      2U * APP_CAMERA_DISPLAY_CAMERA_LINE_BYTES);
+    if ((int32_t)(by * 2U) < s_overlay_dirty_y0)
+    {
+      s_overlay_dirty_y0 = (int32_t)(by * 2U);
+    }
+    if ((int32_t)((by * 2U) + 2U) > s_overlay_dirty_y1)
+    {
+      s_overlay_dirty_y1 = (int32_t)((by * 2U) + 2U);
+    }
 
     for (uint32_t bx = 0U; bx < (APP_CAMERA_DISPLAY_WIDTH / 2U); bx++)
     {
@@ -514,16 +509,39 @@ static void AppCameraDisplay_DrawAcousticOverlay(uint32_t frame_addr)
   {
     if (overlay.markers[i].strength >= APP_CAMERA_DISPLAY_MARKER_MIN_STRENGTH)
     {
-      AppCameraDisplay_DrawMarker(framebuffer, &overlay.markers[i], (i == 0U) ? 1U : 0U);
+      const int32_t band = 28;
+      int32_t my0 = (int32_t)overlay.markers[i].y - band;
+      int32_t my1 = (int32_t)overlay.markers[i].y + band;
+
+      my0 = AppCameraDisplay_MaxI32(my0, 0);
+      my1 = AppCameraDisplay_MinI32(my1, (int32_t)APP_CAMERA_DISPLAY_HEIGHT);
+      if (my1 > my0)
+      {
+        AppCameraDisplay_InvalidateDCache(frame_addr +
+                                            ((uint32_t)my0 * APP_CAMERA_DISPLAY_CAMERA_LINE_BYTES),
+                                          (uint32_t)(my1 - my0) * APP_CAMERA_DISPLAY_CAMERA_LINE_BYTES);
+        AppCameraDisplay_DrawMarker(framebuffer, &overlay.markers[i], (i == 0U) ? 1U : 0U);
+        if (my0 < s_overlay_dirty_y0)
+        {
+          s_overlay_dirty_y0 = my0;
+        }
+        if (my1 > s_overlay_dirty_y1)
+        {
+          s_overlay_dirty_y1 = my1;
+        }
+      }
     }
   }
 
-  AppCameraDisplay_FlushCameraRect(frame_addr,
-                                   0,
-                                   0,
-                                   (int32_t)APP_CAMERA_DISPLAY_WIDTH,
-                                   (int32_t)APP_CAMERA_DISPLAY_HEIGHT,
-                                   0U);
+  /* Write the touched band back for the LTDC scan-out. */
+  if (s_overlay_dirty_y1 > s_overlay_dirty_y0)
+  {
+    AppCameraDisplay_CleanDCache(frame_addr +
+                                   ((uint32_t)s_overlay_dirty_y0 * APP_CAMERA_DISPLAY_CAMERA_LINE_BYTES),
+                                 (uint32_t)(s_overlay_dirty_y1 - s_overlay_dirty_y0) *
+                                   APP_CAMERA_DISPLAY_CAMERA_LINE_BYTES);
+  }
+
   g_app_camera_overlay_draw_cycles = DWT->CYCCNT - cycles_start;
   g_app_camera_overlay_draw_count++;
 }
@@ -635,99 +653,12 @@ static int32_t AppCameraDisplay_DisableCameraLayer(void)
   return APP_CAMERA_DISPLAY_OK;
 }
 
-static uint8_t AppCameraDisplay_CopyFrameDma2d(uint32_t src_addr,
-                                               uint32_t dst_addr)
-{
-#if APP_CAMERA_DISPLAY_DMA2D_COPY_ENABLE
-  HAL_StatusTypeDef status;
-
-  if ((src_addr == 0U) ||
-      (dst_addr == 0U) ||
-      (hdma2d.Instance == 0) ||
-      (hdma2d.State != HAL_DMA2D_STATE_READY))
-  {
-    g_app_camera_dma2d_fallback_count++;
-    return 0U;
-  }
-
-  hdma2d.Init.Mode = DMA2D_M2M;
-  hdma2d.Init.ColorMode = DMA2D_OUTPUT_RGB565;
-  hdma2d.Init.OutputOffset = 0U;
-  hdma2d.Init.AlphaInverted = DMA2D_REGULAR_ALPHA;
-  hdma2d.Init.RedBlueSwap = DMA2D_RB_REGULAR;
-  hdma2d.Init.BytesSwap = DMA2D_BYTES_REGULAR;
-  hdma2d.Init.LineOffsetMode = DMA2D_LOM_PIXELS;
-  hdma2d.LayerCfg[DMA2D_FOREGROUND_LAYER].InputOffset = 0U;
-  hdma2d.LayerCfg[DMA2D_FOREGROUND_LAYER].InputColorMode = DMA2D_INPUT_RGB565;
-  hdma2d.LayerCfg[DMA2D_FOREGROUND_LAYER].AlphaMode = DMA2D_NO_MODIF_ALPHA;
-  hdma2d.LayerCfg[DMA2D_FOREGROUND_LAYER].InputAlpha = 255U;
-  hdma2d.LayerCfg[DMA2D_FOREGROUND_LAYER].AlphaInverted = DMA2D_REGULAR_ALPHA;
-  hdma2d.LayerCfg[DMA2D_FOREGROUND_LAYER].RedBlueSwap = DMA2D_RB_REGULAR;
-
-  AppCameraDisplay_CleanInvalidateDCache(dst_addr, APP_CAMERA_DISPLAY_CAMERA_FRAME_BYTES);
-
-  status = HAL_DMA2D_Init(&hdma2d);
-  if (status == HAL_OK)
-  {
-    status = HAL_DMA2D_ConfigLayer(&hdma2d, DMA2D_FOREGROUND_LAYER);
-  }
-  if (status == HAL_OK)
-  {
-    status = HAL_DMA2D_Start(&hdma2d,
-                             src_addr,
-                             dst_addr,
-                             APP_CAMERA_DISPLAY_WIDTH,
-                             APP_CAMERA_DISPLAY_HEIGHT);
-  }
-  if (status == HAL_OK)
-  {
-    status = HAL_DMA2D_PollForTransfer(&hdma2d, APP_CAMERA_DISPLAY_DMA2D_TIMEOUT_MS);
-  }
-  if (status != HAL_OK)
-  {
-    g_app_camera_dma2d_error_code = hdma2d.ErrorCode;
-    if (hdma2d.State != HAL_DMA2D_STATE_READY)
-    {
-      (void)HAL_DMA2D_Abort(&hdma2d);
-    }
-    g_app_camera_dma2d_fallback_count++;
-    return 0U;
-  }
-
-  AppCameraDisplay_InvalidateDCache(dst_addr, APP_CAMERA_DISPLAY_CAMERA_FRAME_BYTES);
-  g_app_camera_dma2d_copy_count++;
-  return 1U;
-#else
-  (void)src_addr;
-  (void)dst_addr;
-  return 0U;
-#endif
-}
-
+/* The completed DCMIPP buffer is displayed directly (no compose copy); the
+ * overlay draws into it before the vblank flip. Only the overlay-touched
+ * region needs cache maintenance. */
 static uint32_t AppCameraDisplay_PrepareDisplayFrame(uint32_t frame_addr)
 {
-#if APP_CAMERA_DISPLAY_COMPOSE_ENABLE
-  const uint32_t compose_addr = (uint32_t)s_camera_display_compose_buffer;
-
-  if (frame_addr == 0U)
-  {
-    return 0U;
-  }
-
-  AppCameraDisplay_InvalidateDCache(frame_addr, APP_CAMERA_DISPLAY_CAMERA_FRAME_BYTES);
-  if (AppCameraDisplay_CopyFrameDma2d(frame_addr, compose_addr) == 0U)
-  {
-    (void)memcpy((void *)compose_addr,
-                 (const void *)frame_addr,
-                 APP_CAMERA_DISPLAY_CAMERA_FRAME_BYTES);
-    AppCameraDisplay_CleanDCache(compose_addr, APP_CAMERA_DISPLAY_CAMERA_FRAME_BYTES);
-  }
-  g_app_camera_compose_addr = compose_addr;
-  g_app_camera_compose_count++;
-  return compose_addr;
-#else
   return frame_addr;
-#endif
 }
 
 int32_t AppCameraDisplay_InitLayers(uint32_t initial_camera_addr)
@@ -920,14 +851,26 @@ void AppCameraDisplay_RefreshColorKeyHole(int32_t x,
   AppCameraDisplay_CleanDCache(clean_start, clean_bytes);
 }
 
+/* Called from the DCMIPP frame ISR: only records the newest completed frame
+ * and wakes the worker. Overwrites any not-yet-consumed frame (latest wins). */
 void AppCameraDisplay_RequestSwap(uint32_t frame_addr)
 {
-  uint32_t display_addr;
-
   if (((g_app_camera_display_flags & APP_CAMERA_DISPLAY_FLAG_READY) == 0U) || (frame_addr == 0U))
   {
     return;
   }
+
+  s_swap_pending_addr = frame_addr;
+  if (s_swap_worker_ready != 0U)
+  {
+    (void)tx_event_flags_set(&s_swap_events, APP_CAMERA_DISPLAY_SWAP_EVENT, TX_OR);
+  }
+}
+
+/* Overlay + LTDC flip for one camera frame (worker context). */
+static void AppCameraDisplay_ProcessSwap(uint32_t frame_addr)
+{
+  uint32_t display_addr;
 
   AppCameraDisplay_SnapshotLtdc();
   if ((g_app_camera_ltdc_isr2 & APP_CAMERA_DISPLAY_LTDC_ERROR_MASK) != 0U)
@@ -946,12 +889,56 @@ void AppCameraDisplay_RequestSwap(uint32_t frame_addr)
   g_app_camera_display_addr = display_addr;
   if ((g_app_camera_display_flags & APP_CAMERA_DISPLAY_FLAG_VISIBLE) != 0U)
   {
+    /* Cache maintenance happens inside the draw, per touched scanline band. */
     AppCameraDisplay_DrawAcousticOverlay(display_addr);
     LTDC_Layer1->CFBAR = display_addr;
     AppCameraDisplay_ReloadLayer(LTDC_Layer1, LTDC_LxRCR_VBR);
   }
   g_app_camera_ltdc_swap_count++;
   AppCameraDisplay_SnapshotLtdc();
+}
+
+UINT AppCameraDisplay_WorkerInit(void)
+{
+  UINT status = tx_event_flags_create(&s_swap_events, "cam_swap");
+
+  if (status == TX_SUCCESS)
+  {
+    s_swap_worker_ready = 1U;
+  }
+  return status;
+}
+
+void AppCameraDisplay_WorkerThreadEntry(ULONG thread_input)
+{
+  ULONG events;
+
+  (void)thread_input;
+
+  while (1)
+  {
+    if (tx_event_flags_get(&s_swap_events,
+                           APP_CAMERA_DISPLAY_SWAP_EVENT,
+                           TX_OR_CLEAR,
+                           &events,
+                           TX_WAIT_FOREVER) != TX_SUCCESS)
+    {
+      tx_thread_sleep(1U);
+      continue;
+    }
+
+    {
+      /* Consume the newest pending frame; RequestSwap may overwrite this
+       * while we draw, which simply queues the next wakeup. */
+      const uint32_t frame_addr = s_swap_pending_addr;
+
+      s_swap_pending_addr = 0U;
+      if (frame_addr != 0U)
+      {
+        AppCameraDisplay_ProcessSwap(frame_addr);
+      }
+    }
+  }
 }
 
 void AppCameraDisplay_GetStatus(AppCameraDisplayStatus_t *status)

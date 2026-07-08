@@ -82,7 +82,10 @@ static uint8_t s_bmp_row[APP_MEDIA_FB_WIDTH * 3U * APP_MEDIA_BMP_ROWS_PER_WRITE]
 static uint8_t s_jpeg_buffer[APP_MEDIA_JPEG_MAX_BYTES] __attribute__((aligned(32)));
 static uint8_t s_jpeg_decode_buffer[APP_MEDIA_JPEG_DECODE_MAX_BYTES] __attribute__((section(".EXTRAM"), aligned(32)));
 static uint16_t s_preview_buffer[APP_MEDIA_PREVIEW_WIDTH * APP_MEDIA_PREVIEW_HEIGHT] __attribute__((section(".EXTRAM"), aligned(32)));
-static AppMediaAviIndex_t s_avi_index[APP_MEDIA_MAX_VIDEO_FRAMES];
+/* CPU-only FileX/AVI metadata (14 KB); lives in cached external RAM to keep
+ * internal SRAM free for thread stacks. Only touched by the media thread,
+ * well after HyperRAM is up. */
+static AppMediaAviIndex_t s_avi_index[APP_MEDIA_MAX_VIDEO_FRAMES] __attribute__((section(".EXTRAM"), aligned(32)));
 
 static AppMediaStatus_t s_status;
 static JPEG_HandleTypeDef s_jpeg_handle;
