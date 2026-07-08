@@ -151,6 +151,7 @@ private:
     AppTextLabel perfValue[PerfCount];
     AppTextLabel sysInfoName[SysInfoCount];
     AppTextLabel sysInfoValue[SysInfoCount];
+    AppTextLabel sysAccelLabel;
 
     /* ---- params page ---- */
     AppTextLabel paramsTitle;

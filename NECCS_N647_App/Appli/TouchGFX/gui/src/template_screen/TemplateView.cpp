@@ -566,6 +566,12 @@ void TemplateView::setupSystemPage()
         add(sysInfoName[i]);
         add(sysInfoValue[i]);
     }
+
+    /* Hardware-acceleration credit line (the N6 story for the judges). */
+    setupLabel(sysAccelLabel, ContentX + 24, 560, 892, 22, 1,
+               "N6 硬件加速: GPU2D 渲染 · DMA2D · JPEG 编码 · Helium DSP · NPU 就绪",
+               ColorBlueDim, AppTextLabel::ALIGN_CENTER);
+    add(sysAccelLabel);
 }
 
 void TemplateView::setupParamsPage()
@@ -1100,6 +1106,7 @@ void TemplateView::refreshVisibility()
     sysTitle.setVisible(sysVisible);
     sysPerfCard.setVisible(sysVisible);
     sysDecoSonar.setVisible(sysVisible);
+    sysAccelLabel.setVisible(sysVisible);
     sysInfoCard.setVisible(sysVisible);
     for (uint32_t i = 0U; i < PerfCount; ++i)
     {
