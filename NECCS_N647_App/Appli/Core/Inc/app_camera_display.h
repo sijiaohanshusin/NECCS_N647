@@ -42,12 +42,15 @@ extern "C" {
   (APP_CAMERA_DISPLAY_FIELD_W * APP_CAMERA_DISPLAY_FIELD_H)
 #define APP_CAMERA_DISPLAY_MARKER_MAX         3U
 
-/* Source marker in camera-frame pixel coordinates. */
+/* Source marker in camera-frame pixel coordinates. The primary marker also
+ * carries the estimated level (array peak dBFS) printed beside the cross. */
 typedef struct
 {
   uint16_t x;
   uint16_t y;
   uint8_t strength;
+  int8_t level_dbfs;
+  uint8_t level_valid;
 } AppCameraDisplayMarker_t;
 
 typedef struct
@@ -104,6 +107,9 @@ void AppCameraDisplay_SetAcousticField(const uint8_t *field,
                                        uint8_t enabled);
 void AppCameraDisplay_SetHeatPalette(uint8_t palette);
 uint8_t AppCameraDisplay_GetHeatPalette(void);
+/* Fading dot trail of the primary source position. */
+void AppCameraDisplay_SetTrailEnabled(uint8_t enabled);
+uint8_t AppCameraDisplay_GetTrailEnabled(void);
 /* Copy the currently displayed camera frame (with heat overlay) into dst
  * (APP_CAMERA_DISPLAY_WIDTH x HEIGHT RGB565). Returns 1 when the layer is
  * visible and a frame was copied; used by the screenshot compositor. */

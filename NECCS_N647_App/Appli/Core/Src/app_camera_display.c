@@ -36,12 +36,23 @@
 extern LTDC_HandleTypeDef hltdc;
 extern DMA2D_HandleTypeDef hdma2d;
 
+#define APP_CAMERA_DISPLAY_TRAIL_MAX 20U
+
+typedef struct
+{
+  uint16_t x;
+  uint16_t y;
+  uint8_t life; /* 0 = free slot; decays on every field update */
+} AppCameraDisplayTrailDot_t;
+
 typedef struct
 {
   uint8_t enabled;
   uint8_t quality_pct;
   uint8_t marker_count;
+  uint8_t trail_enabled;
   AppCameraDisplayMarker_t markers[APP_CAMERA_DISPLAY_MARKER_MAX];
+  AppCameraDisplayTrailDot_t trail[APP_CAMERA_DISPLAY_TRAIL_MAX];
   uint8_t field[APP_CAMERA_DISPLAY_FIELD_COUNT];
 } AppCameraDisplayAcousticOverlay_t;
 
@@ -346,6 +357,89 @@ static void AppCameraDisplay_DrawSolidRect(uint16_t *framebuffer,
   }
 }
 
+/* 5x7 glyphs for the on-frame level label ("-38dB"). */
+static const uint8_t *AppCameraDisplay_LevelGlyph(char input)
+{
+  static const uint8_t g0[7] = {0x0E, 0x11, 0x13, 0x15, 0x19, 0x11, 0x0E};
+  static const uint8_t g1[7] = {0x04, 0x0C, 0x04, 0x04, 0x04, 0x04, 0x0E};
+  static const uint8_t g2[7] = {0x0E, 0x11, 0x01, 0x02, 0x04, 0x08, 0x1F};
+  static const uint8_t g3[7] = {0x1E, 0x01, 0x01, 0x0E, 0x01, 0x01, 0x1E};
+  static const uint8_t g4[7] = {0x02, 0x06, 0x0A, 0x12, 0x1F, 0x02, 0x02};
+  static const uint8_t g5[7] = {0x1F, 0x10, 0x10, 0x1E, 0x01, 0x01, 0x1E};
+  static const uint8_t g6[7] = {0x06, 0x08, 0x10, 0x1E, 0x11, 0x11, 0x0E};
+  static const uint8_t g7[7] = {0x1F, 0x01, 0x02, 0x04, 0x08, 0x08, 0x08};
+  static const uint8_t g8[7] = {0x0E, 0x11, 0x11, 0x0E, 0x11, 0x11, 0x0E};
+  static const uint8_t g9[7] = {0x0E, 0x11, 0x11, 0x0F, 0x01, 0x02, 0x0C};
+  static const uint8_t gminus[7] = {0x00, 0x00, 0x00, 0x1F, 0x00, 0x00, 0x00};
+  static const uint8_t gd[7] = {0x01, 0x01, 0x0D, 0x13, 0x11, 0x13, 0x0D};
+  static const uint8_t gB[7] = {0x1E, 0x11, 0x11, 0x1E, 0x11, 0x11, 0x1E};
+  static const uint8_t gblank[7] = {0, 0, 0, 0, 0, 0, 0};
+
+  switch (input)
+  {
+  case '0': return g0;
+  case '1': return g1;
+  case '2': return g2;
+  case '3': return g3;
+  case '4': return g4;
+  case '5': return g5;
+  case '6': return g6;
+  case '7': return g7;
+  case '8': return g8;
+  case '9': return g9;
+  case '-': return gminus;
+  case 'd': return gd;
+  case 'B': return gB;
+  default: return gblank;
+  }
+}
+
+/* Draw text at 2x scale with a 1px dark outline pad for readability. */
+static void AppCameraDisplay_DrawLevelText(uint16_t *framebuffer,
+                                           int32_t x,
+                                           int32_t y,
+                                           const char *text)
+{
+  const uint16_t fg = AppCameraDisplay_Rgb565(245U, 246U, 240U);
+  const uint16_t bg = AppCameraDisplay_Rgb565(10U, 16U, 24U);
+  const int32_t scale = 2;
+  int32_t len = 0;
+
+  while (text[len] != '\0')
+  {
+    ++len;
+  }
+
+  AppCameraDisplay_DrawSolidRect(framebuffer,
+                                 x - 3,
+                                 y - 3,
+                                 (len * 6 * scale) + 4,
+                                 (7 * scale) + 6,
+                                 bg);
+
+  for (int32_t i = 0; i < len; ++i)
+  {
+    const uint8_t *rows = AppCameraDisplay_LevelGlyph(text[i]);
+    const int32_t gx = x + (i * 6 * scale);
+
+    for (int32_t row = 0; row < 7; ++row)
+    {
+      for (int32_t col = 0; col < 5; ++col)
+      {
+        if ((rows[row] & (1U << (4 - col))) != 0U)
+        {
+          AppCameraDisplay_DrawSolidRect(framebuffer,
+                                         gx + (col * scale),
+                                         y + (row * scale),
+                                         scale,
+                                         scale,
+                                         fg);
+        }
+      }
+    }
+  }
+}
+
 static void AppCameraDisplay_DrawMarker(uint16_t *framebuffer,
                                         const AppCameraDisplayMarker_t *marker,
                                         uint8_t is_primary)
@@ -374,6 +468,40 @@ static void AppCameraDisplay_DrawMarker(uint16_t *framebuffer,
     AppCameraDisplay_DrawSolidRect(framebuffer, x - box, y + box - 10, 2, 10, color);
     AppCameraDisplay_DrawSolidRect(framebuffer, x + box - 10, y + box - 2, 10, 2, color);
     AppCameraDisplay_DrawSolidRect(framebuffer, x + box - 2, y + box - 10, 2, 10, color);
+
+    if (marker->level_valid != 0U)
+    {
+      char text[8];
+      int32_t level = (int32_t)marker->level_dbfs;
+      uint32_t pos = 0U;
+
+      if (level < 0)
+      {
+        text[pos++] = '-';
+        level = -level;
+      }
+      if (level >= 10)
+      {
+        text[pos++] = (char)('0' + (level / 10));
+      }
+      text[pos++] = (char)('0' + (level % 10));
+      text[pos++] = 'd';
+      text[pos++] = 'B';
+      text[pos] = '\0';
+
+      /* Prefer the right side of the corner box; flip when clipped. */
+      {
+        const int32_t text_w = ((int32_t)pos * 12) + 4;
+        int32_t tx = x + box + 8;
+        const int32_t ty = y - box;
+
+        if ((tx + text_w) > (int32_t)APP_CAMERA_DISPLAY_WIDTH)
+        {
+          tx = x - box - 8 - text_w;
+        }
+        AppCameraDisplay_DrawLevelText(framebuffer, tx, ty, text);
+      }
+    }
   }
 }
 
@@ -549,6 +677,58 @@ static void AppCameraDisplay_DrawAcousticOverlay(uint32_t frame_addr)
 
     (void)memcpy(dst0 + px0, &s_overlay_linebuf[0][px0], span_bytes);
     (void)memcpy(dst1 + px0, &s_overlay_linebuf[1][px0], span_bytes);
+  }
+
+  /* Fading dot trail of the primary source path. */
+  if (overlay.trail_enabled != 0U)
+  {
+    for (uint32_t i = 0U; i < APP_CAMERA_DISPLAY_TRAIL_MAX; i++)
+    {
+      const AppCameraDisplayTrailDot_t *dot = &overlay.trail[i];
+
+      if (dot->life == 0U)
+      {
+        continue;
+      }
+
+      {
+        const int32_t dx = (int32_t)dot->x;
+        const int32_t dy = (int32_t)dot->y;
+        const int32_t dot_y0 = AppCameraDisplay_MaxI32(dy - 3, 0);
+        const int32_t dot_y1 = AppCameraDisplay_MinI32(dy + 3, (int32_t)APP_CAMERA_DISPLAY_HEIGHT);
+        const uint8_t a = (uint8_t)(30U + ((uint32_t)dot->life * 110U / 255U));
+        const uint16_t trail_color = AppCameraDisplay_Rgb565(140U, 220U, 255U);
+
+        if (dot_y1 <= dot_y0)
+        {
+          continue;
+        }
+
+        AppCameraDisplay_InvalidateDCache(frame_addr +
+                                            ((uint32_t)dot_y0 * APP_CAMERA_DISPLAY_CAMERA_LINE_BYTES),
+                                          (uint32_t)(dot_y1 - dot_y0) * APP_CAMERA_DISPLAY_CAMERA_LINE_BYTES);
+        for (int32_t yy = dot_y0; yy < dot_y1; ++yy)
+        {
+          uint16_t *pixel_row = framebuffer + ((uint32_t)yy * APP_CAMERA_DISPLAY_WIDTH);
+          const int32_t x0 = AppCameraDisplay_MaxI32(dx - 2, 0);
+          const int32_t x1 = AppCameraDisplay_MinI32(dx + 2, (int32_t)APP_CAMERA_DISPLAY_WIDTH);
+
+          for (int32_t xx = x0; xx < x1; ++xx)
+          {
+            pixel_row[xx] = AppCameraDisplay_BlendRgb565(pixel_row[xx], trail_color, a);
+          }
+        }
+
+        if (dot_y0 < s_overlay_dirty_y0)
+        {
+          s_overlay_dirty_y0 = dot_y0;
+        }
+        if (dot_y1 > s_overlay_dirty_y1)
+        {
+          s_overlay_dirty_y1 = dot_y1;
+        }
+      }
+    }
   }
 
   for (uint32_t i = 0U; i < overlay.marker_count; i++)
@@ -816,12 +996,66 @@ void AppCameraDisplay_SetAcousticField(const uint8_t *field,
     }
   }
 
+  /* Trail bookkeeping: age out old dots, push the primary position when it
+   * has moved. Runs at UI tick rate (~60 Hz); life 255 with decay 3 gives
+   * a dot roughly 1.4 s on screen. */
+  if (s_acoustic_overlay.trail_enabled != 0U)
+  {
+    static uint16_t s_trail_last_x = 0xFFFFU;
+    static uint16_t s_trail_last_y = 0xFFFFU;
+    static uint8_t s_trail_slot = 0U;
+
+    for (uint32_t i = 0U; i < APP_CAMERA_DISPLAY_TRAIL_MAX; i++)
+    {
+      if (s_acoustic_overlay.trail[i].life > 3U)
+      {
+        s_acoustic_overlay.trail[i].life -= 3U;
+      }
+      else
+      {
+        s_acoustic_overlay.trail[i].life = 0U;
+      }
+    }
+
+    if ((s_acoustic_overlay.enabled != 0U) && (s_acoustic_overlay.marker_count != 0U))
+    {
+      const uint16_t px = s_acoustic_overlay.markers[0].x;
+      const uint16_t py = s_acoustic_overlay.markers[0].y;
+      const int32_t moved_x = (int32_t)px - (int32_t)s_trail_last_x;
+      const int32_t moved_y = (int32_t)py - (int32_t)s_trail_last_y;
+
+      if (((moved_x * moved_x) + (moved_y * moved_y)) >= 64)
+      {
+        s_acoustic_overlay.trail[s_trail_slot].x = px;
+        s_acoustic_overlay.trail[s_trail_slot].y = py;
+        s_acoustic_overlay.trail[s_trail_slot].life = 255U;
+        s_trail_slot = (uint8_t)((s_trail_slot + 1U) % APP_CAMERA_DISPLAY_TRAIL_MAX);
+        s_trail_last_x = px;
+        s_trail_last_y = py;
+      }
+    }
+  }
+  else
+  {
+    memset(s_acoustic_overlay.trail, 0, sizeof(s_acoustic_overlay.trail));
+  }
+
   if (primask == 0U)
   {
     __enable_irq();
   }
 
   g_app_camera_overlay_update_count++;
+}
+
+void AppCameraDisplay_SetTrailEnabled(uint8_t enabled)
+{
+  s_acoustic_overlay.trail_enabled = (enabled != 0U) ? 1U : 0U;
+}
+
+uint8_t AppCameraDisplay_GetTrailEnabled(void)
+{
+  return s_acoustic_overlay.trail_enabled;
 }
 
 void AppCameraDisplay_SetHeatPalette(uint8_t palette)

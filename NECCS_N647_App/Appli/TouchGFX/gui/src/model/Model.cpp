@@ -276,6 +276,8 @@ typedef struct
     uint16_t x;
     uint16_t y;
     uint8_t strength;
+    int8_t level_dbfs;
+    uint8_t level_valid;
 } AppCameraDisplayMarker_t;
 
 static void AppCameraDisplay_SetAcousticField(const uint8_t* field,
@@ -301,6 +303,18 @@ static void AppCameraDisplay_SetHeatPalette(uint8_t palette)
 static uint8_t AppCameraDisplay_GetHeatPalette(void)
 {
     return 0U;
+}
+
+static uint8_t s_simTrailEnabled = 0U;
+
+static void AppCameraDisplay_SetTrailEnabled(uint8_t enabled)
+{
+    s_simTrailEnabled = enabled;
+}
+
+static uint8_t AppCameraDisplay_GetTrailEnabled(void)
+{
+    return s_simTrailEnabled;
 }
 
 static void AppCameraDisplay_SetVisible(uint8_t visible)
@@ -509,6 +523,13 @@ void pollAcoustic(AppUiSnapshot& snapshot)
         markers[markerCount].x = static_cast<uint16_t>((px < 0.0f) ? 0.0f : ((px > 639.0f) ? 639.0f : px));
         markers[markerCount].y = static_cast<uint16_t>((py < 0.0f) ? 0.0f : ((py > 479.0f) ? 479.0f : py));
         markers[markerCount].strength = acoustic.cand_strength[i];
+        /* The primary cross carries the array peak level (dBFS estimate);
+         * pcmdRawPeakDbfs is one tick stale, which is fine at 60 Hz. */
+        markers[markerCount].level_dbfs = snapshot.pcmdRawPeakDbfs;
+        markers[markerCount].level_valid =
+            ((markerCount == 0U) &&
+             (acoustic.valid != 0U) &&
+             ((snapshot.pcmdFlags & APP_UI_PCMD_FLAG_RAW_VALID) != 0U)) ? 1U : 0U;
         ++markerCount;
     }
 
@@ -591,6 +612,11 @@ void pollCameraDisplay(AppUiSnapshot& snapshot)
     snapshot.cameraDma2dCopyCount = display.dma2d_copy_count;
     snapshot.cameraDisplayErrorCount = display.error_count;
     snapshot.cameraDma2dErrorCode = display.dma2d_error_code;
+#if defined(STM32N647xx)
+    snapshot.overlayDrawCycles = g_app_camera_overlay_draw_cycles;
+#else
+    snapshot.overlayDrawCycles = 0U;
+#endif
 }
 
 void pollTouch(AppUiSnapshot& snapshot)
@@ -658,6 +684,12 @@ void pollMedia(AppUiSnapshot& snapshot)
     copyFileName(snapshot.mediaLastFile, media.last_file, sizeof(snapshot.mediaLastFile));
     copyFileName(snapshot.mediaSelectedFile, media.selected_file, sizeof(snapshot.mediaSelectedFile));
 
+#if defined(STM32N647xx) && defined(DEBUG)
+    snapshot.mediaEncodeMs = static_cast<uint16_t>(g_app_media_perf_encode_ms);
+#else
+    snapshot.mediaEncodeMs = 0U;
+#endif
+
     AppMediaPreviewInfo_t preview;
     memset(&preview, 0, sizeof(preview));
     snapshot.mediaPreviewPixels = AppMedia_GetPreviewBuffer(&preview);
@@ -697,7 +729,10 @@ volatile uint32_t g_app_ui_request_screen = 0xFFU;
 Model::Model()
     : modelListener(0),
       tickCount(0U),
-      bootTicks(0U)
+      bootTicks(0U),
+      triggerCooldown(0U),
+      triggerArmed(false),
+      triggerPrevHot(false)
 {
     memset(&snapshot, 0, sizeof(snapshot));
     snapshot.activeScreen = APP_UI_SCREEN_BOOT;
@@ -737,6 +772,33 @@ void Model::tick()
             setActiveScreen(APP_UI_SCREEN_IMAGE);
         }
     }
+
+    /* Acoustic trigger: on a rising "hot" edge (valid detection above the
+     * level threshold) capture a screenshot, then hold off for ~6 s. */
+    snapshot.trailEnabled = AppCameraDisplay_GetTrailEnabled();
+    if (triggerCooldown > 0U)
+    {
+        --triggerCooldown;
+    }
+    if (triggerArmed && (snapshot.activeScreen != APP_UI_SCREEN_BOOT))
+    {
+        const bool hot =
+            ((snapshot.acousticFlags & APP_UI_ACOUSTIC_FLAG_VALID) != 0U) &&
+            (snapshot.qualityPct >= 12U) &&
+            (snapshot.pcmdRawPeakDbfs >= -32);
+        if (hot && !triggerPrevHot && (triggerCooldown == 0U))
+        {
+            requestScreenshot();
+            ++snapshot.triggerCount;
+            triggerCooldown = 360U;
+        }
+        triggerPrevHot = hot;
+    }
+    else
+    {
+        triggerPrevHot = false;
+    }
+    snapshot.triggerArmed = triggerArmed ? 1U : 0U;
 
     g_app_ui_debug[0] = tickCount;
     g_app_ui_debug[1] = bootTicks;
@@ -828,6 +890,29 @@ void Model::cycleHeatPalette()
     const uint8_t next = static_cast<uint8_t>((AppCameraDisplay_GetHeatPalette() + 1U) % 3U);
     AppCameraDisplay_SetHeatPalette(next);
     snapshot.heatPalette = next;
+    if (modelListener != 0)
+    {
+        modelListener->uiSnapshotUpdated(snapshot);
+    }
+}
+
+void Model::toggleTrigger()
+{
+    triggerArmed = !triggerArmed;
+    triggerPrevHot = false;
+    triggerCooldown = 0U;
+    snapshot.triggerArmed = triggerArmed ? 1U : 0U;
+    if (modelListener != 0)
+    {
+        modelListener->uiSnapshotUpdated(snapshot);
+    }
+}
+
+void Model::toggleTrail()
+{
+    const uint8_t next = (AppCameraDisplay_GetTrailEnabled() != 0U) ? 0U : 1U;
+    AppCameraDisplay_SetTrailEnabled(next);
+    snapshot.trailEnabled = next;
     if (modelListener != 0)
     {
         modelListener->uiSnapshotUpdated(snapshot);

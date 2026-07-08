@@ -48,6 +48,8 @@ public:
     void cycleScene();
     void adjustTemperature(int8_t deltaC);
     void cycleHeatPalette();
+    void toggleTrigger();
+    void toggleTrail();
     void requestScreenshot();
     void toggleRecording();
     void refreshMedia();

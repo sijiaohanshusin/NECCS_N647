@@ -101,6 +101,13 @@ typedef struct
   char selected_file[APP_MEDIA_FILE_NAME_LEN];
 } AppMediaStatus_t;
 
+#ifdef DEBUG
+/* Per-stage timing of the last recorded frame (ms), for perf HUD/GDB. */
+extern volatile uint32_t g_app_media_perf_compose_ms;
+extern volatile uint32_t g_app_media_perf_encode_ms;
+extern volatile uint32_t g_app_media_perf_write_ms;
+#endif
+
 UINT AppMedia_Init(VOID *memory_ptr);
 uint32_t AppMedia_RequestScreenshot(void);
 uint32_t AppMedia_RequestRecordStart(void);

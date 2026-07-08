@@ -42,9 +42,9 @@ private:
     static const uint32_t StripCount = 4U;
     static const uint32_t MicCount = 32U;
     static const uint32_t PerfCount = 5U;
-    static const uint32_t SysInfoCount = 8U;
+    static const uint32_t SysInfoCount = 10U;
     static const uint32_t ProfileCount = 3U;
-    static const uint32_t ParamRowCount = 4U;
+    static const uint32_t ParamRowCount = 5U;
     static const uint32_t MediaInfoCount = 8U;
     static const uint32_t MediaActionCount = 5U;
     static const uint32_t BootItemCount = 5U;
@@ -120,6 +120,7 @@ private:
     AppTextLabel railModeTitle;
     AppTextLabel railModeValue;
     AppTextLabel railSceneValue;
+    AppTextLabel railCandLabel[2];
     touchgfx::Box stripPanel;
     AppTextLabel stripLabel[StripCount];
 

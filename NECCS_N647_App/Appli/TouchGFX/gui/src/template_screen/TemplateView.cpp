@@ -343,10 +343,10 @@ void TemplateView::setupImagePage()
     }
 
     /* right data rail */
-    railCard[0].setPosition(RailX, 60, RailW, 122);
-    railCard[1].setPosition(RailX, 190, RailW, 112);
-    railCard[2].setPosition(RailX, 310, RailW, 102);
-    railCard[3].setPosition(RailX, 420, RailW, 88);
+    railCard[0].setPosition(RailX, 60, RailW, 132);
+    railCard[1].setPosition(RailX, 200, RailW, 104);
+    railCard[2].setPosition(RailX, 312, RailW, 104);
+    railCard[3].setPosition(RailX, 424, RailW, 84);
     for (uint32_t i = 0U; i < RailCardCount; ++i)
     {
         railCard[i].setStyle(ColorPanel, 10U);
@@ -354,44 +354,58 @@ void TemplateView::setupImagePage()
         add(railCard[i]);
     }
 
-    setupLabel(railSourceTitle, RailX + 14, 70, 144, 20, 1, "声源方位", ColorMuted);
-    setupLabel(railTheta, RailX + 14, 92, 144, 26, 2, "-- °", ColorText);
-    setupLabel(railPhi, RailX + 14, 120, 144, 26, 2, "-- °", ColorText);
+    setupLabel(railSourceTitle, RailX + 14, 68, 144, 18, 1, "声源方位", ColorMuted);
+    setupLabel(railTheta, RailX + 14, 88, 144, 24, 2, "-- °", ColorText);
+    setupLabel(railPhi, RailX + 14, 112, 144, 24, 2, "-- °", ColorText);
     add(railSourceTitle);
     add(railTheta);
     add(railPhi);
 
-    railQualityTrack.setPosition(RailX + 14, 158, 144, 6);
+    railQualityTrack.setPosition(RailX + 14, 142, 144, 5);
     railQualityTrack.setColor(ColorPanel2);
     add(railQualityTrack);
-    railQualityFill.setPosition(RailX + 14, 158, 4, 6);
+    railQualityFill.setPosition(RailX + 14, 142, 4, 5);
     railQualityFill.setColor(ColorBlue);
     add(railQualityFill);
 
-    setupLabel(railStateTitle, RailX + 14, 200, 144, 20, 1, "链路状态", ColorMuted);
+    /* Secondary source rows (multi-source list). */
+    for (uint32_t i = 0U; i < 2U; ++i)
+    {
+        setupLabel(railCandLabel[i],
+                   RailX + 14,
+                   static_cast<int16_t>(152 + (i * 18)),
+                   144,
+                   17,
+                   1,
+                   "",
+                   rgb(120, 214, 255));
+        add(railCandLabel[i]);
+    }
+
+    setupLabel(railStateTitle, RailX + 14, 208, 144, 18, 1, "链路状态", ColorMuted);
     add(railStateTitle);
     static const char* stateNames[RailStateRows] = {"麦阵", "相机", "SD"};
     for (uint32_t i = 0U; i < RailStateRows; ++i)
     {
-        const int16_t y = static_cast<int16_t>(224 + (i * 24));
+        const int16_t y = static_cast<int16_t>(230 + (i * 23));
         setupLabel(railStateName[i], RailX + 14, y, 60, 20, 1, stateNames[i], ColorMuted);
         setupLabel(railStateValue[i], RailX + 70, y, 88, 20, 1, "等待", ColorAmber, AppTextLabel::ALIGN_RIGHT);
         add(railStateName[i]);
         add(railStateValue[i]);
     }
 
-    setupLabel(railPerfTitle, RailX + 14, 320, 144, 20, 1, "性能", ColorMuted);
+    setupLabel(railPerfTitle, RailX + 14, 320, 144, 18, 1, "性能", ColorMuted);
     setupLabel(railPerfMs, RailX + 14, 342, 144, 24, 2, "SRP --", ColorText);
-    setupLabel(railPerfFps, RailX + 14, 368, 144, 20, 1, "热图 --", ColorMuted);
-    setupLabel(railPerfCam, RailX + 14, 388, 144, 20, 1, "相机 --", ColorMuted);
+    setupLabel(railPerfFps, RailX + 14, 370, 144, 18, 1, "热图 --", ColorMuted);
+    setupLabel(railPerfCam, RailX + 14, 390, 144, 18, 1, "相机 --", ColorMuted);
     add(railPerfTitle);
     add(railPerfMs);
     add(railPerfFps);
     add(railPerfCam);
 
-    setupLabel(railModeTitle, RailX + 14, 430, 144, 20, 1, "Wide32 · 48k", ColorMuted);
+    setupLabel(railModeTitle, RailX + 14, 432, 144, 18, 1, "Wide32 · 48k", ColorMuted);
     setupLabel(railModeValue, RailX + 14, 452, 144, 24, 2, "标准", ColorBlue);
-    setupLabel(railSceneValue, RailX + 14, 478, 144, 20, 1, "通用场景", ColorMuted);
+    setupLabel(railSceneValue, RailX + 14, 478, 144, 18, 1, "通用场景", ColorMuted);
     add(railModeTitle);
     add(railModeValue);
     add(railSceneValue);
@@ -486,10 +500,10 @@ void TemplateView::setupSystemPage()
         add(perfValue[i]);
     }
 
-    static const char* infoNames[SysInfoCount] = {"电池", "系统电压", "电流", "触摸", "相机帧", "显示错误", "UI 帧率", "版本"};
+    static const char* infoNames[SysInfoCount] = {"电池", "系统电压", "电流", "触摸", "相机帧", "显示错误", "热图渲染", "录像编码", "触发次数", "版本"};
     for (uint32_t i = 0U; i < SysInfoCount; ++i)
     {
-        const int16_t y = static_cast<int16_t>(140 + (i * 48));
+        const int16_t y = static_cast<int16_t>(136 + (i * 41));
         setupLabel(sysInfoName[i], ContentX + 584, y, 110, 22, 1, infoNames[i], ColorMuted);
         setupLabel(sysInfoValue[i], ContentX + 690, y, 200, 22, 1, "--", ColorText, AppTextLabel::ALIGN_RIGHT);
         add(sysInfoName[i]);
@@ -522,27 +536,27 @@ void TemplateView::setupParamsPage()
         add(profileTouch[i]);
     }
 
-    static const char* rowNames[ParamRowCount] = {"场景模式", "频带", "温度 / 声速", "调色板"};
-    static const char* rowValues[ParamRowCount] = {"通用", "563 - 7875 Hz", "25℃ / 346 m/s", "铁红"};
+    static const char* rowNames[ParamRowCount] = {"场景模式", "频带", "温度 / 声速", "调色板", "声源轨迹"};
+    static const char* rowValues[ParamRowCount] = {"通用", "563 - 7875 Hz", "25℃ / 346 m/s", "铁红", "关闭"};
     for (uint32_t i = 0U; i < ParamRowCount; ++i)
     {
-        const int16_t y = static_cast<int16_t>(208 + (i * 78));
-        paramRowPanel[i].setPosition(ContentX + 24, y, 892, 64);
+        const int16_t y = static_cast<int16_t>(200 + (i * 72));
+        paramRowPanel[i].setPosition(ContentX + 24, y, 892, 60);
         paramRowPanel[i].setStyle(ColorPanel, 12U);
         paramRowPanel[i].setBorder(ColorLine, true);
         add(paramRowPanel[i]);
 
-        setupLabel(paramRowName[i], ContentX + 48, static_cast<int16_t>(y + 20), 220, 24, 2, rowNames[i], ColorMuted);
+        setupLabel(paramRowName[i], ContentX + 48, static_cast<int16_t>(y + 18), 220, 24, 2, rowNames[i], ColorMuted);
         /* Temperature row keeps space free on the right for the steppers. */
         const int16_t valueWidth = (i == 2U) ? 280 : 392;
-        setupLabel(paramRowValue[i], ContentX + 500, static_cast<int16_t>(y + 20), valueWidth, 24, 2, rowValues[i], ColorText, AppTextLabel::ALIGN_RIGHT);
+        setupLabel(paramRowValue[i], ContentX + 500, static_cast<int16_t>(y + 18), valueWidth, 24, 2, rowValues[i], ColorText, AppTextLabel::ALIGN_RIGHT);
         add(paramRowName[i]);
         add(paramRowValue[i]);
 
-        /* Scene and palette rows toggle on tap anywhere in the row. */
-        if ((i == 0U) || (i == 3U))
+        /* Scene, palette and trail rows toggle on tap anywhere in the row. */
+        if ((i == 0U) || (i == 3U) || (i == 4U))
         {
-            paramRowTouch[i].setPosition(ContentX + 24, y, 892, 64);
+            paramRowTouch[i].setPosition(ContentX + 24, y, 892, 60);
             paramRowTouch[i].setAction(paramsPressedCallback);
             add(paramRowTouch[i]);
         }
@@ -553,7 +567,7 @@ void TemplateView::setupParamsPage()
     for (uint32_t i = 0U; i < 2U; ++i)
     {
         const int16_t x = static_cast<int16_t>(ContentX + 800 + (i * 56));
-        const int16_t y = static_cast<int16_t>(208 + (2U * 78) + 10);
+        const int16_t y = static_cast<int16_t>(200 + (2U * 72) + 8);
         tempStepChip[i].setPosition(x, y, 44, 44);
         tempStepChip[i].setStyle(ColorPanel2, 12U);
         tempStepChip[i].setBorder(ColorBlueDim, true);
@@ -865,6 +879,8 @@ void TemplateView::refreshVisibility()
     railModeTitle.setVisible(imageVisible);
     railModeValue.setVisible(imageVisible);
     railSceneValue.setVisible(imageVisible);
+    railCandLabel[0].setVisible(imageVisible);
+    railCandLabel[1].setVisible(imageVisible);
     stripPanel.setVisible(imageVisible);
     for (uint32_t i = 0U; i < StripCount; ++i)
     {
@@ -1148,9 +1164,28 @@ void TemplateView::refreshImagePage(const AppUiSnapshot& snapshot)
     {
         fillW = 4;
     }
-    railQualityFill.setPosition(RailX + 14, 158, fillW, 6);
+    railQualityFill.setPosition(RailX + 14, 142, fillW, 5);
     railQualityTrack.invalidate();
     railQualityFill.invalidate();
+
+    /* Secondary sources (multi-source list). */
+    for (uint32_t i = 0U; i < 2U; ++i)
+    {
+        const uint32_t cand = i + 1U;
+        if (cand < snapshot.candCount)
+        {
+            (void)snprintf(text, sizeof(text), "S%lu %+d° / %+d°  %u%%",
+                           static_cast<unsigned long>(cand + 1U),
+                           snapshot.candTheta[cand],
+                           snapshot.candPhi[cand],
+                           (snapshot.candStrength[cand] * 100U) / 255U);
+        }
+        else
+        {
+            text[0] = '\0';
+        }
+        railCandLabel[i].setText(text);
+    }
 
     const bool pcmdOk = (snapshot.pcmdFlags & APP_UI_PCMD_FLAG_FRAME_VALID) != 0U;
     const bool pcmdFault = (snapshot.pcmdFlags & APP_UI_PCMD_FLAG_RAW_FAULT) != 0U;
@@ -1194,11 +1229,17 @@ void TemplateView::refreshImagePage(const AppUiSnapshot& snapshot)
 
     railModeValue.setText(profileName(activeProfile));
 
-    /* quick buttons: record button reflects state */
+    /* quick buttons: record + trigger reflect their armed/active state */
     const bool recording = (snapshot.mediaFlags & APP_UI_MEDIA_FLAG_RECORDING) != 0U;
     quickButton[1].setFillColor(recording ? ColorRedDim : ColorPanel2);
     quickLabel[1].setText(recording ? "停止" : "录像");
     quickLabel[1].setColors(recording ? ColorRed : ColorText, ColorBg, false);
+
+    const bool armed = (snapshot.triggerArmed != 0U);
+    quickButton[2].setFillColor(armed ? ColorBlueDim : ColorPanel2);
+    quickButton[2].setBorder(armed ? ColorBlue : ColorLine, true);
+    quickLabel[2].setColors(armed ? ColorBlue : ColorText, ColorBg, false);
+    quickLabel[2].setText(armed ? "警戒中" : "触发");
 
     quickLabel[3].setText(paletteName(snapshot.heatPalette));
 
@@ -1308,10 +1349,29 @@ void TemplateView::refreshSystemPage(const AppUiSnapshot& snapshot)
     (void)snprintf(text, sizeof(text), "%lu", static_cast<unsigned long>(snapshot.cameraDisplayErrorCount));
     sysInfoValue[5].setText(text);
 
-    (void)snprintf(text, sizeof(text), "%u.%u", snapshot.uiFpsX10 / 10U, snapshot.uiFpsX10 % 10U);
+    /* Overlay render time: DWT cycles at 600 MHz -> ms x10. */
+    {
+        const uint32_t msX10 = snapshot.overlayDrawCycles / 60000U;
+        (void)snprintf(text, sizeof(text), "%lu.%lu ms",
+                       static_cast<unsigned long>(msX10 / 10U),
+                       static_cast<unsigned long>(msX10 % 10U));
+    }
     sysInfoValue[6].setText(text);
 
-    sysInfoValue[7].setText(__DATE__);
+    if (snapshot.mediaEncodeMs != 0U)
+    {
+        (void)snprintf(text, sizeof(text), "%u ms", snapshot.mediaEncodeMs);
+    }
+    else
+    {
+        (void)snprintf(text, sizeof(text), "--");
+    }
+    sysInfoValue[7].setText(text);
+
+    (void)snprintf(text, sizeof(text), "%lu", static_cast<unsigned long>(snapshot.triggerCount));
+    sysInfoValue[8].setText(text);
+
+    sysInfoValue[9].setText(__DATE__);
 }
 
 void TemplateView::refreshParamsPage(const AppUiSnapshot& snapshot)
@@ -1341,6 +1401,9 @@ void TemplateView::refreshParamsPage(const AppUiSnapshot& snapshot)
     paramRowValue[2].setText(text);
 
     paramRowValue[3].setText(paletteName(snapshot.heatPalette));
+
+    paramRowValue[4].setColors((snapshot.trailEnabled != 0U) ? ColorBlue : ColorText, ColorBg, false);
+    paramRowValue[4].setText((snapshot.trailEnabled != 0U) ? "开" : "关闭");
 }
 
 void TemplateView::refreshMediaPage(const AppUiSnapshot& snapshot)
@@ -1459,7 +1522,7 @@ void TemplateView::onQuickPressed(const touchgfx::AbstractButton& source)
     }
     else if (&source == &quickTouch[2])
     {
-        /* trigger mode arrives with the P6 feature pass */
+        presenter->toggleTrigger();
     }
     else if (&source == &quickTouch[3])
     {
@@ -1492,6 +1555,10 @@ void TemplateView::onParamsPressed(const touchgfx::AbstractButton& source)
     else if (&source == &paramRowTouch[3])
     {
         presenter->cycleHeatPalette();
+    }
+    else if (&source == &paramRowTouch[4])
+    {
+        presenter->toggleTrail();
     }
     else if (&source == &tempStepTouch[0])
     {

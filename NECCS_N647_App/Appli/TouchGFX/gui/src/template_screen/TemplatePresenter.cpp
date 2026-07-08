@@ -82,6 +82,16 @@ void TemplatePresenter::playToggleMedia()
     model->playToggleMedia();
 }
 
+void TemplatePresenter::toggleTrigger()
+{
+    model->toggleTrigger();
+}
+
+void TemplatePresenter::toggleTrail()
+{
+    model->toggleTrail();
+}
+
 void TemplatePresenter::uiSnapshotUpdated(const AppUiSnapshot& snapshot)
 {
     view.updateSnapshot(snapshot);

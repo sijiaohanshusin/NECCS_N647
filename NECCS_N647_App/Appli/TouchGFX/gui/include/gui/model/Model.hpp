@@ -192,6 +192,11 @@ struct AppUiSnapshot
     int16_t candTheta[3];
     int16_t candPhi[3];
     uint8_t candStrength[3];
+    uint32_t overlayDrawCycles;
+    uint32_t triggerCount;
+    uint16_t mediaEncodeMs;
+    uint8_t triggerArmed;
+    uint8_t trailEnabled;
     uint8_t heatPalette;
     uint8_t acousticScene;
     int8_t acousticTempC;
@@ -245,6 +250,8 @@ public:
     void cycleHeatPalette();
     void cycleScene();
     void adjustTemperature(int8_t deltaC);
+    void toggleTrigger();
+    void toggleTrail();
     void requestScreenshot();
     void toggleRecording();
     void refreshMedia();
@@ -265,6 +272,9 @@ protected:
     AppUiSnapshot snapshot;
     uint32_t tickCount;
     uint32_t bootTicks;
+    uint32_t triggerCooldown;
+    bool triggerArmed;
+    bool triggerPrevHot;
 };
 
 #endif /* MODEL_HPP */
