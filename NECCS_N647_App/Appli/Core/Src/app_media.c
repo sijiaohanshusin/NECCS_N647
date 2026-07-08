@@ -84,8 +84,11 @@ static FX_FILE s_work_file;
 static FX_FILE s_record_file;
 static uint8_t s_filex_cache[APP_MEDIA_FILEX_CACHE_SIZE] __attribute__((aligned(32)));
 static uint8_t s_boot_sector[SD_NAND_BLOCK_SIZE] __attribute__((aligned(32)));
-static uint8_t s_bmp_row[APP_MEDIA_FB_WIDTH * 3U * APP_MEDIA_BMP_ROWS_PER_WRITE] __attribute__((aligned(32)));
-static uint8_t s_jpeg_buffer[APP_MEDIA_JPEG_MAX_BYTES] __attribute__((aligned(32)));
+/* CPU-only staging buffers (FileX copies through its own cache and the JPEG
+ * codec is fed by CPU FIFO writes, no DMA): cached external RAM is fine and
+ * this returns ~580 KB of internal SRAM. */
+static uint8_t s_bmp_row[APP_MEDIA_FB_WIDTH * 3U * APP_MEDIA_BMP_ROWS_PER_WRITE] __attribute__((section(".EXTRAM"), aligned(32)));
+static uint8_t s_jpeg_buffer[APP_MEDIA_JPEG_MAX_BYTES] __attribute__((section(".EXTRAM"), aligned(32)));
 static uint8_t s_jpeg_decode_buffer[APP_MEDIA_JPEG_DECODE_MAX_BYTES] __attribute__((section(".EXTRAM"), aligned(32)));
 static uint16_t s_preview_buffer[APP_MEDIA_PREVIEW_WIDTH * APP_MEDIA_PREVIEW_HEIGHT] __attribute__((section(".EXTRAM"), aligned(32)));
 /* Snapshot of the displayed camera frame (with heat overlay) taken at

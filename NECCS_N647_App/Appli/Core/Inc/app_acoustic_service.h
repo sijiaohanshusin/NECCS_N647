@@ -17,9 +17,11 @@ extern "C" {
 #define APP_ACOUSTIC_SERVICE_CAMERA_HFOV_DEG  77.0f
 #define APP_ACOUSTIC_SERVICE_CAMERA_VFOV_DEG  61.1f
 
-/* Continuous heat field resampled from the SRP grid (camera aspect 4:3). */
-#define APP_ACOUSTIC_SERVICE_FIELD_W          48U
-#define APP_ACOUSTIC_SERVICE_FIELD_H          36U
+/* Continuous heat field resampled from the SRP grid (camera aspect 4:3).
+ * 96x72 keeps the bilinear upscale step at ~6.7 px per field cell, which
+ * removes the visible blockiness the 48x36 field showed on the panel. */
+#define APP_ACOUSTIC_SERVICE_FIELD_W          96U
+#define APP_ACOUSTIC_SERVICE_FIELD_H          72U
 #define APP_ACOUSTIC_SERVICE_FIELD_COUNT \
   (APP_ACOUSTIC_SERVICE_FIELD_W * APP_ACOUSTIC_SERVICE_FIELD_H)
 #define APP_ACOUSTIC_SERVICE_CAND_MAX         3U

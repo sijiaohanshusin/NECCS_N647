@@ -31,15 +31,22 @@
 #define APP_ACOUSTIC_SERVICE_FIELD_EMA_ATTACK   0.65f
 #define APP_ACOUSTIC_SERVICE_FIELD_EMA_DECAY    0.12f
 #define APP_ACOUSTIC_SERVICE_FIELD_FINE_GAIN    0.65f
-#define APP_ACOUSTIC_SERVICE_FIELD_FINE_SIGMA   1.35f
+/* Sigma/radius are in field cells; scaled with the 96x72 field density so
+ * the angular footprint of a fine bump stays the same as before. */
+#define APP_ACOUSTIC_SERVICE_FIELD_FINE_SIGMA   2.7f
 /* Frequency resolution of the Wide32/48k pipeline (48000 / 256). */
 #define APP_ACOUSTIC_SERVICE_BIN_HZ             187.5f
 #define APP_ACOUSTIC_SERVICE_TEMP_MIN_C         (-20)
 #define APP_ACOUSTIC_SERVICE_TEMP_MAX_C         60
 
 static AppAcousticSrpContext_t s_srp_ctx __attribute__((aligned(32)));
-static AppAcousticImagingVisFrame_t s_vis_frame __attribute__((aligned(32)));
-static AppAcousticServiceSnapshot_t s_snapshot __attribute__((aligned(32)));
+/* CPU-only structures: cached external RAM keeps internal SRAM free for the
+ * hot paths (the 96x72 field grew these by ~10 KB). GDB symbol names are
+ * unchanged (debug scripts reference them by name, not by address). */
+static AppAcousticImagingVisFrame_t s_vis_frame
+    __attribute__((section(".EXTRAM"), aligned(32)));
+static AppAcousticServiceSnapshot_t s_snapshot
+    __attribute__((section(".EXTRAM"), aligned(32)));
 static float s_service_samples[APP_ACOUSTIC_SERVICE_SAMPLE_COUNT]
     __attribute__((section(".EXTRAM"), aligned(32)));
 
@@ -475,7 +482,7 @@ static void AppAcousticService_BuildLinearField(const AppAcousticImagingVisFrame
   {
     const float sigma = APP_ACOUSTIC_SERVICE_FIELD_FINE_SIGMA;
     const float inv_two_sigma_sq = 1.0f / (2.0f * sigma * sigma);
-    const int32_t radius = 4;
+    const int32_t radius = 8;
     const float fx_scale = (float)APP_ACOUSTIC_SERVICE_FIELD_W / APP_ACOUSTIC_SERVICE_CAMERA_HFOV_DEG;
     const float fy_scale = (float)APP_ACOUSTIC_SERVICE_FIELD_H / APP_ACOUSTIC_SERVICE_CAMERA_VFOV_DEG;
 

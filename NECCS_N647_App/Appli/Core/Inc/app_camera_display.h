@@ -35,9 +35,9 @@ extern "C" {
 #define APP_CAMERA_DISPLAY_COLOR_KEY_RGB888   0x00FF00FFUL
 #define APP_CAMERA_DISPLAY_COLOR_KEY_RGB565   0xF81FU
 
-/* Acoustic heat field pushed by the UI Model (camera-aspect, 48x36). */
-#define APP_CAMERA_DISPLAY_FIELD_W            48U
-#define APP_CAMERA_DISPLAY_FIELD_H            36U
+/* Acoustic heat field pushed by the UI Model (camera-aspect, 96x72). */
+#define APP_CAMERA_DISPLAY_FIELD_W            96U
+#define APP_CAMERA_DISPLAY_FIELD_H            72U
 #define APP_CAMERA_DISPLAY_FIELD_COUNT \
   (APP_CAMERA_DISPLAY_FIELD_W * APP_CAMERA_DISPLAY_FIELD_H)
 #define APP_CAMERA_DISPLAY_MARKER_MAX         3U

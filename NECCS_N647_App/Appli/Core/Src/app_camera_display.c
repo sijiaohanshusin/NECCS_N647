@@ -505,13 +505,16 @@ static void AppCameraDisplay_DrawMarker(uint16_t *framebuffer,
   }
 }
 
-/* Render the 48x36 heat field over the camera frame: fixed-point bilinear
+/* Render the 96x72 heat field over the camera frame: fixed-point bilinear
  * upscale in 2x2 pixel blocks, palette LUT colouring and per-pixel alpha.
- * Runs on the camera thread at swap rate; measured via DWT into
+ * Runs on the camera worker thread at swap rate; measured via DWT into
  * g_app_camera_overlay_draw_cycles. */
 static void AppCameraDisplay_DrawAcousticOverlay(uint32_t frame_addr)
 {
-  AppCameraDisplayAcousticOverlay_t overlay;
+  /* Static: ~7 KB with the 96x72 field, far too large for the worker thread
+   * stack. Only the swap worker calls this function. Kept in internal SRAM
+   * (hot per-pixel reads). */
+  static AppCameraDisplayAcousticOverlay_t overlay __attribute__((aligned(32)));
   uint16_t *framebuffer;
   const uint16_t *palette;
   uint32_t qscale;

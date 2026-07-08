@@ -218,11 +218,15 @@ SECTIONS
   } >ROM
 
   /* External RAM */
+  /* NOLOAD: the app clears [_sextram, _eextram) once after HyperRAM is up,
+   * so statics placed here behave like .bss. */
   .EXTRAM (NOLOAD) :
   {
     . = ALIGN(8);
+    _sextram = .;
     *(.EXTRAM)
     . = ALIGN(8);
+    _eextram = .;
   } >EXTRAM
 
   /* Remove information from the compiler libraries */

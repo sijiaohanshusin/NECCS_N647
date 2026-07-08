@@ -23,6 +23,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include <string.h>
+
 #include "./SYS/sys.h"
 #ifdef DEBUG
 #include "./HyperRAM/hyperram.h"
@@ -296,6 +298,14 @@ int main(void)
   }
   App_BringUpStatus_Ready(APP_BRINGUP_MODULE_MEMORY, 0);
   App_BootDiag_SetStage(APP_BOOT_STAGE_HYPERRAM_TEST_DONE);
+
+  /* The .EXTRAM section is NOLOAD: clear it once so statics placed there
+   * (snapshots, field accumulators, media staging) behave like .bss. */
+  {
+    extern uint8_t _sextram;
+    extern uint8_t _eextram;
+    memset(&_sextram, 0, (size_t)(&_eextram - &_sextram));
+  }
 
   /* USER CODE END SysInit */
 
