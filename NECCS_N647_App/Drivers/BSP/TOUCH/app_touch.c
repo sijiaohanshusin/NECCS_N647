@@ -397,6 +397,13 @@ static uint8_t gt_try_init_at(uint8_t address7, GPIO_PinState int_state)
     return 0U;
   }
 
+  /* Stash the raw PID bytes for live diagnosis (SWD/system page): a chip
+   * that ACKs but never reports touches can be told apart from a real
+   * GT911 ("911\0" = 39 31 31 00) by these bytes. */
+  g_touch.reserved[0] = pid[0];
+  g_touch.reserved[1] = pid[1];
+  g_touch.reserved[2] = pid[2];
+
   if (gt_pid_looks_valid(pid) == 0U)
   {
     return 0U;

@@ -247,9 +247,12 @@ int main(void)
    * external-Flash boot the BootROM does not leave DBGMCU running, so SWD
    * attach failed ("cannot get core ID") on the assembled unit and Release
    * issues could not be inspected live. Debug builds get this from the
-   * probe; enabling it here costs nothing and keeps Release attachable. */
+   * probe; enabling it here costs nothing and keeps Release attachable.
+   * DBGCLKEN (DBGMCU_CR bit 20) is the software debug-clock enable - the
+   * RCC gates alone are not sufficient, attach still dropped without it. */
   __HAL_RCC_DBGMCU_CLK_ENABLE();
   __HAL_RCC_DBG_CLK_ENABLE();
+  DBGMCU->CR |= DBGMCU_CR_DBGCLKEN | DBGMCU_CR_DBG_SLEEP;
 
   /* USER CODE END 1 */
 
@@ -474,7 +477,15 @@ static void MX_I2C2_Init(void)
 
   /* USER CODE END I2C2_Init 1 */
   hi2c2.Instance = I2C2;
-  hi2c2.Init.Timing = 0x10707DBC;
+  /* ~40 kHz with a long data-setup window (PRESC=3 -> 16 MHz kernel ticks,
+   * SCLDEL=15). The bus has NO external pull-ups - only the ~40k internal
+   * ones - so rise times on the loaded camera+touch net are in the
+   * microseconds. The CubeMX 100 kHz timing (0x10707DBC) left the edges
+   * marginal: ~22 percent of touch reads failed and GT911 status returned
+   * zeros in Release (probabilistic, clock-tree dependent). Slowing the
+   * bus trades a few ms of config time for clean edges. Fit 2.2-4.7k
+   * external pull-ups to restore full speed. */
+  hi2c2.Init.Timing = 0x30F2B4C8;
   hi2c2.Init.OwnAddress1 = 0;
   hi2c2.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
   hi2c2.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
