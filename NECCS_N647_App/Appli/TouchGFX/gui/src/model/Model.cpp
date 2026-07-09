@@ -807,7 +807,11 @@ void pollPcmd(AppUiSnapshot& snapshot)
     {
         snapshot.pcmdFlags |= APP_UI_PCMD_FLAG_RAW_VALID;
     }
-    if ((pcmd.raw_quality_flags & APP_UI_PCMD_RAW_FLAG_RAIL_FAULT) != 0U)
+    /* Genuine array fault = running but not delivering valid audio (config
+     * lost / DMA desync). A rail flag alone is per-mic data quality - some
+     * mics sit DC-pinned near full scale while SRP localises fine from the
+     * healthy channels - and must not latch the on-screen fault state. */
+    if ((pcmd.started != 0U) && (pcmd.raw_audio_valid == 0U))
     {
         snapshot.pcmdFlags |= APP_UI_PCMD_FLAG_RAW_FAULT;
     }

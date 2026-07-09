@@ -16,10 +16,13 @@
 #endif
 
 #ifndef PCMD3180_HAL_SW_I2C_HALF_PERIOD_US
-/* 20 us half period (~25 kHz). Tried 5 us/100 kHz on 2026-07-09: config
- * ACKs and status reads still passed, but the second device on each TDM bus
- * stopped driving its slots (persistent rail fault, no audio). The bus has
- * weak pull-ups and a long harness - keep the conservative timing. */
+/* 20 us half period (~25 kHz) - the board-validated timing (all-4-device
+ * config verified 2026-07-09 08:41). Slowing to 50 us was tried and made
+ * corruption WORSE, which ruled out rise time: the failures scale with the
+ * config window duration because the mic SCL/SDA net is bridged on the
+ * baseboard to the shared I2C2 bus (camera + power management traffic).
+ * The fix is serialising via AppI2C2_Lock during the config window, not
+ * slower clocks. */
 #define PCMD3180_HAL_SW_I2C_HALF_PERIOD_US 20U
 #endif
 
@@ -216,16 +219,33 @@ static void PCMD3180_HAL_SwSetSda(PCMD3180_HAL_BusContextTypeDef *context,
     PCMD3180_HAL_SwDelay();
 }
 
-static GPIO_PinState PCMD3180_HAL_SwReadSda(PCMD3180_HAL_BusContextTypeDef *context)
+/*
+ * Release SCL and wait until the line actually reads high before timing the
+ * clock-high phase. The open-drain bus is pulled up only by weak resistors,
+ * so on this board (long mic harness, four PCMD3180 loads) SCL has a slow
+ * rise edge and a slave may clock-stretch; driving the next edge blindly
+ * sampled data in the wrong phase, which showed up as the device
+ * probe/config masks flapping run-to-run. The wait is bounded so a shorted
+ * or stuck-low bus cannot hang the config thread.
+ */
+static void PCMD3180_HAL_SwSclRelease(PCMD3180_HAL_BusContextTypeDef *context)
 {
+    HAL_GPIO_WritePin(context->scl_port, context->scl_pin, GPIO_PIN_SET);
+    for (uint32_t guard = 0U; guard < 250U; guard++)
+    {
+        if (HAL_GPIO_ReadPin(context->scl_port, context->scl_pin) == GPIO_PIN_SET)
+        {
+            break;
+        }
+        PCMD3180_HAL_SwDelayUs(1U);
+    }
     PCMD3180_HAL_SwDelay();
-    return HAL_GPIO_ReadPin(context->sda_port, context->sda_pin);
 }
 
 static void PCMD3180_HAL_SwStart(PCMD3180_HAL_BusContextTypeDef *context)
 {
     PCMD3180_HAL_SwSetSda(context, GPIO_PIN_SET);
-    PCMD3180_HAL_SwSetScl(context, GPIO_PIN_SET);
+    PCMD3180_HAL_SwSclRelease(context);
     PCMD3180_HAL_SwSetSda(context, GPIO_PIN_RESET);
     PCMD3180_HAL_SwSetScl(context, GPIO_PIN_RESET);
 }
@@ -233,7 +253,7 @@ static void PCMD3180_HAL_SwStart(PCMD3180_HAL_BusContextTypeDef *context)
 static void PCMD3180_HAL_SwStop(PCMD3180_HAL_BusContextTypeDef *context)
 {
     PCMD3180_HAL_SwSetSda(context, GPIO_PIN_RESET);
-    PCMD3180_HAL_SwSetScl(context, GPIO_PIN_SET);
+    PCMD3180_HAL_SwSclRelease(context);
     PCMD3180_HAL_SwSetSda(context, GPIO_PIN_SET);
 }
 
@@ -243,14 +263,15 @@ static uint8_t PCMD3180_HAL_SwWriteByte(PCMD3180_HAL_BusContextTypeDef *context,
     for (uint32_t bit = 0U; bit < 8U; bit++)
     {
         PCMD3180_HAL_SwSetSda(context, ((data & 0x80U) != 0U) ? GPIO_PIN_SET : GPIO_PIN_RESET);
-        PCMD3180_HAL_SwSetScl(context, GPIO_PIN_SET);
+        PCMD3180_HAL_SwSclRelease(context);
         PCMD3180_HAL_SwSetScl(context, GPIO_PIN_RESET);
         data <<= 1;
     }
 
+    /* Release SDA for the ACK bit, clock it, and sample while SCL is high. */
     PCMD3180_HAL_SwSetSda(context, GPIO_PIN_SET);
-    PCMD3180_HAL_SwSetScl(context, GPIO_PIN_SET);
-    const uint8_t nack = (PCMD3180_HAL_SwReadSda(context) == GPIO_PIN_SET) ? 1U : 0U;
+    PCMD3180_HAL_SwSclRelease(context);
+    const uint8_t nack = (HAL_GPIO_ReadPin(context->sda_port, context->sda_pin) == GPIO_PIN_SET) ? 1U : 0U;
     PCMD3180_HAL_SwSetScl(context, GPIO_PIN_RESET);
     return nack;
 }
@@ -264,8 +285,9 @@ static uint8_t PCMD3180_HAL_SwReadByte(PCMD3180_HAL_BusContextTypeDef *context,
     for (uint32_t bit = 0U; bit < 8U; bit++)
     {
         data <<= 1;
-        PCMD3180_HAL_SwSetScl(context, GPIO_PIN_SET);
-        if (PCMD3180_HAL_SwReadSda(context) == GPIO_PIN_SET)
+        PCMD3180_HAL_SwSclRelease(context);
+        /* SCL confirmed high and the half-period settle elapsed: sample now. */
+        if (HAL_GPIO_ReadPin(context->sda_port, context->sda_pin) == GPIO_PIN_SET)
         {
             data |= 1U;
         }
@@ -273,7 +295,7 @@ static uint8_t PCMD3180_HAL_SwReadByte(PCMD3180_HAL_BusContextTypeDef *context,
     }
 
     PCMD3180_HAL_SwSetSda(context, (nack == 0U) ? GPIO_PIN_RESET : GPIO_PIN_SET);
-    PCMD3180_HAL_SwSetScl(context, GPIO_PIN_SET);
+    PCMD3180_HAL_SwSclRelease(context);
     PCMD3180_HAL_SwSetScl(context, GPIO_PIN_RESET);
     PCMD3180_HAL_SwSetSda(context, GPIO_PIN_SET);
     return data;

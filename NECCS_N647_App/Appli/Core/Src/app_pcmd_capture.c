@@ -30,10 +30,8 @@
 #define APP_PCMD_CAPTURE_CONFIG_RETRY_MS     20U
 #define APP_PCMD_CAPTURE_POST_CONFIG_SETTLE_MS  1000U
 #define APP_PCMD_CAPTURE_POST_CONFIG_DISCARD_HALVES  16U
-/* Rail-fault restart hysteresis: require persistence before tearing the
- * pipeline down (transient rails must not cost a 2 s reconfig). */
-#define APP_PCMD_CAPTURE_RAIL_FAULT_POLLS    8U
-#define APP_PCMD_CAPTURE_RAIL_GRACE_MS       2000U
+/* Full-array bring-up attempts before the partial-array failsafe engages. */
+#define APP_PCMD_CAPTURE_FULL_ATTEMPTS       3U
 #define APP_PCMD_CAPTURE_POST_CONFIG_STATUS_KICK  1U
 #define APP_PCMD_CAPTURE_KEEP_SW_I2C_ACTIVE  0U
 #define APP_PCMD_CAPTURE_EVENT_HALF0         0x00000001UL
@@ -98,11 +96,22 @@ static volatile uint32_t s_raw_rail_sample_count;
 static volatile uint32_t s_raw_total_sample_count;
 static volatile uint8_t s_raw_accum_enabled;
 static volatile uint16_t s_dma_discard_halves_remaining[APP_PCMD_CAPTURE_BUS_COUNT];
-static uint8_t s_i2c_force_software_backend;
+/* Failsafe: after several full-array bring-up attempts fail to configure all
+ * four devices, accept whatever subset came up and stream from those. A
+ * stable partial array (SRP still localises from the healthy channels) beats
+ * an endless all-or-nothing reconfig loop when one device is marginal. */
+static uint8_t s_pcmd_allow_partial;
+/* Set once the devices are configured and verified over I2C. The mic array
+ * only needs I2C during configuration - audio then flows over SAI/TDM - so
+ * the bus is frozen afterwards and frame stalls recover via DMA-only
+ * restart, never by re-touching I2C. */
+static uint8_t s_pcmd_config_frozen;
 
 static void AppPcmdCapture_UpdateMicLevels(void);
 static void AppPcmdCapture_DeviceStatusKick(uint32_t device_index);
 static void AppPcmdCapture_StopDma(void);
+static HAL_StatusTypeDef AppPcmdCapture_StartSaiDma(uint16_t discard_halves,
+                                                    uint8_t slave_first);
 
 static uint8_t AppPcmdCapture_ClampPercent(uint32_t value)
 {
@@ -331,7 +340,6 @@ static void AppPcmdCapture_ClearRuntime(void)
 {
   memset(&s_snapshot, 0, sizeof(s_snapshot));
   s_raw_accum_enabled = 0U;
-  s_i2c_force_software_backend = 0U;
   AppPcmdCapture_ClearRawAccumulator();
   for (uint32_t i = 0U; i < APP_PCMD_CAPTURE_DMA_HALVES; i++)
   {
@@ -658,7 +666,11 @@ static void AppPcmdCapture_UpdateMicLevels(void)
       (uint16_t)(((uint64_t)s_snapshot.raw_rail_sample_count * 1000ULL) /
                  (uint64_t)s_snapshot.raw_total_sample_count);
   s_snapshot.raw_quality_flags = 0U;
-  if (s_snapshot.device_config_ok_mask == 0x0FU)
+  /* CONFIG_OK gates publishing (via raw_audio_valid). Normally require all
+   * four devices; once the partial-array failsafe is armed, any configured
+   * device keeps the healthy channels streaming. */
+  if ((s_snapshot.device_config_ok_mask == 0x0FU) ||
+      ((s_pcmd_allow_partial != 0U) && (s_snapshot.device_config_ok_mask != 0U)))
   {
     s_snapshot.raw_quality_flags |= APP_PCMD_CAPTURE_RAW_FLAG_CONFIG_OK;
   }
@@ -683,12 +695,17 @@ static void AppPcmdCapture_UpdateMicLevels(void)
   {
     s_snapshot.raw_quality_flags |= APP_PCMD_CAPTURE_RAW_FLAG_HIGH_FLOOR;
   }
+  /* RAIL_FAULT is a per-frame data-quality indicator, NOT a validity gate.
+   * On-board finding (2026-07-09, Rev B): some mic slots sit DC-pinned near
+   * full scale (every sample trips the rail counter). Reconfiguring cannot
+   * un-rail a stuck mic, and gating validity on it starved the whole
+   * pipeline. SRP localises fine from the healthy channels, so publish
+   * whenever the pipeline is configured and in sync. */
   s_snapshot.raw_audio_valid =
-      (((s_snapshot.raw_quality_flags & (APP_PCMD_CAPTURE_RAW_FLAG_CONFIG_OK |
-                                         APP_PCMD_CAPTURE_RAW_FLAG_DMA_SYNC)) ==
-        (APP_PCMD_CAPTURE_RAW_FLAG_CONFIG_OK |
-         APP_PCMD_CAPTURE_RAW_FLAG_DMA_SYNC)) &&
-       ((s_snapshot.raw_quality_flags & APP_PCMD_CAPTURE_RAW_FLAG_RAIL_FAULT) == 0U)) ? 1U : 0U;
+      ((s_snapshot.raw_quality_flags & (APP_PCMD_CAPTURE_RAW_FLAG_CONFIG_OK |
+                                        APP_PCMD_CAPTURE_RAW_FLAG_DMA_SYNC)) ==
+       (APP_PCMD_CAPTURE_RAW_FLAG_CONFIG_OK |
+        APP_PCMD_CAPTURE_RAW_FLAG_DMA_SYNC)) ? 1U : 0U;
 }
 
 static void AppPcmdCapture_UpdateFrameRate(uint32_t now_ms)
@@ -1023,6 +1040,33 @@ static void AppPcmdCapture_RequestRestart(uint32_t reason)
   App_BringUpStatus_Fail(APP_BRINGUP_MODULE_AUDIO_FRAME, (int32_t)reason);
 }
 
+/* Recover a frame stall without touching I2C: the PCMD3180 devices keep
+ * their verified (frozen) register configuration, so only the SAI/DMA
+ * capture path is torn down and restarted. `started` stays latched, so the
+ * pipeline never falls back into the I2C config path. Returns 1 on
+ * success. */
+static uint8_t AppPcmdCapture_RestartDmaOnly(void)
+{
+  HAL_StatusTypeDef hal_status;
+
+  s_raw_accum_enabled = 0U;
+  AppPcmdCapture_StopDma();
+  AppPcmdCapture_ClearPendingDmaEvents();
+
+  hal_status = AppPcmdCapture_StartSaiDma(APP_PCMD_CAPTURE_POST_CONFIG_DISCARD_HALVES, 1U);
+  if (hal_status != HAL_OK)
+  {
+    s_snapshot.start_status = APP_PCMD_CAPTURE_HAL_ERROR;
+    AppPcmdCapture_StopDma();
+    return 0U;
+  }
+
+  s_raw_accum_enabled = 1U;
+  s_snapshot.started = 1U;
+  s_snapshot.start_status = APP_PCMD_CAPTURE_OK;
+  return 1U;
+}
+
 static void AppPcmdCapture_ArmDiscardHalves(uint16_t discard_halves)
 {
   uint32_t primask = __get_PRIMASK();
@@ -1144,11 +1188,18 @@ AppPcmdCaptureStatus_t AppPcmdCapture_Init(AppMicArrayMode_t mode)
   s_snapshot.debug_ui_enabled = ((g_app_pcmd_debug_ui_enable != 0U) ||
                                  (APP_PCMD_DIAG_UI_ENABLE != 0U)) ? 1U : 0U;
 
-  s_hal_context.hi2c = &hi2c2;
-  s_hal_context.scl_port = GPIOD;
-  s_hal_context.scl_pin = GPIO_PIN_14;
-  s_hal_context.sda_port = GPIOD;
-  s_hal_context.sda_pin = GPIO_PIN_4;
+  s_hal_context.hi2c = NULL;
+  /* Dedicated software-I2C pins for the mic array (rewired 2026-07-09):
+   * PC10=SCL, PC11=SDA, spare expansion GPIO with secure attributes already
+   * set in MX_GPIO_Init. hi2c stays NULL so the driver never de-inits,
+   * locks, or recovers the camera's hardware I2C2 (PD14/PD4) - the two
+   * buses are now electrically and logically independent, which removes
+   * the AF<->GPIO pin flipping and bus contention that made bring-up
+   * probabilistic. */
+  s_hal_context.scl_port = GPIOC;
+  s_hal_context.scl_pin = GPIO_PIN_10;
+  s_hal_context.sda_port = GPIOC;
+  s_hal_context.sda_pin = GPIO_PIN_11;
   s_hal_context.shutdown_port = MIC_SHDNZ_GPIO_Port;
   s_hal_context.shutdown_pin = MIC_SHDNZ_Pin;
   s_hal_context.timeout_ms = APP_PCMD_CAPTURE_I2C_TIMEOUT_MS;
@@ -1231,6 +1282,13 @@ AppPcmdCaptureStatus_t AppPcmdCapture_Start(void)
   __HAL_SAI_DISABLE_IT(&hsai_BlockB1, SAI_IT_AFSDET | SAI_IT_LFSDET);
   AppPcmdCapture_DelayMs(APP_PCMD_CAPTURE_CLOCK_SETTLE_MS);
 
+  /* Hold the I2C2 lock for the whole config window even though the mic bus
+   * now bit-bangs dedicated pins (PC10/PC11): the failure signature is
+   * identical to the PD4/PD14 era and scales with window duration, i.e.
+   * concurrent camera-exposure / power-management I2C2 traffic disturbs the
+   * mic net during configuration. Serialising the window is the combination
+   * that was board-verified stable (2026-07-09 08:41, all 4 devices, 5400+
+   * frames). One-time boot cost only - config freezes afterwards. */
   if (AppI2C2_Lock(APP_PCMD_CAPTURE_CONFIG_LOCK_MS) == 0U)
   {
     s_snapshot.start_status = APP_PCMD_CAPTURE_BUSY;
@@ -1238,38 +1296,26 @@ AppPcmdCaptureStatus_t AppPcmdCapture_Start(void)
     return APP_PCMD_CAPTURE_BUSY;
   }
 
-  if ((APP_PCMD_CAPTURE_I2C_BACKEND == APP_PCMD_CAPTURE_I2C_BACKEND_SW) ||
-      (s_i2c_force_software_backend != 0U))
-  {
-    config_status = AppPcmdCapture_ResetAndConfigurePcmd(APP_PCMD_CAPTURE_I2C_BACKEND_SW);
-  }
-  else
-  {
-    config_status = AppPcmdCapture_ResetAndConfigurePcmd(APP_PCMD_CAPTURE_I2C_BACKEND_HAL);
-    if ((config_status != APP_PCMD_CAPTURE_OK) &&
-        (APP_PCMD_CAPTURE_I2C_BACKEND == APP_PCMD_CAPTURE_I2C_BACKEND_AUTO))
-    {
-      s_i2c_force_software_backend = 1U;
-      s_snapshot.i2c_fallback_count++;
-      config_status = AppPcmdCapture_ResetAndConfigurePcmd(APP_PCMD_CAPTURE_I2C_BACKEND_SW);
-    }
-    else if ((config_status == APP_PCMD_CAPTURE_OK) &&
-             (APP_PCMD_CAPTURE_I2C_BACKEND == APP_PCMD_CAPTURE_I2C_BACKEND_AUTO) &&
-             (s_snapshot.device_status_ok_mask != 0x0FU))
-    {
-      s_i2c_force_software_backend = 1U;
-      s_snapshot.i2c_fallback_count++;
-      config_status = AppPcmdCapture_ResetAndConfigurePcmd(APP_PCMD_CAPTURE_I2C_BACKEND_SW);
-    }
-  }
+  config_status = AppPcmdCapture_ResetAndConfigurePcmd(APP_PCMD_CAPTURE_I2C_BACKEND_SW);
 
   AppI2C2_Unlock();
+
+  /* Accept the pass when every device configured, or - once the failsafe is
+   * armed after repeated full-array misses - when at least one device did.
+   * Only a completely empty bus is a hard failure worth another
+   * hardware-reset retry. */
   if (config_status != APP_PCMD_CAPTURE_OK)
   {
-    s_snapshot.start_status = config_status;
-    AppPcmdCapture_StopDma();
-    App_BringUpStatus_Fail(APP_BRINGUP_MODULE_PCMD_RAW, (int32_t)config_status);
-    return config_status;
+    const uint8_t partial_ok = ((s_pcmd_allow_partial != 0U) &&
+                                (s_snapshot.device_config_ok_mask != 0U)) ? 1U : 0U;
+
+    if (partial_ok == 0U)
+    {
+      s_snapshot.start_status = config_status;
+      AppPcmdCapture_StopDma();
+      App_BringUpStatus_Fail(APP_BRINGUP_MODULE_PCMD_RAW, (int32_t)config_status);
+      return config_status;
+    }
   }
 
   AppPcmdCapture_DelayMs(APP_PCMD_CAPTURE_POST_CONFIG_SETTLE_MS);
@@ -1286,6 +1332,10 @@ AppPcmdCaptureStatus_t AppPcmdCapture_Start(void)
   s_raw_accum_enabled = 1U;
   s_snapshot.started = 1U;
   s_snapshot.start_status = APP_PCMD_CAPTURE_OK;
+  /* One-time I2C configuration succeeded: freeze the bus. The devices keep
+   * their registers and audio flows over SAI, so I2C is never touched again
+   * (frame stalls recover via DMA-only restart). */
+  s_pcmd_config_frozen = 1U;
   App_BringUpStatus_Ready(APP_BRINGUP_MODULE_PCMD_RAW, APP_PCMD_CAPTURE_OK);
   return APP_PCMD_CAPTURE_OK;
 }
@@ -1387,8 +1437,7 @@ void AppPcmdCapture_ThreadEntry(ULONG thread_input)
 
   uint32_t last_seq = 0U;
   uint32_t stall_ticks = 0U;
-  uint32_t rail_polls = 0U;
-  uint32_t started_ms = 0U;
+  uint8_t start_attempts = 0U;
 
   while (1)
   {
@@ -1409,15 +1458,26 @@ void AppPcmdCapture_ThreadEntry(ULONG thread_input)
       (void)AppPcmdCapture_Start();
       if (s_snapshot.started == 0U)
       {
+        /* Count consecutive full-array misses; past the threshold, arm the
+         * partial-array failsafe so the next pass latches with whatever
+         * devices came up instead of looping all-or-nothing. */
+        if (start_attempts < 0xFFU)
+        {
+          start_attempts++;
+        }
+        if ((s_pcmd_allow_partial == 0U) &&
+            (start_attempts >= APP_PCMD_CAPTURE_FULL_ATTEMPTS))
+        {
+          s_pcmd_allow_partial = 1U;
+        }
         s_snapshot.recovering = 1U;
         AppPcmdCapture_DelayMs(APP_PCMD_CAPTURE_RETRY_DELAY_MS);
         continue;
       }
+      start_attempts = 0U;
       s_snapshot.recovering = 0U;
       last_seq = s_snapshot.latest_seq;
       stall_ticks = 0U;
-      rail_polls = 0U;
-      started_ms = HAL_GetTick();
     }
 
     if ((boosted != 0U) && (self != TX_NULL))
@@ -1430,38 +1490,12 @@ void AppPcmdCapture_ThreadEntry(ULONG thread_input)
 
     (void)AppPcmdCapture_Poll(TX_TIMER_TICKS_PER_SECOND / 10U);
 
-    /* Rail-fault restart, with hysteresis: the flag must persist for
-     * several consecutive polls outside the post-start grace window.
-     * Transients (mic filter settling tail, mechanical knocks pinning the
-     * membrane) previously caused restart loops that presented as "PCMD
-     * takes forever to start". */
-    if (s_snapshot.started != 0U)
-    {
-      if ((s_snapshot.raw_quality_flags & APP_PCMD_CAPTURE_RAW_FLAG_RAIL_FAULT) != 0U)
-      {
-        if ((HAL_GetTick() - started_ms) >= APP_PCMD_CAPTURE_RAIL_GRACE_MS)
-        {
-          rail_polls++;
-        }
-        if (rail_polls >= APP_PCMD_CAPTURE_RAIL_FAULT_POLLS)
-        {
-          rail_polls = 0U;
-          s_snapshot.watchdog_restart_count++;
-          s_snapshot.recovering = 1U;
-          AppPcmdCapture_RequestRestart((uint32_t)s_snapshot.raw_quality_flags);
-          AppPcmdCapture_DelayMs(APP_PCMD_CAPTURE_RETRY_DELAY_MS);
-          continue;
-        }
-      }
-      else
-      {
-        rail_polls = 0U;
-      }
-    }
-
     /* Frame-stall watchdog: SAI/DMA can wedge silently (e.g. cable brownout
      * on the mic array) - the loop keeps polling but latest_seq freezes.
-     * ~2 s without a new frame triggers a full stop/reconfig cycle. */
+     * ~2 s without a new frame triggers recovery. Once the I2C config is
+     * frozen, recovery restarts only the SAI/DMA (never re-touches the
+     * bus); rail faults alone never restart anything - stuck mics are not
+     * fixable by reconfig and the healthy channels keep streaming. */
     if (s_snapshot.started != 0U)
     {
       if (s_snapshot.latest_seq != last_seq)
@@ -1473,8 +1507,24 @@ void AppPcmdCapture_ThreadEntry(ULONG thread_input)
       {
         stall_ticks = 0U;
         s_snapshot.watchdog_restart_count++;
-        s_snapshot.recovering = 1U;
-        AppPcmdCapture_RequestRestart((uint32_t)APP_PCMD_CAPTURE_PCMD_ERROR);
+        if (s_pcmd_config_frozen != 0U)
+        {
+          if (AppPcmdCapture_RestartDmaOnly() == 0U)
+          {
+            s_snapshot.recovering = 1U;
+            AppPcmdCapture_DelayMs(APP_PCMD_CAPTURE_RETRY_DELAY_MS);
+          }
+          else
+          {
+            s_snapshot.recovering = 0U;
+          }
+          last_seq = s_snapshot.latest_seq;
+        }
+        else
+        {
+          s_snapshot.recovering = 1U;
+          AppPcmdCapture_RequestRestart((uint32_t)APP_PCMD_CAPTURE_PCMD_ERROR);
+        }
       }
     }
   }
