@@ -208,6 +208,11 @@ struct AppUiSnapshot
     uint8_t touchReady;
     uint8_t touchDown;
     uint8_t touchIc;
+    /* Touch bring-up diagnostics for the on-screen fault banner (the touch
+     * failure itself blocks any touch-driven diagnosis). */
+    uint8_t touchLastError;
+    uint8_t touchHalStatus;
+    uint16_t touchInitAttempts;
     uint8_t qualityPct;
     uint8_t contrastPct;
     uint8_t candCount;

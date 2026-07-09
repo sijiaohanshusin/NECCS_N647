@@ -866,6 +866,10 @@ void pollTouch(AppUiSnapshot& snapshot)
     snapshot.touchY = touch.y;
     snapshot.touchRawX = touch.raw_x;
     snapshot.touchRawY = touch.raw_y;
+    snapshot.touchLastError = static_cast<uint8_t>(touch.last_error);
+    snapshot.touchHalStatus = static_cast<uint8_t>(touch.last_hal_status);
+    snapshot.touchInitAttempts =
+        static_cast<uint16_t>((touch.init_attempts <= 0xFFFFU) ? touch.init_attempts : 0xFFFFU);
 }
 
 void pollPower(AppUiSnapshot& snapshot)

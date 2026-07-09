@@ -1318,14 +1318,26 @@ void TemplateView::refreshStatusBar(const AppUiSnapshot& snapshot)
     }
     fpsLabel.setText(text);
 
-    /* Mic-array health toast: reconnecting while the watchdog cycles, a
-     * persistent failure message if it keeps failing. Hidden on boot page. */
+    /* Health toast. Touch failure outranks the mic banner: without touch the
+     * user cannot navigate at all, and the on-screen codes are the only
+     * diagnosis channel (a dead touch blocks any touch-driven debug UI).
+     * >=5 init attempts = ~5 s of 1 Hz retries, well past normal bring-up. */
     const bool onBoot = (activeScreen == APP_UI_SCREEN_BOOT);
+    const bool touchFault = (snapshot.touchReady == 0U) &&
+                            (snapshot.touchInitAttempts >= 5U);
     const bool recovering = (snapshot.pcmdFlags & APP_UI_PCMD_FLAG_RECOVERING) != 0U;
-    const bool show = recovering && !onBoot;
+    const bool show = (touchFault || recovering) && !onBoot;
     if (show)
     {
-        if (snapshot.pcmdWatchdogRestarts >= 3U)
+        if (touchFault)
+        {
+            (void)snprintf(text, sizeof(text), "触摸异常 E%u H%u N%u",
+                           snapshot.touchLastError,
+                           snapshot.touchHalStatus,
+                           snapshot.touchInitAttempts);
+            alertLabel.setText(text);
+        }
+        else if (snapshot.pcmdWatchdogRestarts >= 3U)
         {
             alertLabel.setText("麦克风阵列异常, 请检查连接");
         }

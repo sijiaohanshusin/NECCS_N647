@@ -243,6 +243,14 @@ int main(void)
   App_MPU_ConfigNonCacheable();
   App_BootDiag_SetStage(APP_BOOT_STAGE_MAIN_ENTER);
 
+  /* Keep the debug interface clocked on cold/XIP boots: with the strap on
+   * external-Flash boot the BootROM does not leave DBGMCU running, so SWD
+   * attach failed ("cannot get core ID") on the assembled unit and Release
+   * issues could not be inspected live. Debug builds get this from the
+   * probe; enabling it here costs nothing and keeps Release attachable. */
+  __HAL_RCC_DBGMCU_CLK_ENABLE();
+  __HAL_RCC_DBG_CLK_ENABLE();
+
   /* USER CODE END 1 */
 
   /* Enable the CPU Cache */
@@ -305,6 +313,17 @@ int main(void)
     extern uint8_t _sextram;
     extern uint8_t _eextram;
     memset(&_sextram, 0, (size_t)(&_eextram - &_sextram));
+  }
+
+  /* .SRP_FAST is NOLOAD too (SRP workspace: FFT buffers, GCC accumulators,
+   * smoothing history). Nothing else zeroes it: on a Release/XIP cold boot
+   * the SRAM behind it is random garbage, which fed the SRP pipeline junk
+   * spectra and produced wildly wrong localisation. RAM-debug runs masked
+   * this because the SRAM usually held zeros or a previous run's data. */
+  {
+    extern uint8_t __ssrp_fast;
+    extern uint8_t __esrp_fast;
+    memset(&__ssrp_fast, 0, (size_t)(&__esrp_fast - &__ssrp_fast));
   }
 
   /* Clear the UI framebuffer to black before the panel/backlight comes up:
