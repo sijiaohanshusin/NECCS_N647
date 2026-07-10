@@ -1702,6 +1702,19 @@ void TemplateView::refreshSystemPage(const AppUiSnapshot& snapshot)
     sysInfoValue[8].setText(text);
 
     sysInfoValue[9].setText(__DATE__);
+
+    /* Live NPU telemetry in the acceleration credit line. */
+    if (snapshot.npuActive != 0U)
+    {
+        (void)snprintf(text, sizeof(text), "NPU 运行中 %luk 次 · %u µs/次",
+                       static_cast<unsigned long>(snapshot.npuInferences / 1000U),
+                       snapshot.npuLatencyUs);
+        char line[96];
+        (void)snprintf(line, sizeof(line),
+                       "N6 硬件加速: GPU2D · DMA2D · JPEG · Helium DSP · %s",
+                       (snapshot.npuInferences >= 1000U) ? text : "NPU 运行中");
+        sysAccelLabel.setText(line);
+    }
 }
 
 void TemplateView::refreshParamsPage(const AppUiSnapshot& snapshot)

@@ -157,6 +157,10 @@ struct AppUiSnapshot
     uint32_t pcmdRawRailSampleCount;
     uint32_t pcmdRawTotalSampleCount;
     uint32_t pcmdWatchdogRestarts;
+    /* Neural-ART sound classifier telemetry. */
+    uint32_t npuInferences;
+    uint16_t npuLatencyUs;
+    uint8_t npuActive;
     uint32_t acousticFlags;
     uint32_t acousticInputSeq;
     uint32_t acousticOutputSeq;

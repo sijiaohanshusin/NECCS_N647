@@ -37,6 +37,11 @@ int32_t AppNpu_Init(void);
  * 2048 bytes). Pass NULL to use a synthetic ramp test pattern. */
 int32_t AppNpu_RunInference(const int8_t *spectrogram_2048);
 
+/* Live path: push one 64-bin display spectrum frame (uint8). A 32-frame
+ * rolling window is kept internally; every 8th frame triggers one NPU
+ * inference (~0.4 ms in the caller's context). */
+void AppNpu_FeedSpectrum(const uint8_t *spectrum_64);
+
 void AppNpu_GetSnapshot(AppNpuSnapshot_t *snapshot);
 
 /* Bring-up poll hook: services g_app_npu_test_request (SWD-driven). */

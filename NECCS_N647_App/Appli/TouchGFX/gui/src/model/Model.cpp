@@ -707,6 +707,15 @@ void pollAcoustic(AppUiSnapshot& snapshot)
     updateAiClassifier(snapshot);
 
     {
+        AppNpuSnapshot_t npu;
+        AppNpu_GetSnapshot(&npu);
+        snapshot.npuInferences = npu.inference_count;
+        snapshot.npuLatencyUs = (uint16_t)((npu.last_us > 0xFFFFU) ? 0xFFFFU : npu.last_us);
+        snapshot.npuActive = (uint8_t)((npu.initialized != 0U) && (npu.last_status == 0U) &&
+                                       (npu.inference_count != 0U));
+    }
+
+    {
         AppAcousticFieldParams_t fieldParams;
         AppAcousticService_GetFieldParams(&fieldParams);
         snapshot.fieldDbFloor = (int8_t)(fieldParams.db_floor - 0.5f);

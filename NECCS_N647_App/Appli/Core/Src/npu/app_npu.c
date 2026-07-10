@@ -173,6 +173,46 @@ void AppNpu_GetSnapshot(AppNpuSnapshot_t *snapshot)
   }
 }
 
+/* 32-frame rolling spectrum window, fed by the acoustic service thread. */
+static int8_t s_spec_window[32U * 64U];
+static uint32_t s_spec_head;
+static uint32_t s_spec_feeds;
+
+void AppNpu_FeedSpectrum(const uint8_t *spectrum_64)
+{
+  int8_t *row;
+
+  if (spectrum_64 == NULL)
+  {
+    return;
+  }
+
+  row = &s_spec_window[s_spec_head * 64U];
+  for (uint32_t i = 0U; i < 64U; ++i)
+  {
+    /* uint8 0..255 -> int8 -128..127, matching the quantized input. */
+    row[i] = (int8_t)((int32_t)spectrum_64[i] - 128);
+  }
+  s_spec_head = (s_spec_head + 1U) % 32U;
+  s_spec_feeds++;
+
+  /* Inference every 8 frames (~0.8 s at the ~10 Hz acoustic rate), and
+   * only once the window has fully filled at least once. */
+  if ((s_spec_feeds >= 32U) && ((s_spec_feeds & 7U) == 0U))
+  {
+    /* Assemble in time order: oldest row first. */
+    static int8_t ordered[32U * 64U];
+
+    for (uint32_t r = 0U; r < 32U; ++r)
+    {
+      const uint32_t src_row = (s_spec_head + r) % 32U;
+
+      memcpy(&ordered[r * 64U], &s_spec_window[src_row * 64U], 64U);
+    }
+    (void)AppNpu_RunInference(ordered);
+  }
+}
+
 void AppNpu_Poll(void)
 {
   if (g_app_npu_test_request != 0U)
