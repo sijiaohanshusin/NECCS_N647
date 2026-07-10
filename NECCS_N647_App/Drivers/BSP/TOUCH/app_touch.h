@@ -38,6 +38,19 @@ typedef struct
   uint32_t consecutive_error_count;
   uint32_t cooldown_count;
   uint32_t reinit_count;
+  /* Diagnostics split: bus-mutex wait timeouts (benign contention with the
+   * camera) vs real wire-level failures (NACK/arbitration = flaky panel
+   * link). Only wire errors should trigger reinit. */
+  uint32_t lock_timeout_count;
+  uint32_t wire_error_count;
+  /* GT911 config-table head (regs 0x8047..0x804E) read back at init:
+   * [0]=cfg version, [1..2]=X resolution LE, [3..4]=Y resolution LE,
+   * [5]=touch number, [6]=module switch 1, [7]=module switch 2.
+   * cfg_read_ok=1 when the readback itself succeeded. An all-zero head on
+   * a chip that ACKs = the controller's NVM config failed to load and it
+   * will never report touches (root cause of the dead 7" panel). */
+  uint8_t cfg_head[8];
+  uint8_t cfg_read_ok;
 } AppTouchSnapshot_t;
 
 uint8_t AppTouch_Init(void);
