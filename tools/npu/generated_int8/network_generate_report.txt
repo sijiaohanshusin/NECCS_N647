@@ -1,5 +1,5 @@
 ST Edge AI Core v4.0.0-20500 359356bb0
-Created date          : 2026-07-11 03:04:52
+Created date          : 2026-07-11 03:25:22
 Parameters            : generate --model tools\npu\toy_sound_classifier_int8.onnx --target stm32n6 --st-neural-art --output tools\npu\generated_int8
 
 Model name - toy_sound_classifier_int8
@@ -58,21 +58,15 @@ m_id   layer (original)                                    oshape               
 ------ --------------------------------------------------- ---------------------- -------------- --------- -------------------------------- 
 31     flat_DequantizeLinear_Output (DequantizeLinear)     [b:1,c:1024]                              2,048       flat_QuantizeLinear_Output 
 ------ --------------------------------------------------- ---------------------- -------------- --------- -------------------------------- 
-32     logits (Gemm)                                       [b:1,c:6]                                 6,150     flat_DequantizeLinear_Output 
+32     class_scores_Quant..near_Input (Gemm)               [b:1,c:6]                                 6,150     flat_DequantizeLinear_Output 
                                                                                                              fc_w_DequantizeLin..tput_const 
                                                                                                                                  fc_b_const 
 ------ --------------------------------------------------- ---------------------- -------------- --------- -------------------------------- 
-33     logits_QuantizeLinear_Output (QuantizeLinear)       [b:1,c:6]                                    12                           logits 
+33     class_scores_Quant..ear_Output (QuantizeLinear)     [b:1,c:6]                                    12   class_scores_Quant..near_Input 
 ------ --------------------------------------------------- ---------------------- -------------- --------- -------------------------------- 
-34     logits_DequantizeLinear_Output (DequantizeLinear)   [b:1,c:6]                                    12     logits_QuantizeLinear_Output 
+34     class_scores (DequantizeLinear)                     [b:1,c:6]                                    12   class_scores_Quant..ear_Output 
 ------ --------------------------------------------------- ---------------------- -------------- --------- -------------------------------- 
-35     class_scores_Quant..near_Input (Softmax)            [b:1,c:6]                                    90   logits_DequantizeLinear_Output 
------- --------------------------------------------------- ---------------------- -------------- --------- -------------------------------- 
-36     class_scores_Quant..ear_Output (QuantizeLinear)     [b:1,c:6]                                    12   class_scores_Quant..near_Input 
------- --------------------------------------------------- ---------------------- -------------- --------- -------------------------------- 
-37     class_scores (DequantizeLinear)                     [b:1,c:6]                                    12   class_scores_Quant..ear_Output 
------- --------------------------------------------------- ---------------------- -------------- --------- -------------------------------- 
-model: macc=1,517,768 weights=48,152 activations=-- io=--
+model: macc=1,517,654 weights=48,152 activations=-- io=--
 
 
 
@@ -93,23 +87,23 @@ Memory usage information  (input/output buffers are included in activations)
 	npuRAM4    [0x34270000 - 0x342E0000]:          0  B /    448.000 kB  (  0.00 % used) -- weights:          0  B (  0.00 % used)  activations:          0  B (  0.00 % used)
 	npuRAM5    [0x342E0000 - 0x34350000]:      6.000 kB /    448.000 kB  (  1.34 % used) -- weights:          0  B (  0.00 % used)  activations:      6.000 kB (  1.34 % used)
 	npuRAM6    [0x34350000 - 0x343C0000]:          0  B /    448.000 kB  (  0.00 % used) -- weights:          0  B (  0.00 % used)  activations:          0  B (  0.00 % used)
-	octoFlash  [0x71000000 - 0x78000000]:     12.063 kB /    112.000 MB  (  0.01 % used) -- weights:     12.063 kB (  0.01 % used)  activations:          0  B (  0.00 % used)
+	octoFlash  [0x71000000 - 0x78000000]:     12.001 kB /    112.000 MB  (  0.01 % used) -- weights:     12.001 kB (  0.01 % used)  activations:          0  B (  0.00 % used)
 	hyperRAM   [0x90000000 - 0x92000000]:          0  B /     32.000 MB  (  0.00 % used) -- weights:          0  B (  0.00 % used)  activations:          0  B (  0.00 % used)
 ---
-Total:                                            18.063 kB                                  -- weights:     12.063 kB                  activations:      6.000 kB                   
+Total:                                            18.001 kB                                  -- weights:     12.001 kB                  activations:      6.000 kB                   
 ====================================================================================
 
 
 Used memory ranges
 ------------------------------------------------------------------------------------
 	npuRAM5    [0x342E0000 - 0x34350000]: 0x342E0000-0x342E1800
-	octoFlash  [0x71000000 - 0x78000000]: 0x71000000-0x71003050
+	octoFlash  [0x71000000 - 0x78000000]: 0x71000000-0x71003010
 ====================================================================================
 
 Epochs details
 ------------------------------------------------------------------------------------
-Total number of epochs                               7
->> pure software (SW) epochs                         1
+Total number of epochs                               6
+>> pure software (SW) epochs                         0
 >> hybrid epochs (using both software and hardware)  0
 >> pure hardware (HW or EC) epochs                   6  (implemented in 0 epoch controller blobs/meta epochs)
 ---
@@ -122,6 +116,5 @@ Total number of epochs                               7
 | epoch_4  |  HW  |         |
 | epoch_5  |  HW  |         |
 | epoch_6  |  HW  |         |
-| epoch_7  |  SW  | Softmax |
 +----------+------+---------+
 ====================================================================================

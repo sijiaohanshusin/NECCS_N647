@@ -42,6 +42,16 @@
 			<locationURI>PARENT-2-PROJECT_LOC/Drivers/BSP</locationURI>
 		</link>
 		<link>
+			<name>Drivers/NPU</name>
+			<type>2</type>
+			<locationURI>PARENT-2-PROJECT_LOC/Drivers/NPU</locationURI>
+		</link>
+		<link>
+			<name>Application/User/Core/npu</name>
+			<type>2</type>
+			<locationURI>PARENT-2-PROJECT_LOC/Appli/Core/Src/npu</locationURI>
+		</link>
+		<link>
 			<name>Drivers/BSP/PCMD3180/pcmd3180.c</name>
 			<type>1</type>
 			<locationURI>PARENT-2-PROJECT_LOC/Drivers/BSP/PCMD3180/pcmd3180.c</locationURI>
@@ -65,6 +75,11 @@
 			<name>Drivers/STM32N6xx_HAL_Driver/stm32n6xx_hal_cortex.c</name>
 			<type>1</type>
 			<locationURI>PARENT-2-PROJECT_LOC/Drivers/STM32N6xx_HAL_Driver/Src/stm32n6xx_hal_cortex.c</locationURI>
+		</link>
+		<link>
+			<name>Drivers/STM32N6xx_HAL_Driver/stm32n6xx_hal_cacheaxi.c</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/Drivers/STM32N6xx_HAL_Driver/Src/stm32n6xx_hal_cacheaxi.c</locationURI>
 		</link>
 		<link>
 			<name>Drivers/STM32N6xx_HAL_Driver/stm32n6xx_hal_crc.c</name>

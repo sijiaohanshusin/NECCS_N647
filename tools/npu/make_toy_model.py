@@ -48,8 +48,10 @@ def main():
         helper.make_node("Relu", ["c3"], ["r3"]),
         helper.make_node("MaxPool", ["r3"], ["p3"], kernel_shape=[2, 2], strides=[2, 2]),
         helper.make_node("Flatten", ["p3"], ["flat"]),
-        helper.make_node("Gemm", ["flat", "fc_w", "fc_b"], ["logits"], transB=1),
-        helper.make_node("Softmax", ["logits"], ["class_scores"]),
+        # No Softmax on purpose: raw logits keep the whole graph on NPU
+        # hardware epochs (softmax was the lone SW epoch and drags in the
+        # X-CUBE-AI kernel library); the app applies softmax to 6 values.
+        helper.make_node("Gemm", ["flat", "fc_w", "fc_b"], ["class_scores"], transB=1),
     ]
 
     graph = helper.make_graph(

@@ -5,11 +5,11 @@
             "model_files": [
                 {
                     "name": "toy_sound_classifier_int8_OE_3_3_1.onnx",
-                    "signature": "0xf58069aa04bd83259f2ee41020d36696"
+                    "signature": "0xd9bb68ff2e9cfb8e531af441d335cd1f"
                 }
             ],
             "name": "network",
-            "generated_time": "2026-07-11T03:04:50+0800"
+            "generated_time": "2026-07-11T03:25:19+0800"
         },
         "tools": [
             {
@@ -21,7 +21,7 @@
                     "model_files": [
                         {
                             "name": "toy_sound_classifier_int8.onnx",
-                            "signature": "0x5e1f810f6e78c518e17613dc43593b43"
+                            "signature": "0x56fae9a43cb64376c77830d6725f183f"
                         }
                     ],
                     "name": "toy_sound_classifier_int8",
@@ -32,7 +32,7 @@
             }
         ],
         "test_name": "",
-        "network_signature": "0x78597717493cd53d"
+        "network_signature": "0x7f339f017bc958e9"
     },
     "model_info": {
         "original_inputs": [
@@ -72,10 +72,10 @@
                     "type": "SIGNED",
                     "size": 8,
                     "scale": [
-                        0.003921568859368563
+                        0.0017572975484654307
                     ],
                     "zero": [
-                        -128
+                        -24
                     ],
                     "quantizer": "UNIFORM"
                 },
@@ -734,48 +734,6 @@
                 ],
                 "class": "integer",
                 "type": "S8"
-            }
-        },
-        "Dequantize_20_out_0": {
-            "format": {
-                "params": [
-                    [
-                        0.0017572975484654307
-                    ],
-                    [
-                        -24
-                    ]
-                ],
-                "class": "integer",
-                "type": "S8"
-            }
-        },
-        "Softmax_21_out_0": {
-            "format": {
-                "params": [
-                    [
-                        0.003921568859368563
-                    ],
-                    [
-                        -128
-                    ]
-                ],
-                "class": "integer",
-                "type": "S8"
-            }
-        },
-        "Quantize_22_out_0": {
-            "format": {
-                "params": [
-                    [
-                        0.003921568859368563
-                    ],
-                    [
-                        -128
-                    ]
-                ],
-                "class": "integer",
-                "type": "S8"
             },
             "data_channel_position": "CHFIRST",
             "data_channel_batch": 1,
@@ -888,24 +846,7 @@
                 "p3_QuantizeLinear_Output"
             ]
         },
-        "Gemm_18": {
-            "names": [
-                "logits",
-                "flat_DequantizeLinear_Output",
-                "flat_QuantizeLinear_Output"
-            ]
-        },
         "Quantize_19": {
-            "names": [
-                "__FE_GENERATED__"
-            ]
-        },
-        "Dequantize_20": {
-            "names": [
-                "__FE_GENERATED__"
-            ]
-        },
-        "Quantize_22": {
             "names": [
                 "__FE_GENERATED__"
             ]
