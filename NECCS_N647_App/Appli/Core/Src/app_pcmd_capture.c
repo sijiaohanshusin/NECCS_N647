@@ -54,11 +54,18 @@
 #endif
 
 #ifndef APP_PCMD_CAPTURE_STATUS_READ_ON_START
-#define APP_PCMD_CAPTURE_STATUS_READ_ON_START 0U
+/* Read the real device registers into device_status[] right after config
+ * (one extra status read per device inside the same I2C window). Without
+ * this the snapshot holds fabricated expected values, which made the
+ * dead-PDM-lane investigation chase phantom "healthy" registers. */
+#define APP_PCMD_CAPTURE_STATUS_READ_ON_START 1U
 #endif
 
 #ifndef APP_PCMD_CAPTURE_STATUS_POLL_MS
-#define APP_PCMD_CAPTURE_STATUS_POLL_MS      0U
+/* Diagnostic build: poll the real device registers (incl. GPI_MON, the
+ * live PDM data-pin sampler) every 2 s while streaming. Only active when
+ * g_app_pcmd_debug_ui_enable is set from the debugger. */
+#define APP_PCMD_CAPTURE_STATUS_POLL_MS      2000U
 #endif
 
 extern SAI_HandleTypeDef hsai_BlockA1;
@@ -887,6 +894,9 @@ static AppPcmdCaptureStatus_t AppPcmdCapture_ConfigPcmdDevices(void)
         s_snapshot.device_config_ok_mask = (uint8_t)(s_snapshot.device_config_ok_mask | device_mask);
         s_snapshot.device_status_ok_mask = (uint8_t)(s_snapshot.device_status_ok_mask | device_mask);
 #if (APP_PCMD_CAPTURE_STATUS_READ_ON_START != 0U)
+        /* Diagnostic-only readback of the REAL registers: expose them in
+         * the snapshot (SWD/system page) but never drop a configured device
+         * over a glitchy read - that caused the all-or-nothing loops. */
         status_status = PCMD3180_ReadStatus(&s_pcmd_handles[index],
                                             &s_snapshot.device_status[index]);
         if ((status_status == PCMD3180_OK) &&
@@ -898,6 +908,7 @@ static AppPcmdCaptureStatus_t AppPcmdCapture_ConfigPcmdDevices(void)
         {
           s_snapshot.device_status_ok_mask = (uint8_t)(s_snapshot.device_status_ok_mask & (uint8_t)~device_mask);
         }
+        status_status = PCMD3180_OK;
 #else
         status_status = PCMD3180_OK;
 #endif
@@ -1230,6 +1241,15 @@ AppPcmdCaptureStatus_t AppPcmdCapture_Init(AppMicArrayMode_t mode)
      * + a separate Activate sweep) left most PDM front-ends silent - only
      * 1-2 of 32 slots carried real modulator data. Do not defer. */
     s_pcmd_configs[index].defer_power_up = 0U;
+    /* Per-register write-verify-retry: live readback (2026-07-10) caught
+     * ACKed writes landing with corrupted VALUES on the pull-up-less bus
+     * (slot regs holding 0xFE / colliding slot numbers -> silent PDM lanes,
+     * garbage localisation). Every config write must close the loop. */
+    s_pcmd_configs[index].verify_writes = 1U;
+    /* No MICBIAS: PDM mics are digitally supplied; the H7-proven power
+     * value is PWR_CFG=0x60 (PLL+PDM only). Tested 2026-07-10: bias on
+     * only lifted the noise floor slightly, no lanes woke up. */
+    s_pcmd_configs[index].enable_micbias = 0U;
   }
 
   s_snapshot.initialized = 1U;
@@ -1309,22 +1329,28 @@ AppPcmdCaptureStatus_t AppPcmdCapture_Start(void)
   }
 
   AppPcmdCapture_DelayMs(APP_PCMD_CAPTURE_POST_CONFIG_SETTLE_MS);
-  AppPcmdCapture_StopDma();
+  /* NEVER stop/restart the SAI here. The PCMD3180 is a clock slave: its
+   * PLL locks to our BCLK, and stopping the SAI (even briefly, to re-arm
+   * the DMA) drops BCLK -> PLL-lock-lost + ASI-clock-error latch on every
+   * device (read live 2026-07-10: INT_LTCH0=0xC0 on all four) -> PDMCLK to
+   * the microphones stops -> the entire array reads digital silence even
+   * though every register is correct. This restart was THE root cause of
+   * the "mics receive bad data" P0. Keep the first DMA run alive and just
+   * discard the halves captured during the config window. */
+  AppPcmdCapture_ClearRawAccumulator();
+  AppPcmdCapture_ArmDiscardHalves(APP_PCMD_CAPTURE_POST_CONFIG_DISCARD_HALVES);
   AppPcmdCapture_ClearPendingDmaEvents();
-  hal_status = AppPcmdCapture_StartSaiDma(APP_PCMD_CAPTURE_POST_CONFIG_DISCARD_HALVES, 1U);
-  if (hal_status != HAL_OK)
-  {
-    s_snapshot.start_status = APP_PCMD_CAPTURE_HAL_ERROR;
-    AppPcmdCapture_StopDma();
-    return APP_PCMD_CAPTURE_HAL_ERROR;
-  }
 
   s_raw_accum_enabled = 1U;
   s_snapshot.started = 1U;
   s_snapshot.start_status = APP_PCMD_CAPTURE_OK;
   /* One-time I2C configuration succeeded: freeze the bus. The devices keep
    * their registers and audio flows over SAI, so I2C is never touched again
-   * (frame stalls recover via DMA-only restart). */
+   * (frame stalls recover via DMA-only restart). Tri-state the soft-I2C
+   * wires entirely: on this harness they are coupled with the PDM lines,
+   * and any driven idle level clamps most microphone lanes to digital
+   * silence (the "bad mic data" P0). */
+  PCMD3180_HAL_TriStateBusPins(&s_hal_context);
   s_pcmd_config_frozen = 1U;
   App_BringUpStatus_Ready(APP_BRINGUP_MODULE_PCMD_RAW, APP_PCMD_CAPTURE_OK);
   return APP_PCMD_CAPTURE_OK;

@@ -60,6 +60,9 @@ void PCMD3180_HAL_DelayMs(void *context, uint32_t delay_ms);
 
 void PCMD3180_HAL_SetShutdown(void *context, uint8_t asserted);
 
+/* Release SCL/SDA to Hi-Z inputs (post-config; wires shared with PDM). */
+void PCMD3180_HAL_TriStateBusPins(PCMD3180_HAL_BusContextTypeDef *context);
+
 #ifdef __cplusplus
 }
 #endif
