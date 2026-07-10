@@ -2009,17 +2009,46 @@ static uint32_t decode_jpeg_preview(uint32_t jpeg_size, uint32_t frame_index, ui
   }
 
   memset(s_jpeg_decode_buffer, 0, output_bytes);
-  if (HAL_JPEG_Decode(&s_jpeg_handle,
-                      s_jpeg_buffer,
-                      padded_size,
-                      s_jpeg_decode_buffer,
-                      output_bytes,
-                      APP_MEDIA_JPEG_TIMEOUT_MS) != HAL_OK)
   {
-    s_jpeg_encode_configured = 0U;
-    preview_clear();
-    status_set_error(APP_MEDIA_ERROR_JPEG);
-    return APP_MEDIA_ERROR_JPEG;
+    HAL_StatusTypeDef decode_status = HAL_ERROR;
+
+    for (uint32_t attempt = 0U; attempt < 2U; ++attempt)
+    {
+      /* Back-to-back decodes can leave the codec wedged (observed live:
+       * HAL_JPEG_ERROR_TIMEOUT on the second playback frame once the
+       * DMA2D conversion shortened the inter-frame gap). Heal with a
+       * full peripheral reset instead of failing the frame. */
+      if ((attempt != 0U) || (HAL_JPEG_GetState(&s_jpeg_handle) != HAL_JPEG_STATE_READY))
+      {
+        (void)HAL_JPEG_Abort(&s_jpeg_handle);
+        (void)HAL_JPEG_DeInit(&s_jpeg_handle);
+        s_jpeg_ready = 0U;
+        s_jpeg_encode_configured = 0U;
+        if (ensure_jpeg_ready() != APP_MEDIA_ERROR_NONE)
+        {
+          continue;
+        }
+      }
+
+      decode_status = HAL_JPEG_Decode(&s_jpeg_handle,
+                                      s_jpeg_buffer,
+                                      padded_size,
+                                      s_jpeg_decode_buffer,
+                                      output_bytes,
+                                      APP_MEDIA_JPEG_TIMEOUT_MS);
+      if (decode_status == HAL_OK)
+      {
+        break;
+      }
+    }
+
+    if (decode_status != HAL_OK)
+    {
+      s_jpeg_encode_configured = 0U;
+      preview_clear();
+      status_set_error(APP_MEDIA_ERROR_JPEG);
+      return APP_MEDIA_ERROR_JPEG;
+    }
   }
   /* Decoding reprograms the codec registers from the JFIF header, so the
    * encoder configuration must be re-applied before the next encode. */
