@@ -243,6 +243,15 @@ int main(void)
   App_MPU_ConfigNonCacheable();
   App_BootDiag_SetStage(APP_BOOT_STAGE_MAIN_ENTER);
 
+  /* Keep the debug interface clocked on cold/XIP boots: with the strap on
+   * external-Flash boot the BootROM does not leave DBGMCU running, so SWD
+   * attach failed ("cannot get core ID") and Release issues could only be
+   * debugged blind. DBGCLKEN (DBGMCU_CR bit 20) is required on top of the
+   * RCC gates. Costs nothing in Debug builds. */
+  __HAL_RCC_DBGMCU_CLK_ENABLE();
+  __HAL_RCC_DBG_CLK_ENABLE();
+  DBGMCU->CR |= DBGMCU_CR_DBGCLKEN | DBGMCU_CR_DBG_SLEEP;
+
   /* USER CODE END 1 */
 
   /* Enable the CPU Cache */
@@ -305,6 +314,17 @@ int main(void)
     extern uint8_t _sextram;
     extern uint8_t _eextram;
     memset(&_sextram, 0, (size_t)(&_eextram - &_sextram));
+  }
+
+  /* .SRP_FAST is NOLOAD too (SRP workspace: FFT buffers, GCC accumulators,
+   * smoothing history). Nothing else zeroes it: on a Release/XIP cold boot
+   * the SRAM behind it is random garbage, which fed the SRP pipeline junk
+   * spectra and produced wildly wrong localisation. RAM-debug runs masked
+   * this because GDB loads left the SRAM in a benign state. */
+  {
+    extern uint8_t __ssrp_fast;
+    extern uint8_t __esrp_fast;
+    memset(&__ssrp_fast, 0, (size_t)(&__esrp_fast - &__ssrp_fast));
   }
 
   /* Clear the UI framebuffer to black before the panel/backlight comes up:
