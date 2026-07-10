@@ -19,11 +19,13 @@
 #define APP_MEDIA_THREAD_STACK_SIZE       12288U
 #define APP_MEDIA_THREAD_PRIORITY         12U
 #define APP_MEDIA_QUEUE_LENGTH            8U
-/* 64 KB media cache: the 8 KB original thrashed on every multi-file
- * operation (a thumbnail page alone streams ~280 KB through it). The SD
- * driver is CPU-polling (no DMA), so the cache can live in cached
- * HyperRAM without coherency concerns. */
-#define APP_MEDIA_FILEX_CACHE_SIZE        (128U * SD_NAND_BLOCK_SIZE)
+/* NOTE 2026-07-11: a 64 KB cache in .EXTRAM was tried and rolled back the
+ * same night - after one reboot the volume scan stopped finding files that
+ * a smaller internal-SRAM cache finds fine (VID/THM opens failing while
+ * the first few probes succeed). Root cause not yet isolated (suspect
+ * HyperRAM access pattern vs FileX FAT caching); keep the cache in
+ * internal SRAM until that is understood. */
+#define APP_MEDIA_FILEX_CACHE_SIZE        (16U * SD_NAND_BLOCK_SIZE)
 #define APP_MEDIA_FORMAT_SECTORS_CLUSTER  32U
 
 #define APP_MEDIA_FB_WIDTH                1024U
@@ -91,7 +93,7 @@ static uint8_t s_filex_ready = 0U;
 static FX_MEDIA s_media;
 static FX_FILE s_work_file;
 static FX_FILE s_record_file;
-static uint8_t s_filex_cache[APP_MEDIA_FILEX_CACHE_SIZE] __attribute__((section(".EXTRAM"), aligned(32)));
+static uint8_t s_filex_cache[APP_MEDIA_FILEX_CACHE_SIZE] __attribute__((aligned(32)));
 static uint8_t s_boot_sector[SD_NAND_BLOCK_SIZE] __attribute__((aligned(32)));
 /* CPU-only staging buffers (FileX copies through its own cache and the JPEG
  * codec is fed by CPU FIFO writes, no DMA): cached external RAM is fine and
@@ -244,7 +246,8 @@ static void preview_clear(void)
   status_unlock();
 }
 
-static void preview_commit(uint32_t type, uint32_t frame_index, uint32_t frame_count)
+static void preview_commit_sized(uint32_t type, uint32_t width, uint32_t height,
+                                 uint32_t frame_index, uint32_t frame_count)
 {
   clean_preview_cache();
 
@@ -252,11 +255,17 @@ static void preview_commit(uint32_t type, uint32_t frame_index, uint32_t frame_c
   s_status.flags |= APP_MEDIA_FLAG_PREVIEW_VALID;
   s_status.preview_generation++;
   s_status.preview_type = type;
-  s_status.preview_width = APP_MEDIA_PREVIEW_WIDTH;
-  s_status.preview_height = APP_MEDIA_PREVIEW_HEIGHT;
+  s_status.preview_width = width;
+  s_status.preview_height = height;
   s_status.preview_frame_index = frame_index;
   s_status.preview_frame_count = frame_count;
   status_unlock();
+}
+
+static void preview_commit(uint32_t type, uint32_t frame_index, uint32_t frame_count)
+{
+  preview_commit_sized(type, APP_MEDIA_PREVIEW_WIDTH, APP_MEDIA_PREVIEW_HEIGHT,
+                       frame_index, frame_count);
 }
 
 static UINT file_read_exact(FX_FILE *file, void *buffer, ULONG bytes, uint32_t *bytes_read)
@@ -942,6 +951,32 @@ static void select_item(uint32_t type, uint32_t index)
   status_unlock();
 
   reset_video_playback();
+
+  /* Instant feedback: if the tapped item's thumbnail is resident in the
+   * current page, publish it as the preview right away (the widget scales
+   * it up). The full-resolution decode below then replaces it - the
+   * viewer never shows a stale/black frame while the SD read runs. */
+  for (uint32_t slot = 0U; slot < APP_MEDIA_THUMB_SLOTS; ++slot)
+  {
+    uint8_t slot_valid;
+    uint8_t slot_type;
+    uint32_t slot_index;
+
+    status_lock();
+    slot_valid = (uint8_t)(s_thumb_info.slot_used[slot] & s_thumb_info.slot_valid[slot]);
+    slot_type = s_thumb_info.slot_type[slot];
+    slot_index = s_thumb_info.slot_index[slot];
+    status_unlock();
+
+    if ((slot_valid != 0U) && (slot_type == (uint8_t)type) && (slot_index == index))
+    {
+      memcpy(s_preview_buffer, s_thumb_buffer[slot],
+             (size_t)APP_MEDIA_THUMB_WIDTH * APP_MEDIA_THUMB_HEIGHT * 2U);
+      preview_commit_sized(type, APP_MEDIA_THUMB_WIDTH, APP_MEDIA_THUMB_HEIGHT, 0U, 0U);
+      break;
+    }
+  }
+
   (void)read_selected_file();
 }
 
@@ -1766,6 +1801,56 @@ static uint32_t select_next_file(void)
   return APP_MEDIA_ERROR_NONE;
 }
 
+/* Hardware YCbCr 4:2:0 MCU stream -> RGB565 conversion. The DMA2D input
+ * stage natively consumes the JPEG codec's block-interleaved MCU layout,
+ * which replaces the ~155k-multiply software loop per video frame. Only
+ * used for MCU-aligned images (all our MJPEG recordings are 512x304). */
+static uint32_t media_dma2d_convert_ycbcr(const uint8_t *mcu_stream,
+                                          uint32_t width,
+                                          uint32_t height,
+                                          uint16_t *dst)
+{
+  extern DMA2D_HandleTypeDef hdma2d;
+
+  hdma2d.Instance = DMA2D;
+  hdma2d.Init.Mode = DMA2D_M2M_PFC;
+  hdma2d.Init.ColorMode = DMA2D_OUTPUT_RGB565;
+  hdma2d.Init.OutputOffset = APP_MEDIA_PREVIEW_WIDTH - width;
+  hdma2d.Init.AlphaInverted = DMA2D_REGULAR_ALPHA;
+  hdma2d.Init.RedBlueSwap = DMA2D_RB_REGULAR;
+  hdma2d.Init.BytesSwap = DMA2D_BYTES_REGULAR;
+  hdma2d.Init.LineOffsetMode = DMA2D_LOM_PIXELS;
+  if (HAL_DMA2D_Init(&hdma2d) != HAL_OK)
+  {
+    return APP_MEDIA_ERROR_JPEG;
+  }
+
+  hdma2d.LayerCfg[1].InputColorMode = DMA2D_INPUT_YCBCR;
+  hdma2d.LayerCfg[1].ChromaSubSampling = DMA2D_CSS_420;
+  hdma2d.LayerCfg[1].InputOffset = 0U;
+  hdma2d.LayerCfg[1].AlphaMode = DMA2D_NO_MODIF_ALPHA;
+  hdma2d.LayerCfg[1].InputAlpha = 0xFFU;
+  hdma2d.LayerCfg[1].AlphaInverted = DMA2D_REGULAR_ALPHA;
+  hdma2d.LayerCfg[1].RedBlueSwap = DMA2D_RB_REGULAR;
+  if (HAL_DMA2D_ConfigLayer(&hdma2d, 1U) != HAL_OK)
+  {
+    return APP_MEDIA_ERROR_JPEG;
+  }
+
+  if (HAL_DMA2D_Start(&hdma2d, (uint32_t)(uintptr_t)mcu_stream,
+                      (uint32_t)(uintptr_t)dst, width, height) != HAL_OK)
+  {
+    return APP_MEDIA_ERROR_JPEG;
+  }
+  if (HAL_DMA2D_PollForTransfer(&hdma2d, 250U) != HAL_OK)
+  {
+    (void)HAL_DMA2D_Abort(&hdma2d);
+    return APP_MEDIA_ERROR_JPEG;
+  }
+
+  return APP_MEDIA_ERROR_NONE;
+}
+
 static uint32_t jpeg_parse_info(const uint8_t *data, uint32_t size, AppMediaJpegInfo_t *info)
 {
   uint32_t pos = 2U;
@@ -1956,8 +2041,33 @@ static uint32_t decode_jpeg_preview(uint32_t jpeg_size, uint32_t frame_index, ui
   dst_y0 = (APP_MEDIA_PREVIEW_HEIGHT - info.height) / 2U;
   src = s_jpeg_decode_buffer;
 
-  if (is_color != 0U)
+#ifndef APP_MEDIA_USE_DMA2D_DECODE
+#define APP_MEDIA_USE_DMA2D_DECODE 1
+#endif
+  if ((APP_MEDIA_USE_DMA2D_DECODE != 0) && (is_color != 0U) &&
+      ((info.width & 15U) == 0U) && ((info.height & 15U) == 0U))
   {
+    /* MCU-aligned color frame: hardware conversion. Cache dance: flush the
+     * memset zeros and the CPU-written MCU stream to RAM, then drop the
+     * destination lines so post-DMA reads (UI blit, THM writes) fetch the
+     * DMA2D output instead of stale cache content. */
+    uint16_t *dst = &s_preview_buffer[(dst_y0 * APP_MEDIA_PREVIEW_WIDTH) + dst_x0];
+
+    clean_preview_cache();
+    SCB_CleanDCache_by_Addr((void *)s_jpeg_decode_buffer, (int32_t)output_bytes);
+    SCB_InvalidateDCache_by_Addr((void *)s_preview_buffer, (int32_t)sizeof(s_preview_buffer));
+    __DSB();
+
+    if (media_dma2d_convert_ycbcr(src, info.width, info.height, dst) != APP_MEDIA_ERROR_NONE)
+    {
+      /* Hardware path failed: fall back to the software conversion. */
+      memset(s_preview_buffer, 0, sizeof(s_preview_buffer));
+      goto software_color_convert;
+    }
+  }
+  else if (is_color != 0U)
+  {
+software_color_convert:
     for (uint32_t mcu_y = 0U; mcu_y < mcu_rows; ++mcu_y)
     {
       for (uint32_t mcu_x = 0U; mcu_x < mcu_cols; ++mcu_x)
