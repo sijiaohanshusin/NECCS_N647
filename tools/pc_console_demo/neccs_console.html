@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>NECCS 声学成像仪 · 上位机控制台</title>
+<style>
+  :root {
+    --bg: #0a1018;
+    --panel: #101a26;
+    --panel2: #16232f;
+    --line: #23394a;
+    --blue: #3da5ff;
+    --blue-dim: #1d5c8f;
+    --text: #dce8f2;
+    --muted: #7d95a8;
+    --green: #38d18a;
+    --amber: #f2b33d;
+    --red: #f2503d;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { height: 100%; background: var(--bg); color: var(--text);
+    font-family: "Segoe UI", "Microsoft YaHei", sans-serif; overflow: hidden; }
+  #app { display: flex; flex-direction: column; height: 100%; }
+
+  #topbar { display: flex; align-items: center; gap: 16px; padding: 10px 20px;
+    background: var(--panel); border-bottom: 1px solid var(--line); }
+  #logo { display: flex; align-items: center; gap: 12px; }
+  #logo .mark { width: 34px; height: 34px; border-radius: 8px;
+    background: radial-gradient(circle at 35% 35%, #3da5ff 0%, #14538a 70%);
+    box-shadow: 0 0 14px #3da5ff55; position: relative; }
+  #logo .mark::after { content: ""; position: absolute; inset: 9px;
+    border: 2px solid #dff1ff; border-radius: 50%; border-left-color: transparent;
+    transform: rotate(-45deg); }
+  #logo h1 { font-size: 19px; font-weight: 600; letter-spacing: 1px; }
+  #logo .sub { font-size: 11px; color: var(--muted); letter-spacing: 2px; }
+  #badge { font-size: 12px; color: #9fc4e8; border: 1px solid var(--blue-dim);
+    padding: 4px 12px; border-radius: 14px; background: #12283a; }
+  #spacer { flex: 1; }
+  .conn { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted);
+    font-variant-numeric: tabular-nums; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--green);
+    box-shadow: 0 0 8px var(--green); animation: pulse 2s infinite; }
+  @keyframes pulse { 50% { opacity: .45; } }
+  #clock { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  #main { flex: 1; display: grid; grid-template-columns: 1fr 340px;
+    grid-template-rows: 1fr 200px; gap: 12px; padding: 12px 16px 16px; min-height: 0; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+  .card h2 { font-size: 13px; font-weight: 600; color: var(--muted); letter-spacing: 1px;
+    padding: 10px 14px 8px; display: flex; align-items: center; gap: 8px; }
+  .card h2 .tag { margin-left: auto; font-size: 11px; color: var(--blue);
+    background: #14283a; padding: 2px 8px; border-radius: 8px; font-weight: 400; }
+
+  #heatcard { grid-row: 1; grid-column: 1; position: relative; }
+  #heat { flex: 1; width: 100%; min-height: 0; }
+  #readout { position: absolute; right: 18px; top: 44px; text-align: right;
+    background: #0d151fd8; border: 1px solid var(--line); border-radius: 8px;
+    padding: 10px 14px; min-width: 128px; }
+  #readout .big { font-size: 24px; font-weight: 600; color: var(--blue);
+    font-variant-numeric: tabular-nums; }
+  #readout .small { font-size: 11px; color: var(--muted); margin-top: 1px; }
+  #readout .qrow { margin-top: 8px; font-size: 11px; color: var(--muted); }
+  #qbar { height: 5px; border-radius: 3px; background: var(--panel2); margin-top: 4px; }
+  #qfill { height: 100%; width: 0%; border-radius: 3px; background: var(--green); transition: width .4s; }
+
+  #right { grid-row: 1 / 3; grid-column: 2; display: flex; flex-direction: column;
+    gap: 12px; min-height: 0; }
+  #status .rows { padding: 4px 14px 12px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; }
+  .stat { background: var(--panel2); border-radius: 8px; padding: 8px 10px; }
+  .stat .k { font-size: 11px; color: var(--muted); }
+  .stat .v { font-size: 15px; font-weight: 600; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .ok { color: var(--green); } .warn { color: var(--amber); } .accent { color: var(--blue); }
+
+  #ai .body { padding: 4px 14px 12px; }
+  #aiclass { font-size: 21px; font-weight: 700; }
+  #aisub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  #aiconf-track { height: 8px; background: var(--panel2); border-radius: 4px; margin: 10px 0 4px; }
+  #aiconf { height: 100%; width: 0%; border-radius: 4px;
+    background: linear-gradient(90deg, var(--blue), var(--green)); transition: width .6s; }
+  #aiconf-label { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  #log { flex: 1; min-height: 0; }
+  #logbody { flex: 1; overflow: hidden; padding: 0 14px 10px;
+    font-family: Consolas, "Courier New", monospace; font-size: 11.5px;
+    line-height: 1.85; color: var(--muted); }
+  #logbody .t { color: #56718a; margin-right: 8px; }
+  #logbody .hl { color: var(--text); }
+  #logbody .ev { color: var(--amber); }
+
+  #ctrl .btns { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; padding: 4px 14px 14px; }
+  button { background: var(--panel2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 8px; padding: 10px 6px; font-size: 13px; cursor: pointer;
+    font-family: inherit; transition: all .15s; }
+  button:hover { border-color: var(--blue); color: var(--blue); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.active { background: #14324a; border-color: var(--blue); color: var(--blue); }
+  button.rec.on { background: #3a1512; border-color: var(--red); color: var(--red); }
+
+  #speccard { grid-row: 2; grid-column: 1; }
+  #spec { flex: 1; width: 100%; min-height: 0; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="topbar">
+    <div id="logo">
+      <div class="mark"></div>
+      <div>
+        <h1>声学成像仪 · 上位机控制台</h1>
+        <div class="sub">ACOUSTIC CAMERA PC CONSOLE · STM32N6</div>
+      </div>
+    </div>
+    <div id="badge">第9届 AI赋能设计 · AI for Design &amp; Design for AI</div>
+    <div id="spacer"></div>
+    <div class="conn"><div class="dot"></div><span id="connlabel">COM8 已连接</span>&nbsp;·&nbsp;<span id="rx">RX 0 B</span>&nbsp;·&nbsp;<span id="lat">1.8 ms</span></div>
+    <div id="clock">--:--:--</div>
+  </div>
+
+  <div id="main">
+    <div class="card" id="heatcard">
+      <h2>实时声学热力图 <span class="tag" id="scenetag">通用模式 · 场 96×72 · 9.6 fps</span></h2>
+      <canvas id="heat"></canvas>
+      <div id="readout">
+        <div class="big" id="ro-theta">--</div>
+        <div class="small">方位角 θ</div>
+        <div class="big" id="ro-phi" style="margin-top:6px">--</div>
+        <div class="small">俯仰角 φ</div>
+        <div class="big" id="ro-db" style="margin-top:6px">--</div>
+        <div class="small">峰值声压</div>
+        <div class="qrow">定位质量 <span id="qval">--</span>
+          <div id="qbar"><div id="qfill"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="right">
+      <div class="card" id="status">
+        <h2>设备遥测 <span class="tag" id="uptime">运行 00:00</span></h2>
+        <div class="rows">
+          <div class="stat"><div class="k">麦克风阵列</div><div class="v ok">4/4 · 32ch</div></div>
+          <div class="stat"><div class="k">音频帧</div><div class="v accent" id="st-frames">0</div></div>
+          <div class="stat"><div class="k">SRP-PHAT</div><div class="v" id="st-srp">9.0 ms</div></div>
+          <div class="stat"><div class="k">相机</div><div class="v" id="st-cam">15.3 fps</div></div>
+          <div class="stat"><div class="k">采样率</div><div class="v">48 kHz</div></div>
+          <div class="stat"><div class="k">SD 剩余</div><div class="v" id="st-sd">1.91 GB</div></div>
+        </div>
+      </div>
+
+      <div class="card" id="ai">
+        <h2>AI 声纹识别 <span class="tag">Helium DSP · 边缘推理</span></h2>
+        <div class="body">
+          <div id="aiclass" class="accent">聆听中</div>
+          <div id="aisub">等待有效声学事件…</div>
+          <div id="aiconf-track"><div id="aiconf"></div></div>
+          <div id="aiconf-label">置信度 --</div>
+        </div>
+      </div>
+
+      <div class="card" id="log">
+        <h2>链路日志</h2>
+        <div id="logbody"></div>
+      </div>
+
+      <div class="card" id="ctrl">
+        <h2>远程控制</h2>
+        <div class="btns">
+          <button id="b-scene">场景：通用</button>
+          <button id="b-pal">调色板：铁红</button>
+          <button id="b-shot">远程截屏</button>
+          <button id="b-rec" class="rec">开始录像</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" id="speccard">
+      <h2>参考通道频谱 <span class="tag" id="bandtag">分析频带 1125 – 7688 Hz · 187.5 Hz/bin</span></h2>
+      <canvas id="spec"></canvas>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* ================================================================== */
+/*  Simulated telemetry with a realistic detection state machine:     */
+/*  IDLE (noise floor only) -> DETECT (source appears, tracks,        */
+/*  classifier converges) -> LOST (hold last angle briefly) -> IDLE.  */
+/*  Counters are monotonic, values quantised like the real firmware.  */
+/* ================================================================== */
+
+const $ = id => document.getElementById(id);
+const t0 = Date.now();
+
+/* ---------- state machine ---------- */
+const S = { mode: "idle", modeT: 0,
+  srcX: .5, srcY: .45, velX: 0, velY: 0,
+  lvl: -78,            /* smoothed peak dBFS */
+  q: 0,                /* localisation quality 0..100 */
+  heldX: .5, heldY: .45,
+  clsIdx: 4, clsLock: 0, conf: 0,
+  frames: 0, rxBytes: 0 };
+
+const CLASSES = [
+  ["气体泄漏", "#f2b33d", "宽带高频湍流特征"],
+  ["轴承磨损", "#f2503d", "周期性冲击 + 谐波"],
+  ["电弧放电", "#c163f2", "脉冲串 · 峰值不稳定"],
+  ["敲击撞击", "#3da5ff", "瞬态宽带事件"],
+  ["环境噪声", "#38d18a", "低频稳态谱"]
+];
+
+function stepState(dt) {
+  S.modeT -= dt;
+  if (S.mode === "idle") {
+    S.lvl += (-78 - S.lvl) * .06;
+    S.q = Math.max(0, S.q - 2.5);
+    if (S.modeT <= 0) {
+      S.mode = "detect"; S.modeT = 9 + Math.random() * 14;
+      S.srcX = .18 + Math.random() * .64; S.srcY = .2 + Math.random() * .5;
+      S.clsIdx = Math.floor(Math.random() * 4); S.clsLock = 0; S.conf = 35;
+      log(`<span class="ev">EVT</span> 声学事件触发 · bin ${(10 + Math.random() * 28) | 0} 能量越限`);
+    }
+  } else if (S.mode === "detect") {
+    /* slow wander, occasional micro-jitter like a real tracker */
+    S.velX += (Math.random() - .5) * .003; S.velY += (Math.random() - .5) * .0024;
+    S.velX *= .95; S.velY *= .95;
+    S.srcX = Math.min(.92, Math.max(.08, S.srcX + S.velX));
+    S.srcY = Math.min(.86, Math.max(.14, S.srcY + S.velY));
+    const target = -26 - Math.random() * 8;
+    S.lvl += (target - S.lvl) * .08;
+    S.q = Math.min(96, S.q + 4);
+    S.heldX = S.srcX; S.heldY = S.srcY;
+    S.clsLock = Math.min(100, S.clsLock + 3);
+    S.conf += ((78 + Math.random() * 16) - S.conf) * .1;
+    if (S.modeT <= 0) { S.mode = "lost"; S.modeT = 2.2; log('跟踪丢失 · 保持末次方位'); }
+  } else { /* lost */
+    S.lvl += (-78 - S.lvl) * .1;
+    S.q = Math.max(0, S.q - 6);
+    if (S.modeT <= 0) { S.mode = "idle"; S.modeT = 4 + Math.random() * 10; }
+  }
+  S.frames += 4 + ((Math.random() * 2) | 0); /* ~150 fps audio frames */
+  S.rxBytes += 620 + ((Math.random() * 90) | 0);
+}
+
+/* ---------- camera-style backdrop ---------- */
+const heat = $("heat"), hctx = heat.getContext("2d");
+let noiseCanvas = null;
+function makeNoise(w, h) {
+  noiseCanvas = document.createElement("canvas");
+  noiseCanvas.width = w; noiseCanvas.height = h;
+  const c = noiseCanvas.getContext("2d"), img = c.createImageData(w, h), d = img.data;
+  for (let i = 0; i < d.length; i += 4) {
+    /* dim sensor noise with slight blue-grey cast + fixed pattern */
+    const v = 14 + Math.random() * 14;
+    d[i] = v * .82; d[i + 1] = v * .95; d[i + 2] = v * 1.15; d[i + 3] = 255;
+  }
+  /* faint structure: horizontal shelf + vertical edge, like a real scene */
+  c.putImageData(img, 0, 0);
+  c.fillStyle = "rgba(52,62,74,0.5)"; c.fillRect(0, h * .68, w, h * .015);
+  c.fillStyle = "rgba(40,48,60,0.45)"; c.fillRect(w * .24, h * .3, w * .012, h * .4);
+  c.fillStyle = "rgba(46,56,66,0.35)"; c.fillRect(w * .58, h * .22, w * .18, h * .012);
+}
+
+const PALETTES = {
+  "铁红":   v => [Math.min(255, v * 2.9), Math.max(0, v * 1.9 - 150), Math.max(0, v * 4 - 720)],
+  "彩虹":   v => [Math.min(255, Math.max(0, (v - 120) * 3.4)), Math.min(255, v < 128 ? v * 2 : 500 - v * 2), Math.max(0, 235 - v * 1.9)],
+  "高对比": v => [Math.min(255, v * 2.5), Math.min(255, v * 1.05), Math.max(0, 230 - v * 1.4)]
+};
+let paletteName = "铁红";
+let exposure = 1, expTarget = 1;
+
+function drawHeat() {
+  const w = heat.clientWidth * devicePixelRatio, h = heat.clientHeight * devicePixelRatio;
+  if (heat.width !== w || heat.height !== h) { heat.width = w; heat.height = h; makeNoise(w, h); }
+  if (!noiseCanvas) makeNoise(w, h);
+
+  /* sensor field with slow auto-exposure breathing + live noise shimmer */
+  if (Math.random() < .02) expTarget = .92 + Math.random() * .18;
+  exposure += (expTarget - exposure) * .05;
+  hctx.globalAlpha = 1; hctx.filter = `brightness(${exposure})`;
+  hctx.drawImage(noiseCanvas, 0, 0);
+  hctx.filter = "none";
+  /* per-frame shimmer: sparse bright pixels */
+  hctx.fillStyle = "rgba(120,140,160,0.10)";
+  for (let i = 0; i < 60; i++) {
+    hctx.fillRect(Math.random() * w, Math.random() * h, 2, 2);
+  }
+  /* vignette */
+  const vg = hctx.createRadialGradient(w / 2, h / 2, h * .35, w / 2, h / 2, h * .85);
+  vg.addColorStop(0, "rgba(0,0,0,0)"); vg.addColorStop(1, "rgba(0,0,0,0.55)");
+  hctx.fillStyle = vg; hctx.fillRect(0, 0, w, h);
+
+  /* heat overlay only when tracking (gated, like the firmware) */
+  const active = S.q > 8;
+  if (active) {
+    const cx = S.heldX * w, cy = S.heldY * h;
+    const R = (0.11 + (S.lvl + 60) / 260) * Math.min(w, h) * (S.q / 96);
+    const pal = PALETTES[paletteName];
+    const img = hctx.getImageData(Math.max(0, cx - R) | 0, Math.max(0, cy - R) | 0,
+                                  Math.min(w - cx + R, 2 * R) | 0, Math.min(h - cy + R, 2 * R) | 0);
+    const d = img.data, iw = img.width, ih = img.height;
+    const ox = Math.max(0, cx - R), oy = Math.max(0, cy - R);
+    for (let y = 0; y < ih; y += 2) {
+      for (let x = 0; x < iw; x += 2) {
+        const dx = (ox + x) - cx, dy = (oy + y) - cy;
+        const rr = Math.sqrt(dx * dx + dy * dy) / R;
+        if (rr > 1) continue;
+        const v = Math.pow(1 - rr, 1.55) * 255;
+        const [pr, pg, pb] = pal(v);
+        const a = Math.pow(1 - rr, 2.1) * .72;
+        for (let sy = 0; sy < 2; sy++) for (let sx = 0; sx < 2; sx++) {
+          if (y + sy >= ih || x + sx >= iw) continue;
+          const i = ((y + sy) * iw + (x + sx)) * 4;
+          d[i]     = d[i]     * (1 - a) + pr * a;
+          d[i + 1] = d[i + 1] * (1 - a) + pg * a;
+          d[i + 2] = d[i + 2] * (1 - a) + pb * a;
+        }
+      }
+    }
+    hctx.putImageData(img, ox | 0, oy | 0);
+
+    /* crosshair + dB tag (matches device overlay style) */
+    hctx.strokeStyle = "#dff1ff"; hctx.lineWidth = 2 * devicePixelRatio;
+    const L = 13 * devicePixelRatio;
+    hctx.beginPath();
+    hctx.moveTo(cx - L, cy); hctx.lineTo(cx - 4, cy); hctx.moveTo(cx + 4, cy); hctx.lineTo(cx + L, cy);
+    hctx.moveTo(cx, cy - L); hctx.lineTo(cx, cy - 4); hctx.moveTo(cx, cy + 4); hctx.lineTo(cx, cy + L);
+    hctx.stroke();
+    hctx.font = `${12 * devicePixelRatio}px Consolas`;
+    hctx.fillStyle = "#dff1ff";
+    hctx.fillText(`${S.lvl.toFixed(0)} dB`, cx + L + 5, cy - 5);
+  }
+
+  /* camera OSD corners */
+  hctx.font = `${11 * devicePixelRatio}px Consolas`;
+  hctx.fillStyle = "rgba(160,190,215,0.6)";
+  hctx.fillText("CAM 640x480 · IMX219", 12 * devicePixelRatio, h - 12 * devicePixelRatio);
+  const ts = new Date().toLocaleTimeString("zh-CN", { hour12: false });
+  hctx.fillText(ts, w - 78 * devicePixelRatio, h - 12 * devicePixelRatio);
+}
+
+/* ---------- spectrum ---------- */
+const spec = $("spec"), sctx = spec.getContext("2d");
+const bars = new Float32Array(64).fill(3);
+function drawSpec() {
+  const w = spec.clientWidth * devicePixelRatio, h = spec.clientHeight * devicePixelRatio;
+  if (spec.width !== w || spec.height !== h) { spec.width = w; spec.height = h; }
+  sctx.fillStyle = "#0b131d"; sctx.fillRect(0, 0, w, h);
+
+  const padL = 34 * devicePixelRatio, padB = 16 * devicePixelRatio;
+  const pw = w - padL - 8 * devicePixelRatio, ph = h - padB - 6 * devicePixelRatio;
+
+  /* dB grid */
+  sctx.font = `${10 * devicePixelRatio}px Consolas`;
+  sctx.fillStyle = "#4e657c"; sctx.strokeStyle = "#15222f"; sctx.lineWidth = 1;
+  for (const db of [0, -20, -40, -60]) {
+    const y = 6 * devicePixelRatio + (-db / 60) * ph;
+    sctx.beginPath(); sctx.moveTo(padL, y); sctx.lineTo(w - 8 * devicePixelRatio, y); sctx.stroke();
+    sctx.fillText(db + "dB", 4 * devicePixelRatio, y + 3 * devicePixelRatio);
+  }
+
+  const n = bars.length, bw = pw / n;
+  const active = S.q > 8;
+  const peakBin = 7 + Math.round(S.heldX * 32);
+  for (let i = 0; i < n; i++) {
+    /* 1/f noise floor + source peak & harmonic when tracking */
+    let target = 8 + 26 / (1 + i * .35) + Math.random() * 3.5;
+    if (active) {
+      const d1 = Math.abs(i - peakBin), d2 = Math.abs(i - peakBin * 2);
+      const s = (60 + S.lvl) * 1.5;
+      if (d1 < 5) target += s * Math.pow(.5, d1) * (0.9 + Math.random() * .2);
+      if (d2 < 3 && peakBin * 2 < n) target += s * .45 * Math.pow(.5, d2);
+    }
+    /* fast attack, slow decay - like a real analyser */
+    bars[i] += (target > bars[i]) ? (target - bars[i]) * .5 : (target - bars[i]) * .12;
+    const bh = Math.min(ph, bars[i] / 100 * ph);
+    const inBand = i >= 6 && i <= 41;
+    sctx.fillStyle = inBand ? (active && Math.abs(i - peakBin) < 2 ? "#8fd0ff" : "#3da5ff") : "#22415c";
+    sctx.fillRect(padL + i * bw + 1, 6 * devicePixelRatio + ph - bh, Math.max(1, bw - 2), bh);
+  }
+  /* band handles + Hz ticks */
+  sctx.fillStyle = "#dff1ff";
+  for (const b of [6, 41]) sctx.fillRect(padL + b * bw - devicePixelRatio, 6 * devicePixelRatio, 2 * devicePixelRatio, ph);
+  sctx.fillStyle = "#4e657c";
+  for (const [bin, label] of [[5, "1k"], [16, "3k"], [32, "6k"], [48, "9k"], [63, "12k"]]) {
+    sctx.fillText(label, padL + bin * bw - 6 * devicePixelRatio, h - 4 * devicePixelRatio);
+  }
+}
+
+/* ---------- readouts / telemetry ---------- */
+function fmtAngle(v) { return (v >= 0 ? "+" : "") + v.toFixed(1) + "°"; }
+function updateReadouts() {
+  const active = S.q > 8;
+  const theta = (S.heldX - .5) * 120, phi = (0.5 - S.heldY) * 90;
+  $("ro-theta").textContent = active ? fmtAngle(theta) : "--";
+  $("ro-phi").textContent = active ? fmtAngle(phi) : "--";
+  $("ro-db").textContent = active ? S.lvl.toFixed(0) + " dB" : "--";
+  $("qval").textContent = active ? S.q.toFixed(0) + "%" : "--";
+  $("qfill").style.width = S.q + "%";
+  $("qfill").style.background = S.q > 60 ? "var(--green)" : "var(--amber)";
+
+  /* quantised, mostly-stable values - real firmware numbers barely move */
+  if (Math.random() < .3) $("st-srp").textContent = (8.9 + Math.random() * .3).toFixed(1) + " ms";
+  if (Math.random() < .2) $("st-cam").textContent = (15.2 + Math.random() * .2).toFixed(1) + " fps";
+  $("st-frames").textContent = S.frames.toLocaleString();
+
+  const up = (Date.now() - t0) / 1000;
+  $("uptime").textContent = "运行 " + String((up / 60) | 0).padStart(2, "0") + ":" + String((up % 60) | 0).padStart(2, "0");
+  $("rx").textContent = "RX " + (S.rxBytes / 1024).toFixed(1) + " KB";
+  if (Math.random() < .25) $("lat").textContent = (1.4 + Math.random() * 1.1).toFixed(1) + " ms";
+}
+
+/* ---------- AI card ---------- */
+function updateAi() {
+  const active = S.q > 8 && S.clsLock > 30;
+  const el = $("aiclass"), sub = $("aisub");
+  if (!active) {
+    el.textContent = "聆听中"; el.style.color = "var(--blue)";
+    sub.textContent = "等待有效声学事件…";
+    $("aiconf").style.width = "0%";
+    $("aiconf-label").textContent = "置信度 --";
+    return;
+  }
+  const [name, color, desc] = CLASSES[S.clsIdx];
+  el.textContent = name; el.style.color = color;
+  sub.textContent = desc;
+  $("aiconf").style.width = S.conf + "%";
+  $("aiconf-label").textContent = `置信度 ${S.conf.toFixed(0)}% · 特征帧 ${(S.clsLock * 3) | 0}`;
+}
+
+/* ---------- log ---------- */
+const logbody = $("logbody");
+function log(html) {
+  const t = new Date().toLocaleTimeString("zh-CN", { hour12: false });
+  const div = document.createElement("div");
+  div.innerHTML = `<span class="t">${t}</span>${html}`;
+  logbody.prepend(div);
+  while (logbody.children.length > 8) logbody.lastChild.remove();
+}
+log('OPEN <span class="hl">COM8 460800 8N1</span>');
+log('HELLO <span class="hl">NECCS-N647 fw=20260709 proto=2.1</span>');
+log('CFG 阵列 <span class="hl">Wide32 · 48 kHz · 4 器件在线</span>');
+
+/* ---------- controls ---------- */
+const scenes = ["通用", "气体泄漏", "轴承诊断", "电气巡检"];
+let sceneIdx = 0;
+function pend(btn, ms, fn) {  /* fake round-trip: disable, ack, apply */
+  btn.disabled = true;
+  setTimeout(() => { btn.disabled = false; fn(); }, ms);
+}
+$("b-scene").onclick = e => pend(e.target, 380, () => {
+  sceneIdx = (sceneIdx + 1) % scenes.length;
+  $("b-scene").textContent = "场景：" + scenes[sceneIdx];
+  $("scenetag").textContent = scenes[sceneIdx] + "模式 · 场 96×72 · 9.6 fps";
+  log(`TX SET_SCENE=${sceneIdx} → <span class="hl">ACK 12ms</span>`);
+});
+const palNames = Object.keys(PALETTES);
+let palIdx = 0;
+$("b-pal").onclick = e => pend(e.target, 300, () => {
+  palIdx = (palIdx + 1) % palNames.length;
+  paletteName = palNames[palIdx];
+  $("b-pal").textContent = "调色板：" + paletteName;
+  log(`TX SET_PALETTE=${palIdx} → <span class="hl">ACK 9ms</span>`);
+});
+let shotN = 17;
+$("b-shot").onclick = e => pend(e.target, 900, () => {
+  log(`TX CAPTURE → <span class="hl">SCR${String(shotN++).padStart(5, "0")}.BMP 已写入 SD</span>`);
+});
+let rec = false, recT0 = 0, vidN = 7;
+$("b-rec").onclick = e => pend(e.target, 420, () => {
+  rec = !rec;
+  $("b-rec").classList.toggle("on", rec);
+  if (rec) { recT0 = Date.now(); log(`TX REC_START → <span class="hl">VID${String(vidN).padStart(5, "0")}.AVI</span>`); }
+  else { log(`TX REC_STOP → <span class="hl">时长 ${((Date.now() - recT0) / 1000).toFixed(0)}s · 已保存</span>`); vidN++; }
+});
+setInterval(() => {
+  $("b-rec").textContent = rec ? "录像中 " + ((Date.now() - recT0) / 1000).toFixed(0) + "s" : "开始录像";
+}, 500);
+
+/* ---------- clocks & loops ---------- */
+setInterval(() => {
+  $("clock").textContent = new Date().toLocaleTimeString("zh-CN", { hour12: false });
+}, 500);
+S.modeT = 3;
+setInterval(() => stepState(.066), 66);
+(function frame() { drawHeat(); drawSpec(); requestAnimationFrame(frame); })();
+setInterval(() => { updateReadouts(); updateAi(); }, 250);
+setInterval(() => {
+  if (Math.random() < .5) log(`STAT q=${S.q.toFixed(0)} lvl=${S.lvl.toFixed(0)}dB frames=${S.frames}`);
+}, 7000);
+</script>
+</body>
+</html>

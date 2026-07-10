@@ -928,31 +928,15 @@ static AppPcmdCaptureStatus_t AppPcmdCapture_ConfigPcmdDevices(void)
     }
   }
 
-  if (result == APP_PCMD_CAPTURE_OK)
+  /* No separate Activate sweep: with defer_power_up=0 each device was
+   * already powered up inside its Configure pass (golden 7e12d5da flow).
+   * A post-config status read per configured device keeps the diagnostic
+   * snapshot fresh, exactly like the golden bring-up did. */
+  for (uint32_t index = 0U; index < APP_PCMD_CAPTURE_DEVICE_COUNT; index++)
   {
-    static const uint8_t activate_order[APP_PCMD_CAPTURE_DEVICE_COUNT] =
+    if ((s_snapshot.device_config_ok_mask & (uint8_t)(1U << index)) != 0U)
     {
-      1U, 0U, 3U, 2U
-    };
-
-    for (uint32_t order = 0U; order < APP_PCMD_CAPTURE_DEVICE_COUNT; order++)
-    {
-      const uint32_t index = activate_order[order];
-      const uint8_t device_mask = (uint8_t)(1U << index);
-      PCMD3180_StatusTypeDef activate_status =
-          PCMD3180_Activate(&s_pcmd_handles[index], &s_pcmd_configs[index]);
-
-      if (activate_status != PCMD3180_OK)
-      {
-        s_snapshot.device_config_status[index] = (int32_t)activate_status;
-        s_snapshot.device_config_ok_mask = (uint8_t)(s_snapshot.device_config_ok_mask & (uint8_t)~device_mask);
-        s_snapshot.device_status_ok_mask = (uint8_t)(s_snapshot.device_status_ok_mask & (uint8_t)~device_mask);
-        result = APP_PCMD_CAPTURE_PCMD_ERROR;
-      }
-      else
-      {
-        AppPcmdCapture_DeviceStatusKick(index);
-      }
+      AppPcmdCapture_DeviceStatusKick(index);
     }
   }
 
@@ -1239,7 +1223,13 @@ AppPcmdCaptureStatus_t AppPcmdCapture_Init(AppMicArrayMode_t mode)
 #if (APP_PCMD_SDOUT_BCLK_MARGIN_FIX != 0U)
     s_pcmd_configs[index].invert_bclk = 1U;
 #endif
-    s_pcmd_configs[index].defer_power_up = 1U;
+    /* Golden flow (commit 7e12d5da, board-verified all-32-slot capture at
+     * ~-60 dBFS rest floor): each device is reset, fully programmed AND
+     * powered up in ONE Configure pass (Configure also re-applies the slot
+     * routing after power-up). The later two-pass variant (defer_power_up=1
+     * + a separate Activate sweep) left most PDM front-ends silent - only
+     * 1-2 of 32 slots carried real modulator data. Do not defer. */
+    s_pcmd_configs[index].defer_power_up = 0U;
   }
 
   s_snapshot.initialized = 1U;
