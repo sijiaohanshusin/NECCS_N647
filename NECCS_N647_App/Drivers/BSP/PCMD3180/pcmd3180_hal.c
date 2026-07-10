@@ -149,24 +149,18 @@ static void PCMD3180_HAL_SwI2CInitPins(PCMD3180_HAL_BusContextTypeDef *context)
     HAL_GPIO_WritePin(context->scl_port, context->scl_pin, GPIO_PIN_SET);
     HAL_GPIO_WritePin(context->sda_port, context->sda_pin, GPIO_PIN_SET);
 
-    /* SCL push-pull: this bus has no external pull-ups, so an open-drain
-     * SCL rises through the input threshold band over several microseconds
-     * (~40k internal pull-up x harness capacitance). The PCMD3180 clock
-     * input saw multiple edges on those slow ramps - live register
-     * readback caught left-shifted values (0x0D read back as 0x1B) and
-     * stuck bits, i.e. double-clocked data bits. We are the only master
-     * and PCMD3180 never stretches the clock, so driving SCL push-pull is
-     * safe and gives clean sharp edges. SDA stays open-drain (slaves must
-     * drive ACK/read bits) with the internal pull-up. */
-    gpio_init.Mode = GPIO_MODE_OUTPUT_PP;
-    gpio_init.Pull = GPIO_NOPULL;
+    /* Standard open-drain I2C on both lines: the mic bus carries real
+     * external 4.7k pull-ups since the 2026-07-10 harness rework, so edges
+     * rise cleanly and the historical push-pull-SCL workaround (needed
+     * only while the temporary rewired bus had no pull-ups at all) is
+     * gone. Open-drain keeps the pins safe against any other bus master
+     * or clock-stretching device. */
+    gpio_init.Mode = GPIO_MODE_OUTPUT_OD;
+    gpio_init.Pull = GPIO_PULLUP;
     gpio_init.Speed = GPIO_SPEED_FREQ_MEDIUM;
     gpio_init.Pin = context->scl_pin;
     HAL_GPIO_Init(context->scl_port, &gpio_init);
 
-    gpio_init.Mode = GPIO_MODE_OUTPUT_OD;
-    gpio_init.Pull = GPIO_PULLUP;
-    gpio_init.Speed = GPIO_SPEED_FREQ_MEDIUM;
     gpio_init.Pin = context->sda_pin;
     HAL_GPIO_Init(context->sda_port, &gpio_init);
 

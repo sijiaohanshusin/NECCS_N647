@@ -49,8 +49,13 @@
 #define APP_PCMD_SDOUT_BCLK_MARGIN_FIX       1U
 #endif
 
+/* Primary backend is the hardware I2C2 controller: the mic array sits on
+ * the shared PD14/PD4 bus which now carries proper 4.7k pull-ups
+ * (2026-07-10 rework), so the peripheral that already serves camera/touch
+ * can drive the PCMD3180s too. The bit-bang backend remains as an
+ * automatic fallback for a failed full-array config pass. */
 #ifndef APP_PCMD_CAPTURE_I2C_BACKEND
-#define APP_PCMD_CAPTURE_I2C_BACKEND         APP_PCMD_CAPTURE_I2C_BACKEND_SW
+#define APP_PCMD_CAPTURE_I2C_BACKEND         APP_PCMD_CAPTURE_I2C_BACKEND_HAL
 #endif
 
 #ifndef APP_PCMD_CAPTURE_STATUS_READ_ON_START
@@ -1183,18 +1188,19 @@ AppPcmdCaptureStatus_t AppPcmdCapture_Init(AppMicArrayMode_t mode)
   s_snapshot.debug_ui_enabled = ((g_app_pcmd_debug_ui_enable != 0U) ||
                                  (APP_PCMD_DIAG_UI_ENABLE != 0U)) ? 1U : 0U;
 
-  s_hal_context.hi2c = NULL;
-  /* Dedicated software-I2C pins for the mic array (rewired 2026-07-09):
-   * PC10=SCL, PC11=SDA, spare expansion GPIO with secure attributes already
-   * set in MX_GPIO_Init. hi2c stays NULL so the driver never de-inits,
-   * locks, or recovers the camera's hardware I2C2 (PD14/PD4) - the two
-   * buses are now electrically and logically independent, which removes
-   * the AF<->GPIO pin flipping and bus contention that made bring-up
-   * probabilistic. */
-  s_hal_context.scl_port = GPIOC;
-  s_hal_context.scl_pin = GPIO_PIN_10;
-  s_hal_context.sda_port = GPIOC;
-  s_hal_context.sda_pin = GPIO_PIN_11;
+  s_hal_context.hi2c = &hi2c2;
+  /* Mic-array harness re-soldered back onto the shared I2C2 pins
+   * (PD14=SCL / PD4=SDA) with proper 4.7k external pull-ups fitted
+   * (2026-07-10, board-verified with the golden firmware: 4/4 devices,
+   * 31/32 mics live). Passing the real handle lets the driver drive the
+   * devices with the hardware I2C2 peripheral (same controller and
+   * AppI2C2 lock the camera uses); the software bit-bang backend stays
+   * available as an automatic fallback and de-inits/re-inits the
+   * peripheral around each pass. */
+  s_hal_context.scl_port = GPIOD;
+  s_hal_context.scl_pin = GPIO_PIN_14;
+  s_hal_context.sda_port = GPIOD;
+  s_hal_context.sda_pin = GPIO_PIN_4;
   s_hal_context.shutdown_port = MIC_SHDNZ_GPIO_Port;
   s_hal_context.shutdown_pin = MIC_SHDNZ_Pin;
   s_hal_context.timeout_ms = APP_PCMD_CAPTURE_I2C_TIMEOUT_MS;
@@ -1292,13 +1298,10 @@ AppPcmdCaptureStatus_t AppPcmdCapture_Start(void)
   __HAL_SAI_DISABLE_IT(&hsai_BlockB1, SAI_IT_AFSDET | SAI_IT_LFSDET);
   AppPcmdCapture_DelayMs(APP_PCMD_CAPTURE_CLOCK_SETTLE_MS);
 
-  /* Hold the I2C2 lock for the whole config window even though the mic bus
-   * now bit-bangs dedicated pins (PC10/PC11): the failure signature is
-   * identical to the PD4/PD14 era and scales with window duration, i.e.
-   * concurrent camera-exposure / power-management I2C2 traffic disturbs the
-   * mic net during configuration. Serialising the window is the combination
-   * that was board-verified stable (2026-07-09 08:41, all 4 devices, 5400+
-   * frames). One-time boot cost only - config freezes afterwards. */
+  /* The mic array shares the hardware I2C2 bus (PD14/PD4) with the camera
+   * and power management, so the whole config window must hold the AppI2C2
+   * mutex to keep exposure/PMIC traffic out of the middle of the PCMD
+   * register pass. One-time boot cost only - config freezes afterwards. */
   if (AppI2C2_Lock(APP_PCMD_CAPTURE_CONFIG_LOCK_MS) == 0U)
   {
     s_snapshot.start_status = APP_PCMD_CAPTURE_BUSY;
@@ -1306,7 +1309,18 @@ AppPcmdCaptureStatus_t AppPcmdCapture_Start(void)
     return APP_PCMD_CAPTURE_BUSY;
   }
 
-  config_status = AppPcmdCapture_ResetAndConfigurePcmd(APP_PCMD_CAPTURE_I2C_BACKEND_SW);
+  config_status = AppPcmdCapture_ResetAndConfigurePcmd(APP_PCMD_CAPTURE_I2C_BACKEND);
+#if (APP_PCMD_CAPTURE_I2C_BACKEND != APP_PCMD_CAPTURE_I2C_BACKEND_SW)
+  if (config_status != APP_PCMD_CAPTURE_OK)
+  {
+    /* Hardware-I2C pass missed at least one device: run one full bit-bang
+     * pass (fresh hardware reset included) before giving up - the software
+     * backend tolerates marginal bus electricals better and was the only
+     * path that worked in the pull-up-less era. */
+    s_snapshot.i2c_fallback_count++;
+    config_status = AppPcmdCapture_ResetAndConfigurePcmd(APP_PCMD_CAPTURE_I2C_BACKEND_SW);
+  }
+#endif
 
   AppI2C2_Unlock();
 
@@ -1344,13 +1358,13 @@ AppPcmdCaptureStatus_t AppPcmdCapture_Start(void)
   s_raw_accum_enabled = 1U;
   s_snapshot.started = 1U;
   s_snapshot.start_status = APP_PCMD_CAPTURE_OK;
-  /* One-time I2C configuration succeeded: freeze the bus. The devices keep
-   * their registers and audio flows over SAI, so I2C is never touched again
-   * (frame stalls recover via DMA-only restart). Tri-state the soft-I2C
-   * wires entirely: on this harness they are coupled with the PDM lines,
-   * and any driven idle level clamps most microphone lanes to digital
-   * silence (the "bad mic data" P0). */
-  PCMD3180_HAL_TriStateBusPins(&s_hal_context);
+  /* One-time I2C configuration succeeded: freeze the mic config. The
+   * devices keep their registers and audio flows over SAI, so the PCMD
+   * driver never touches I2C again (frame stalls recover via DMA-only
+   * restart). PD14/PD4 stay owned by the hardware I2C2 peripheral - the
+   * camera and power management keep using the bus, which is fine now
+   * that it carries real 4.7k pull-ups (the old tri-state hack was for
+   * the temporary pull-up-less rewired harness only). */
   s_pcmd_config_frozen = 1U;
   App_BringUpStatus_Ready(APP_BRINGUP_MODULE_PCMD_RAW, APP_PCMD_CAPTURE_OK);
   return APP_PCMD_CAPTURE_OK;
