@@ -40,6 +40,7 @@
 #define IMX219_REG_VTSYCK_DIV         0x0303U
 #define IMX219_REG_OPSYCK_DIV         0x030BU
 #define IMX219_REG_PLL_OP_MPY         0x030CU
+#define IMX219_REG_GROUP_HOLD         0x0104U
 #define IMX219_REG_ANALOG_GAIN        0x0157U
 #define IMX219_REG_DIGITAL_GAIN       0x0158U
 #define IMX219_REG_INTEGRATION_TIME   0x015AU
@@ -581,4 +582,35 @@ int32_t AppCameraIMX219_SetTestPattern(uint8_t enable)
 int32_t AppCameraIMX219_UpdateDiagnostics(void)
 {
   return IMX219_ReadbackSmokeConfig();
+}
+
+int32_t AppCameraIMX219_SetExposure(uint16_t exposure_lines,
+                                    uint8_t analog_gain_code,
+                                    uint16_t digital_gain_code)
+{
+  int32_t status;
+
+  /* Grouped-parameter hold makes the three writes land on the same frame
+   * boundary, avoiding half-applied exposure flicker while the AE loop is
+   * converging. */
+  (void)IMX219_WriteReg(IMX219_REG_GROUP_HOLD, 0x0001U, 1U);
+  status = IMX219_WriteReg(IMX219_REG_INTEGRATION_TIME, exposure_lines, 2U);
+  if (status == APP_CAMERA_IMX219_OK)
+  {
+    status = IMX219_WriteReg(IMX219_REG_ANALOG_GAIN, analog_gain_code, 1U);
+  }
+  if (status == APP_CAMERA_IMX219_OK)
+  {
+    status = IMX219_WriteReg(IMX219_REG_DIGITAL_GAIN, digital_gain_code, 2U);
+  }
+  (void)IMX219_WriteReg(IMX219_REG_GROUP_HOLD, 0x0000U, 1U);
+
+  if (status == APP_CAMERA_IMX219_OK)
+  {
+    g_app_camera_imx219_readback_exposure = exposure_lines;
+    g_app_camera_imx219_readback_analog_gain = analog_gain_code;
+    g_app_camera_imx219_readback_digital_gain = digital_gain_code;
+  }
+
+  return status;
 }

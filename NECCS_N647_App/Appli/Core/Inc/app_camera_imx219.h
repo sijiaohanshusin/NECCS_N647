@@ -57,6 +57,11 @@ int32_t AppCameraIMX219_Init(const AppCameraIMX219Config_t *config, uint16_t *ch
 int32_t AppCameraIMX219_SetStream(uint8_t enable);
 int32_t AppCameraIMX219_SetTestPattern(uint8_t enable);
 int32_t AppCameraIMX219_UpdateDiagnostics(void);
+/* Grouped exposure update for the AE loop: integration lines, analog gain
+ * code (0..232, gain = 256/(256-code)) and digital gain (0x0100 = x1). */
+int32_t AppCameraIMX219_SetExposure(uint16_t exposure_lines,
+                                    uint8_t analog_gain_code,
+                                    uint16_t digital_gain_code);
 
 #ifdef __cplusplus
 }
