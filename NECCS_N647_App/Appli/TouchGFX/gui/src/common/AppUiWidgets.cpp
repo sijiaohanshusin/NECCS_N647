@@ -271,17 +271,35 @@ void AppAsciiLabel::setText(const char* value)
         value = "";
     }
 
+    /* Skip the invalidate when the rendered text is unchanged - several
+     * pages push static strings from their ~20 Hz refresh path. */
+    bool changed = false;
     uint32_t i = 0U;
     for (; (i + 1U) < MaxText && value[i] != '\0'; ++i)
     {
+        if (text[i] != value[i])
+        {
+            changed = true;
+        }
         text[i] = value[i];
     }
+    if (text[i] != '\0')
+    {
+        changed = true;
+    }
     text[i] = '\0';
-    invalidate();
+    if (changed)
+    {
+        invalidate();
+    }
 }
 
 void AppAsciiLabel::setColors(touchgfx::colortype foreground, touchgfx::colortype background, bool opaqueBackground)
 {
+    if ((foregroundColor == foreground) && (backgroundColor == background) && (opaque == opaqueBackground))
+    {
+        return;
+    }
     foregroundColor = foreground;
     backgroundColor = background;
     opaque = opaqueBackground;
@@ -387,6 +405,13 @@ void AppRgb565Preview::setSource(const uint16_t* pixels, uint16_t width, uint16_
 
 void AppRgb565Preview::setColors(touchgfx::colortype background, touchgfx::colortype border)
 {
+    /* Change detection: refreshMediaPage() calls this every UI refresh
+     * (~20 Hz) for all 8 gallery tiles; the unconditional invalidate kept
+     * redrawing the whole grid even when nothing changed. */
+    if ((backgroundColor == background) && (borderColor == border))
+    {
+        return;
+    }
     backgroundColor = background;
     borderColor = border;
     invalidate();

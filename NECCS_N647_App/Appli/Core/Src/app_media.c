@@ -19,7 +19,11 @@
 #define APP_MEDIA_THREAD_STACK_SIZE       12288U
 #define APP_MEDIA_THREAD_PRIORITY         12U
 #define APP_MEDIA_QUEUE_LENGTH            8U
-#define APP_MEDIA_FILEX_CACHE_SIZE        (16U * SD_NAND_BLOCK_SIZE)
+/* 64 KB media cache: the 8 KB original thrashed on every multi-file
+ * operation (a thumbnail page alone streams ~280 KB through it). The SD
+ * driver is CPU-polling (no DMA), so the cache can live in cached
+ * HyperRAM without coherency concerns. */
+#define APP_MEDIA_FILEX_CACHE_SIZE        (128U * SD_NAND_BLOCK_SIZE)
 #define APP_MEDIA_FORMAT_SECTORS_CLUSTER  32U
 
 #define APP_MEDIA_FB_WIDTH                1024U
@@ -87,7 +91,7 @@ static uint8_t s_filex_ready = 0U;
 static FX_MEDIA s_media;
 static FX_FILE s_work_file;
 static FX_FILE s_record_file;
-static uint8_t s_filex_cache[APP_MEDIA_FILEX_CACHE_SIZE] __attribute__((aligned(32)));
+static uint8_t s_filex_cache[APP_MEDIA_FILEX_CACHE_SIZE] __attribute__((section(".EXTRAM"), aligned(32)));
 static uint8_t s_boot_sector[SD_NAND_BLOCK_SIZE] __attribute__((aligned(32)));
 /* CPU-only staging buffers (FileX copies through its own cache and the JPEG
  * codec is fed by CPU FIFO writes, no DMA): cached external RAM is fine and
@@ -471,30 +475,61 @@ static uint32_t file_exists(const char *path)
   return 0U;
 }
 
-static uint32_t count_sequence(uint32_t is_video)
+static uint32_t sequence_entry_exists(uint32_t is_video, uint32_t index)
 {
   char path[APP_MEDIA_FILE_NAME_LEN];
-  uint32_t count = 0U;
 
-  for (uint32_t i = 1U; i <= 99999U; ++i)
+  if (is_video != 0U)
   {
-    if (is_video != 0U)
+    make_video_path(index, path, sizeof(path));
+  }
+  else
+  {
+    make_screenshot_path(index, path, sizeof(path));
+  }
+
+  return file_exists(path);
+}
+
+/* Files are written as a gap-free sequence starting at 1, so the count can
+ * be found with an exponential probe plus binary search: O(log N) directory
+ * lookups instead of the old linear walk (hundreds of fx_file_open calls on
+ * every mount/refresh once the gallery fills up). */
+static uint32_t count_sequence(uint32_t is_video)
+{
+  uint32_t known = 0U;
+  uint32_t probe = 1U;
+  uint32_t low;
+  uint32_t high;
+
+  while ((probe <= 99999U) && (sequence_entry_exists(is_video, probe) != 0U))
+  {
+    known = probe;
+    probe <<= 1;
+  }
+
+  if (known == 0U)
+  {
+    return 0U;
+  }
+
+  low = known;
+  high = (probe <= 99999U) ? probe : 100000U;
+  while ((low + 1U) < high)
+  {
+    const uint32_t mid = low + ((high - low) / 2U);
+
+    if (sequence_entry_exists(is_video, mid) != 0U)
     {
-      make_video_path(i, path, sizeof(path));
+      low = mid;
     }
     else
     {
-      make_screenshot_path(i, path, sizeof(path));
+      high = mid;
     }
-
-    if (file_exists(path) == 0U)
-    {
-      break;
-    }
-    count = i;
   }
 
-  return count;
+  return low;
 }
 
 static void select_latest(void)
