@@ -243,14 +243,13 @@ int main(void)
   App_MPU_ConfigNonCacheable();
   App_BootDiag_SetStage(APP_BOOT_STAGE_MAIN_ENTER);
 
-  /* Keep the debug interface clocked on cold/XIP boots: with the strap on
-   * external-Flash boot the BootROM does not leave DBGMCU running, so SWD
-   * attach failed ("cannot get core ID") and Release issues could only be
-   * debugged blind. DBGCLKEN (DBGMCU_CR bit 20) is required on top of the
-   * RCC gates. Costs nothing in Debug builds. */
-  __HAL_RCC_DBGMCU_CLK_ENABLE();
-  __HAL_RCC_DBG_CLK_ENABLE();
-  DBGMCU->CR |= DBGMCU_CR_DBGCLKEN | DBGMCU_CR_DBG_SLEEP;
+  /* Debug-port reopening for cold/XIP boots now lives at the very top of
+   * SystemInit() (BSEC debug authorisation + debug clocks). Do NOT touch
+   * DBGMCU registers from the CPU here: with the BootROM's debug lock
+   * still engaged that access bus-faults (BFAR=0x54001004) and was THE
+   * cause of the Release cold-boot lockup - verified on hardware
+   * 2026-07-10. In Debug (development-boot) builds the debugger owns
+   * DBGMCU and no CPU-side setup is needed either. */
 
   /* USER CODE END 1 */
 
