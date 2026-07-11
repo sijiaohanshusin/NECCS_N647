@@ -94,15 +94,17 @@ started=1 wdog=0`、camera frames 增长、npu `status=0`、media `err=0`。
 5. 提交;`git log` 保持一行式规范(`fix(pcmd): ...`)。
 6. 大改动或发布前:`flash-release` + `xipboot` + `status` 冷启动回归。
 
-## 六、UI 改动专项(必读 docs/UI_DESIGN_SYSTEM.md)
+## 六、UI 改动专项(先读 docs/UI_DESIGN_SYSTEM.md)
 
-UI 全部手写在 `TemplateView.cpp`,没有 Designer。三条铁律:
+UI 全部手写在 `TemplateView.cpp`,没有 Designer。流程:
 
-1. **改前**:读 `docs/UI_DESIGN_SYSTEM.md`,只用文中列出的调色板/组件/
-   布局常量,不发明新颜色新字号。
+1. **改前**:读 `docs/UI_DESIGN_SYSTEM.md` 的设计原则(每页一个主角、
+   层级靠亮度、彩色只表达含义、对齐节奏)。默认做法是模仿最像的
+   现有元素;想创新也可以,创新后用基准图检验。
 2. **中文**:新增任何中文字符后跑
-   `python tools/ui/check_text_glyphs.py`,必须 0 缺字才能编译烧录
+   `python tools/ui/check_text_glyphs.py`,0 缺字再烧录
    (缺字不报错,直接在屏幕上渲染成空白)。
-3. **改后**:`n647.ps1 uitour` 自动翻全部 5 页并逐页截图,肉眼逐张核对:
-   对齐、配色语义(蓝=强调,绿/琥珀/红=状态)、中文完整、无残影。
-   只截当前页会漏掉其他页面的布局回归。
+3. **改后**:`n647.ps1 uitour` 自动翻全部 5 页逐页截图,和
+   `docs/ui_reference/` 基准图并排对比,过"自查五问"
+   (主角、对齐、彩色含义、整体感、中文完整)。
+   改得更好就更新基准图;说不清好坏就回退。
