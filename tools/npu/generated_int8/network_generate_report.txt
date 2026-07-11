@@ -1,0 +1,120 @@
+ST Edge AI Core v4.0.0-20500 359356bb0
+Created date          : 2026-07-11 03:25:22
+Parameters            : generate --model tools\npu\toy_sound_classifier_int8.onnx --target stm32n6 --st-neural-art --output tools\npu\generated_int8
+
+Model name - toy_sound_classifier_int8
+------ --------------------------------------------------- ---------------------- -------------- --------- -------------------------------- 
+m_id   layer (original)                                    oshape                 param/size          macc                     connected to 
+------ --------------------------------------------------- ---------------------- -------------- --------- -------------------------------- 
+0      spectrogram ()                                      [b:1,h:32,w:64,c:1]                                                              
+------ --------------------------------------------------- ---------------------- -------------- --------- -------------------------------- 
+7      fc_b_const (DequantizeLinear)                       [b:6]                  6/24                                                      
+------ --------------------------------------------------- ---------------------- -------------- --------- -------------------------------- 
+8      fc_w_DequantizeLin..tput_const (DequantizeLinear)   [b:6,c:1024]           6,144/24,576                                              
+------ --------------------------------------------------- ---------------------- -------------- --------- -------------------------------- 
+9      spectrogram_Quanti..ear_Output (QuantizeLinear)     [b:1,h:32,w:64,c:1]                       4,096                      spectrogram 
+------ --------------------------------------------------- ---------------------- -------------- --------- -------------------------------- 
+10     spectrogram_Dequan..ear_Output (DequantizeLinear)   [b:1,h:32,w:64,c:1]                       4,096   spectrogram_Quanti..ear_Output 
+------ --------------------------------------------------- ---------------------- -------------- --------- -------------------------------- 
+11     r1 (Conv)                                           [b:1,h:32,w:64,c:8]    80/320           147,464   spectrogram_Dequan..ear_Output 
+------ --------------------------------------------------- ---------------------- -------------- --------- -------------------------------- 
+12     r1_QuantizeLinear_Output (QuantizeLinear)           [b:1,h:32,w:64,c:8]                      32,768                               r1 
+------ --------------------------------------------------- ---------------------- -------------- --------- -------------------------------- 
+13     r1_DequantizeLinear_Output (DequantizeLinear)       [b:1,h:32,w:64,c:8]                      32,768         r1_QuantizeLinear_Output 
+------ --------------------------------------------------- ---------------------- -------------- --------- -------------------------------- 
+14     p1 (MaxPool)                                        [b:1,h:16,w:32,c:8]                      16,384       r1_DequantizeLinear_Output 
+------ --------------------------------------------------- ---------------------- -------------- --------- -------------------------------- 
+15     p1_QuantizeLinear_Output (QuantizeLinear)           [b:1,h:16,w:32,c:8]                       8,192                               p1 
+------ --------------------------------------------------- ---------------------- -------------- --------- -------------------------------- 
+16     p1_DequantizeLinear_Output (DequantizeLinear)       [b:1,h:16,w:32,c:8]                       8,192         p1_QuantizeLinear_Output 
+------ --------------------------------------------------- ---------------------- -------------- --------- -------------------------------- 
+17     r2 (Conv)                                           [b:1,h:16,w:32,c:16]   1,168/4,672      589,840       p1_DequantizeLinear_Output 
+------ --------------------------------------------------- ---------------------- -------------- --------- -------------------------------- 
+18     r2_QuantizeLinear_Output (QuantizeLinear)           [b:1,h:16,w:32,c:16]                     16,384                               r2 
+------ --------------------------------------------------- ---------------------- -------------- --------- -------------------------------- 
+19     r2_DequantizeLinear_Output (DequantizeLinear)       [b:1,h:16,w:32,c:16]                     16,384         r2_QuantizeLinear_Output 
+------ --------------------------------------------------- ---------------------- -------------- --------- -------------------------------- 
+20     p2 (MaxPool)                                        [b:1,h:8,w:16,c:16]                       8,192       r2_DequantizeLinear_Output 
+------ --------------------------------------------------- ---------------------- -------------- --------- -------------------------------- 
+21     p2_QuantizeLinear_Output (QuantizeLinear)           [b:1,h:8,w:16,c:16]                       4,096                               p2 
+------ --------------------------------------------------- ---------------------- -------------- --------- -------------------------------- 
+22     p2_DequantizeLinear_Output (DequantizeLinear)       [b:1,h:8,w:16,c:16]                       4,096         p2_QuantizeLinear_Output 
+------ --------------------------------------------------- ---------------------- -------------- --------- -------------------------------- 
+23     r3 (Conv)                                           [b:1,h:8,w:16,c:32]    4,640/18,560     589,856       p2_DequantizeLinear_Output 
+------ --------------------------------------------------- ---------------------- -------------- --------- -------------------------------- 
+24     r3_QuantizeLinear_Output (QuantizeLinear)           [b:1,h:8,w:16,c:32]                       8,192                               r3 
+------ --------------------------------------------------- ---------------------- -------------- --------- -------------------------------- 
+25     r3_DequantizeLinear_Output (DequantizeLinear)       [b:1,h:8,w:16,c:32]                       8,192         r3_QuantizeLinear_Output 
+------ --------------------------------------------------- ---------------------- -------------- --------- -------------------------------- 
+26     p3 (MaxPool)                                        [b:1,h:4,w:8,c:32]                        4,096       r3_DequantizeLinear_Output 
+------ --------------------------------------------------- ---------------------- -------------- --------- -------------------------------- 
+27     p3_QuantizeLinear_Output (QuantizeLinear)           [b:1,h:4,w:8,c:32]                        2,048                               p3 
+------ --------------------------------------------------- ---------------------- -------------- --------- -------------------------------- 
+28     p3_DequantizeLinear_Output (DequantizeLinear)       [b:1,h:4,w:8,c:32]                        2,048         p3_QuantizeLinear_Output 
+------ --------------------------------------------------- ---------------------- -------------- --------- -------------------------------- 
+29     flat (Flatten)                                      [b:1,c:1024]                                          p3_DequantizeLinear_Output 
+------ --------------------------------------------------- ---------------------- -------------- --------- -------------------------------- 
+30     flat_QuantizeLinear_Output (QuantizeLinear)         [b:1,c:1024]                              2,048                             flat 
+------ --------------------------------------------------- ---------------------- -------------- --------- -------------------------------- 
+31     flat_DequantizeLinear_Output (DequantizeLinear)     [b:1,c:1024]                              2,048       flat_QuantizeLinear_Output 
+------ --------------------------------------------------- ---------------------- -------------- --------- -------------------------------- 
+32     class_scores_Quant..near_Input (Gemm)               [b:1,c:6]                                 6,150     flat_DequantizeLinear_Output 
+                                                                                                             fc_w_DequantizeLin..tput_const 
+                                                                                                                                 fc_b_const 
+------ --------------------------------------------------- ---------------------- -------------- --------- -------------------------------- 
+33     class_scores_Quant..ear_Output (QuantizeLinear)     [b:1,c:6]                                    12   class_scores_Quant..near_Input 
+------ --------------------------------------------------- ---------------------- -------------- --------- -------------------------------- 
+34     class_scores (DequantizeLinear)                     [b:1,c:6]                                    12   class_scores_Quant..ear_Output 
+------ --------------------------------------------------- ---------------------- -------------- --------- -------------------------------- 
+model: macc=1,517,654 weights=48,152 activations=-- io=--
+
+
+
+
+
+Compilation details
+------------------------------------------------------------------------------------
+Compiler version: 1.1.3-262
+Compiler arguments:  -i D:\Project\NECCS\Program\NECCS_N647\tools\npu\generated_int8\toy_sound_classifier_int8_OE_3_3_1.onnx --json-quant-file D:\Project\NECCS\Program\NECCS_N647\tools\npu\generated_int8\toy_sound_classifier_int8_OE_3_3_1_Q.json -g network.c --load-mdesc C:\ST\STEdgeAI\4.0\Utilities\configs\stm32n6.mdesc --load-mpool C:\ST\STEdgeAI\4.0\Utilities\windows\targets\stm32\resources\NPU\STM32N6xx\stm32n6.mpool --load-cdesc C:\ST\STEdgeAI\4.0\Utilities\configs\cortex-m55.cdesc --save-mpool-file D:\Project\NECCS\N647_BaseBoard\firmware\NECCS_N647\st_ai_ws\neural_art__network\stm32n6.mpool --out-dir-prefix D:\Project\NECCS\N647_BaseBoard\firmware\NECCS_N647\st_ai_ws\neural_art__network/ --network-name network --native-float --cache-maintenance --Ocache-opt --enable-virtual-mem-pools --Os --Oauto-sched --output-info-file c_info.json --generate-stai
+====================================================================================
+
+Memory usage information  (input/output buffers are included in activations)
+------------------------------------------------------------------------------------
+	flexMEM    [0x34000000 - 0x34000000]:          0  B /          0  B  (  0.00 % used) -- weights:          0  B (  0.00 % used)  activations:          0  B (  0.00 % used)
+	cpuRAM1    [0x34064000 - 0x34064000]:          0  B /          0  B  (  0.00 % used) -- weights:          0  B (  0.00 % used)  activations:          0  B (  0.00 % used)
+	cpuRAM2    [0x34100000 - 0x34200000]:          0  B /      1.000 MB  (  0.00 % used) -- weights:          0  B (  0.00 % used)  activations:          0  B (  0.00 % used)
+	npuRAM3    [0x34200000 - 0x34270000]:          0  B /    448.000 kB  (  0.00 % used) -- weights:          0  B (  0.00 % used)  activations:          0  B (  0.00 % used)
+	npuRAM4    [0x34270000 - 0x342E0000]:          0  B /    448.000 kB  (  0.00 % used) -- weights:          0  B (  0.00 % used)  activations:          0  B (  0.00 % used)
+	npuRAM5    [0x342E0000 - 0x34350000]:      6.000 kB /    448.000 kB  (  1.34 % used) -- weights:          0  B (  0.00 % used)  activations:      6.000 kB (  1.34 % used)
+	npuRAM6    [0x34350000 - 0x343C0000]:          0  B /    448.000 kB  (  0.00 % used) -- weights:          0  B (  0.00 % used)  activations:          0  B (  0.00 % used)
+	octoFlash  [0x71000000 - 0x78000000]:     12.001 kB /    112.000 MB  (  0.01 % used) -- weights:     12.001 kB (  0.01 % used)  activations:          0  B (  0.00 % used)
+	hyperRAM   [0x90000000 - 0x92000000]:          0  B /     32.000 MB  (  0.00 % used) -- weights:          0  B (  0.00 % used)  activations:          0  B (  0.00 % used)
+---
+Total:                                            18.001 kB                                  -- weights:     12.001 kB                  activations:      6.000 kB                   
+====================================================================================
+
+
+Used memory ranges
+------------------------------------------------------------------------------------
+	npuRAM5    [0x342E0000 - 0x34350000]: 0x342E0000-0x342E1800
+	octoFlash  [0x71000000 - 0x78000000]: 0x71000000-0x71003010
+====================================================================================
+
+Epochs details
+------------------------------------------------------------------------------------
+Total number of epochs                               6
+>> pure software (SW) epochs                         0
+>> hybrid epochs (using both software and hardware)  0
+>> pure hardware (HW or EC) epochs                   6  (implemented in 0 epoch controller blobs/meta epochs)
+---
++----------+------+---------+
+| epoch ID | Type | Details |
++----------+------+---------+
+| epoch_1  |  HW  |         |
+| epoch_2  |  HW  |         |
+| epoch_3  |  HW  |         |
+| epoch_4  |  HW  |         |
+| epoch_5  |  HW  |         |
+| epoch_6  |  HW  |         |
++----------+------+---------+
+====================================================================================

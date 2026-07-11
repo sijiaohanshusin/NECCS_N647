@@ -31,6 +31,10 @@
 #endif
 
 #define APP_TOUCH_I2C_TIMEOUT_MS        5U
+/* Bus-mutex wait budget: camera exposure updates hold AppI2C2 for a few ms
+ * per burst, so 5 ms produced constant spurious "errors" that escalated
+ * into device reinit storms. 25 ms rides out any single camera burst. */
+#define APP_TOUCH_LOCK_WAIT_MS          25U
 #define APP_TOUCH_I2C_COOLDOWN_MS       20U
 #define APP_TOUCH_REINIT_ERROR_LIMIT    16U
 #define APP_TOUCH_REINIT_COOLDOWN_MS    1000U
@@ -47,6 +51,7 @@
 #define APP_TOUCH_GT_ADDR7_LOW          0x14U
 #define APP_TOUCH_GT_ADDR7_HIGH         0x5DU
 #define APP_TOUCH_GT_REG_CTRL           0x8040U
+#define APP_TOUCH_GT_REG_CONFIG         0x8047U
 #define APP_TOUCH_GT_REG_PID            0x8140U
 #define APP_TOUCH_GT_REG_STATUS         0x814EU
 #define APP_TOUCH_GT_REG_TP1            0x8150U
@@ -62,6 +67,10 @@ static uint8_t g_pins_ready;
 static uint8_t g_gt_address7;
 static uint32_t g_next_init_retry_ms;
 static uint32_t g_next_sample_retry_ms;
+/* Set by touch_i2c_mem_xfer when the failure was only the AppI2C2 mutex
+ * timing out (camera holding the bus), so sample bookkeeping can skip the
+ * reinit escalation path for benign contention. */
+static uint8_t g_last_xfer_was_lock_timeout;
 
 static uint8_t time_reached(uint32_t now, uint32_t target)
 {
@@ -74,10 +83,18 @@ static void note_i2c_sample_error(void)
 
   g_touch.last_error = APP_TOUCH_ERR_ACK;
   ++g_touch.error_count;
-  ++g_touch.consecutive_error_count;
   g_next_sample_retry_ms = now + APP_TOUCH_I2C_COOLDOWN_MS;
   ++g_touch.cooldown_count;
 
+  if (g_last_xfer_was_lock_timeout != 0U)
+  {
+    /* Bus mutex contention (camera exposure burst): back off this sample
+     * but do not treat it as device loss - escalating here caused reinit
+     * storms with multi-second touch dropouts. */
+    return;
+  }
+
+  ++g_touch.consecutive_error_count;
   if (g_touch.consecutive_error_count >= APP_TOUCH_REINIT_ERROR_LIMIT)
   {
     g_touch.ready = 0U;
@@ -197,11 +214,14 @@ static uint8_t touch_i2c_mem_xfer(uint8_t is_read,
     return 0U;
   }
 
-  if (AppI2C2_Lock(APP_TOUCH_I2C_TIMEOUT_MS) == 0U)
+  if (AppI2C2_Lock(APP_TOUCH_LOCK_WAIT_MS) == 0U)
   {
     g_touch.last_hal_status = (uint32_t)HAL_BUSY;
+    g_last_xfer_was_lock_timeout = 1U;
+    ++g_touch.lock_timeout_count;
     return 0U;
   }
+  g_last_xfer_was_lock_timeout = 0U;
 
   if (is_read != 0U)
   {
@@ -225,6 +245,10 @@ static uint8_t touch_i2c_mem_xfer(uint8_t is_read,
   }
   AppI2C2_Unlock();
 
+  if (status != HAL_OK)
+  {
+    ++g_touch.wire_error_count;
+  }
   return i2c_status_ok(status);
 }
 
@@ -414,6 +438,13 @@ static uint8_t gt_try_init_at(uint8_t address7, GPIO_PinState int_state)
   HAL_Delay(10U);
   value = 0U;
   (void)gt_write_reg_at(address7, APP_TOUCH_GT_REG_CTRL, &value, 1U);
+
+  /* Diagnostic: expose the head of the GT911 config table (resolution,
+   * max touch number, mode switches). A zeroed/garbage head or a touch
+   * number of 0 explains "chip ACKs but never reports a touch". */
+  g_touch.cfg_read_ok =
+      gt_read_reg_at(address7, APP_TOUCH_GT_REG_CONFIG, g_touch.cfg_head,
+                     sizeof(g_touch.cfg_head));
 
   g_gt_address7 = address7;
   g_touch.address7 = address7;

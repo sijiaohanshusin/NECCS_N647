@@ -232,8 +232,14 @@ static PCMD3180_StatusTypeDef PCMD3180_ApplyAsiRouting(PCMD3180_HandleTypeDef *h
                                                        uint8_t verify)
 {
     PCMD3180_StatusTypeDef status = PCMD3180_ERROR;
-    uint8_t writes_ok = 0U;
 
+    /* Verified routing is mandatory (golden 7e12d5da semantics). Soft
+     * I2C writes occasionally deliver corrupted VALUES while still being
+     * ACKed - live readback on 2026-07-10 caught ch-slot registers holding
+     * 0xFE / cross-device collisions, which silences most PDM lanes and is
+     * exactly the "bad mic data" failure. Reads are reliable on the
+     * dedicated pins (SCL release sync), so verify-and-retry until the
+     * routing truly landed; never accept an unverified slot table. */
     for (uint32_t attempt = 0U; attempt < PCMD3180_ASI_ROUTING_RETRY_COUNT; attempt++)
     {
         status = PCMD3180_SelectPage(handle, 0U);
@@ -247,7 +253,6 @@ static PCMD3180_StatusTypeDef PCMD3180_ApplyAsiRouting(PCMD3180_HandleTypeDef *h
         status = PCMD3180_WriteAsiRouting(handle, config, verify);
         if (status == PCMD3180_OK)
         {
-            writes_ok = 1U;
             PCMD3180_Delay(handle, PCMD3180_ASI_ROUTING_RETRY_DELAY_MS);
             status = PCMD3180_VerifyAsiRouting(handle, config);
             if (status == PCMD3180_OK)
@@ -257,20 +262,6 @@ static PCMD3180_StatusTypeDef PCMD3180_ApplyAsiRouting(PCMD3180_HandleTypeDef *h
         }
 
         PCMD3180_Delay(handle, PCMD3180_ASI_ROUTING_RETRY_DELAY_MS);
-    }
-
-    /* Soft-accept when every routing WRITE was ACKed but the verify READS
-     * kept failing. On this board the read path (repeated-start + read
-     * byte) glitches probabilistically while writes land reliably - the
-     * 2026-07-09 bring-up sessions showed devices failing here with
-     * VERIFY_ERROR yet streaming perfectly once the result was accepted.
-     * A device that ACKs all writes is present and programmed; killing it
-     * over a glitched diagnostic read caused the endless all-or-nothing
-     * reconfig loops. last_status keeps the verify result for the UI. */
-    if (writes_ok != 0U)
-    {
-        handle->last_status = status;
-        return PCMD3180_OK;
     }
 
     return status;

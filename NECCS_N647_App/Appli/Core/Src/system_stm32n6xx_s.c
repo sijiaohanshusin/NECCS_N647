@@ -183,6 +183,28 @@ extern void *g_pfnVectors;
 
 void SystemInit(void)
 {
+  /* FIRST instructions of C startup: reopen the debug port. On a cold
+   * external-Flash (XIP) boot the BootROM closes the BSEC debug
+   * authorisation, which kills SWD (DP answers, AP0/AP1 dead) AND makes
+   * any CPU access to DBGMCU registers bus-fault (verified live
+   * 2026-07-10: `DBGMCU->CR |=` HardFaulted with BFAR=0x54001004 and
+   * locked the boot). Reopen BSEC debug at the current hide-protection
+   * level (same mechanism ST's OEMuROT uses) and enable the debug
+   * clocks. Never touch DBGMCU registers from the CPU on this path.
+   * Harmless in Debug builds where the port is already open. */
+  RCC->APB4ENSR2 = RCC_APB4ENSR2_BSECENS;         /* BSEC register access */
+  (void)RCC->APB4ENR2;
+  {
+    const uint32_t hdpl = BSEC->HDPLSR & BSEC_HDPLSR_HDPL_Msk;
+    BSEC->AP_UNLOCK = 0xB4UL;                     /* DBG_MCU AP unlocked */
+    BSEC->DBGCR = (0xB4UL << 24)                  /* secure debug authorised */
+                | (hdpl << 16)                    /* open at OUR level */
+                | (0xB4UL << 8);                  /* non-secure authorised */
+  }
+  RCC->BUSENSR = RCC_BUSENSR_APB3ENS;             /* APB3 bus (DBGMCU) */
+  RCC->MISCENSR = RCC_MISCENSR_DBGENS;            /* DBG misc kernel clock */
+  (void)RCC->MISCENR;
+
   /* SAU/IDAU, FPU and Interrupts secure/non-secure allocation settings */
   TZ_SAU_Setup();
 

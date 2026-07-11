@@ -49,16 +49,28 @@
 #define APP_PCMD_SDOUT_BCLK_MARGIN_FIX       1U
 #endif
 
+/* Primary backend is the hardware I2C2 controller: the mic array sits on
+ * the shared PD14/PD4 bus which now carries proper 4.7k pull-ups
+ * (2026-07-10 rework), so the peripheral that already serves camera/touch
+ * can drive the PCMD3180s too. The bit-bang backend remains as an
+ * automatic fallback for a failed full-array config pass. */
 #ifndef APP_PCMD_CAPTURE_I2C_BACKEND
-#define APP_PCMD_CAPTURE_I2C_BACKEND         APP_PCMD_CAPTURE_I2C_BACKEND_SW
+#define APP_PCMD_CAPTURE_I2C_BACKEND         APP_PCMD_CAPTURE_I2C_BACKEND_HAL
 #endif
 
 #ifndef APP_PCMD_CAPTURE_STATUS_READ_ON_START
-#define APP_PCMD_CAPTURE_STATUS_READ_ON_START 0U
+/* Read the real device registers into device_status[] right after config
+ * (one extra status read per device inside the same I2C window). Without
+ * this the snapshot holds fabricated expected values, which made the
+ * dead-PDM-lane investigation chase phantom "healthy" registers. */
+#define APP_PCMD_CAPTURE_STATUS_READ_ON_START 1U
 #endif
 
 #ifndef APP_PCMD_CAPTURE_STATUS_POLL_MS
-#define APP_PCMD_CAPTURE_STATUS_POLL_MS      0U
+/* Diagnostic build: poll the real device registers (incl. GPI_MON, the
+ * live PDM data-pin sampler) every 2 s while streaming. Only active when
+ * g_app_pcmd_debug_ui_enable is set from the debugger. */
+#define APP_PCMD_CAPTURE_STATUS_POLL_MS      2000U
 #endif
 
 extern SAI_HandleTypeDef hsai_BlockA1;
@@ -887,6 +899,9 @@ static AppPcmdCaptureStatus_t AppPcmdCapture_ConfigPcmdDevices(void)
         s_snapshot.device_config_ok_mask = (uint8_t)(s_snapshot.device_config_ok_mask | device_mask);
         s_snapshot.device_status_ok_mask = (uint8_t)(s_snapshot.device_status_ok_mask | device_mask);
 #if (APP_PCMD_CAPTURE_STATUS_READ_ON_START != 0U)
+        /* Diagnostic-only readback of the REAL registers: expose them in
+         * the snapshot (SWD/system page) but never drop a configured device
+         * over a glitchy read - that caused the all-or-nothing loops. */
         status_status = PCMD3180_ReadStatus(&s_pcmd_handles[index],
                                             &s_snapshot.device_status[index]);
         if ((status_status == PCMD3180_OK) &&
@@ -898,6 +913,7 @@ static AppPcmdCaptureStatus_t AppPcmdCapture_ConfigPcmdDevices(void)
         {
           s_snapshot.device_status_ok_mask = (uint8_t)(s_snapshot.device_status_ok_mask & (uint8_t)~device_mask);
         }
+        status_status = PCMD3180_OK;
 #else
         status_status = PCMD3180_OK;
 #endif
@@ -928,31 +944,15 @@ static AppPcmdCaptureStatus_t AppPcmdCapture_ConfigPcmdDevices(void)
     }
   }
 
-  if (result == APP_PCMD_CAPTURE_OK)
+  /* No separate Activate sweep: with defer_power_up=0 each device was
+   * already powered up inside its Configure pass (golden 7e12d5da flow).
+   * A post-config status read per configured device keeps the diagnostic
+   * snapshot fresh, exactly like the golden bring-up did. */
+  for (uint32_t index = 0U; index < APP_PCMD_CAPTURE_DEVICE_COUNT; index++)
   {
-    static const uint8_t activate_order[APP_PCMD_CAPTURE_DEVICE_COUNT] =
+    if ((s_snapshot.device_config_ok_mask & (uint8_t)(1U << index)) != 0U)
     {
-      1U, 0U, 3U, 2U
-    };
-
-    for (uint32_t order = 0U; order < APP_PCMD_CAPTURE_DEVICE_COUNT; order++)
-    {
-      const uint32_t index = activate_order[order];
-      const uint8_t device_mask = (uint8_t)(1U << index);
-      PCMD3180_StatusTypeDef activate_status =
-          PCMD3180_Activate(&s_pcmd_handles[index], &s_pcmd_configs[index]);
-
-      if (activate_status != PCMD3180_OK)
-      {
-        s_snapshot.device_config_status[index] = (int32_t)activate_status;
-        s_snapshot.device_config_ok_mask = (uint8_t)(s_snapshot.device_config_ok_mask & (uint8_t)~device_mask);
-        s_snapshot.device_status_ok_mask = (uint8_t)(s_snapshot.device_status_ok_mask & (uint8_t)~device_mask);
-        result = APP_PCMD_CAPTURE_PCMD_ERROR;
-      }
-      else
-      {
-        AppPcmdCapture_DeviceStatusKick(index);
-      }
+      AppPcmdCapture_DeviceStatusKick(index);
     }
   }
 
@@ -1188,18 +1188,19 @@ AppPcmdCaptureStatus_t AppPcmdCapture_Init(AppMicArrayMode_t mode)
   s_snapshot.debug_ui_enabled = ((g_app_pcmd_debug_ui_enable != 0U) ||
                                  (APP_PCMD_DIAG_UI_ENABLE != 0U)) ? 1U : 0U;
 
-  s_hal_context.hi2c = NULL;
-  /* Dedicated software-I2C pins for the mic array (rewired 2026-07-09):
-   * PC10=SCL, PC11=SDA, spare expansion GPIO with secure attributes already
-   * set in MX_GPIO_Init. hi2c stays NULL so the driver never de-inits,
-   * locks, or recovers the camera's hardware I2C2 (PD14/PD4) - the two
-   * buses are now electrically and logically independent, which removes
-   * the AF<->GPIO pin flipping and bus contention that made bring-up
-   * probabilistic. */
-  s_hal_context.scl_port = GPIOC;
-  s_hal_context.scl_pin = GPIO_PIN_10;
-  s_hal_context.sda_port = GPIOC;
-  s_hal_context.sda_pin = GPIO_PIN_11;
+  s_hal_context.hi2c = &hi2c2;
+  /* Mic-array harness re-soldered back onto the shared I2C2 pins
+   * (PD14=SCL / PD4=SDA) with proper 4.7k external pull-ups fitted
+   * (2026-07-10, board-verified with the golden firmware: 4/4 devices,
+   * 31/32 mics live). Passing the real handle lets the driver drive the
+   * devices with the hardware I2C2 peripheral (same controller and
+   * AppI2C2 lock the camera uses); the software bit-bang backend stays
+   * available as an automatic fallback and de-inits/re-inits the
+   * peripheral around each pass. */
+  s_hal_context.scl_port = GPIOD;
+  s_hal_context.scl_pin = GPIO_PIN_14;
+  s_hal_context.sda_port = GPIOD;
+  s_hal_context.sda_pin = GPIO_PIN_4;
   s_hal_context.shutdown_port = MIC_SHDNZ_GPIO_Port;
   s_hal_context.shutdown_pin = MIC_SHDNZ_Pin;
   s_hal_context.timeout_ms = APP_PCMD_CAPTURE_I2C_TIMEOUT_MS;
@@ -1239,7 +1240,22 @@ AppPcmdCaptureStatus_t AppPcmdCapture_Init(AppMicArrayMode_t mode)
 #if (APP_PCMD_SDOUT_BCLK_MARGIN_FIX != 0U)
     s_pcmd_configs[index].invert_bclk = 1U;
 #endif
-    s_pcmd_configs[index].defer_power_up = 1U;
+    /* Golden flow (commit 7e12d5da, board-verified all-32-slot capture at
+     * ~-60 dBFS rest floor): each device is reset, fully programmed AND
+     * powered up in ONE Configure pass (Configure also re-applies the slot
+     * routing after power-up). The later two-pass variant (defer_power_up=1
+     * + a separate Activate sweep) left most PDM front-ends silent - only
+     * 1-2 of 32 slots carried real modulator data. Do not defer. */
+    s_pcmd_configs[index].defer_power_up = 0U;
+    /* Per-register write-verify-retry: live readback (2026-07-10) caught
+     * ACKed writes landing with corrupted VALUES on the pull-up-less bus
+     * (slot regs holding 0xFE / colliding slot numbers -> silent PDM lanes,
+     * garbage localisation). Every config write must close the loop. */
+    s_pcmd_configs[index].verify_writes = 1U;
+    /* No MICBIAS: PDM mics are digitally supplied; the H7-proven power
+     * value is PWR_CFG=0x60 (PLL+PDM only). Tested 2026-07-10: bias on
+     * only lifted the noise floor slightly, no lanes woke up. */
+    s_pcmd_configs[index].enable_micbias = 0U;
   }
 
   s_snapshot.initialized = 1U;
@@ -1282,13 +1298,10 @@ AppPcmdCaptureStatus_t AppPcmdCapture_Start(void)
   __HAL_SAI_DISABLE_IT(&hsai_BlockB1, SAI_IT_AFSDET | SAI_IT_LFSDET);
   AppPcmdCapture_DelayMs(APP_PCMD_CAPTURE_CLOCK_SETTLE_MS);
 
-  /* Hold the I2C2 lock for the whole config window even though the mic bus
-   * now bit-bangs dedicated pins (PC10/PC11): the failure signature is
-   * identical to the PD4/PD14 era and scales with window duration, i.e.
-   * concurrent camera-exposure / power-management I2C2 traffic disturbs the
-   * mic net during configuration. Serialising the window is the combination
-   * that was board-verified stable (2026-07-09 08:41, all 4 devices, 5400+
-   * frames). One-time boot cost only - config freezes afterwards. */
+  /* The mic array shares the hardware I2C2 bus (PD14/PD4) with the camera
+   * and power management, so the whole config window must hold the AppI2C2
+   * mutex to keep exposure/PMIC traffic out of the middle of the PCMD
+   * register pass. One-time boot cost only - config freezes afterwards. */
   if (AppI2C2_Lock(APP_PCMD_CAPTURE_CONFIG_LOCK_MS) == 0U)
   {
     s_snapshot.start_status = APP_PCMD_CAPTURE_BUSY;
@@ -1296,7 +1309,18 @@ AppPcmdCaptureStatus_t AppPcmdCapture_Start(void)
     return APP_PCMD_CAPTURE_BUSY;
   }
 
-  config_status = AppPcmdCapture_ResetAndConfigurePcmd(APP_PCMD_CAPTURE_I2C_BACKEND_SW);
+  config_status = AppPcmdCapture_ResetAndConfigurePcmd(APP_PCMD_CAPTURE_I2C_BACKEND);
+#if (APP_PCMD_CAPTURE_I2C_BACKEND != APP_PCMD_CAPTURE_I2C_BACKEND_SW)
+  if (config_status != APP_PCMD_CAPTURE_OK)
+  {
+    /* Hardware-I2C pass missed at least one device: run one full bit-bang
+     * pass (fresh hardware reset included) before giving up - the software
+     * backend tolerates marginal bus electricals better and was the only
+     * path that worked in the pull-up-less era. */
+    s_snapshot.i2c_fallback_count++;
+    config_status = AppPcmdCapture_ResetAndConfigurePcmd(APP_PCMD_CAPTURE_I2C_BACKEND_SW);
+  }
+#endif
 
   AppI2C2_Unlock();
 
@@ -1319,22 +1343,28 @@ AppPcmdCaptureStatus_t AppPcmdCapture_Start(void)
   }
 
   AppPcmdCapture_DelayMs(APP_PCMD_CAPTURE_POST_CONFIG_SETTLE_MS);
-  AppPcmdCapture_StopDma();
+  /* NEVER stop/restart the SAI here. The PCMD3180 is a clock slave: its
+   * PLL locks to our BCLK, and stopping the SAI (even briefly, to re-arm
+   * the DMA) drops BCLK -> PLL-lock-lost + ASI-clock-error latch on every
+   * device (read live 2026-07-10: INT_LTCH0=0xC0 on all four) -> PDMCLK to
+   * the microphones stops -> the entire array reads digital silence even
+   * though every register is correct. This restart was THE root cause of
+   * the "mics receive bad data" P0. Keep the first DMA run alive and just
+   * discard the halves captured during the config window. */
+  AppPcmdCapture_ClearRawAccumulator();
+  AppPcmdCapture_ArmDiscardHalves(APP_PCMD_CAPTURE_POST_CONFIG_DISCARD_HALVES);
   AppPcmdCapture_ClearPendingDmaEvents();
-  hal_status = AppPcmdCapture_StartSaiDma(APP_PCMD_CAPTURE_POST_CONFIG_DISCARD_HALVES, 1U);
-  if (hal_status != HAL_OK)
-  {
-    s_snapshot.start_status = APP_PCMD_CAPTURE_HAL_ERROR;
-    AppPcmdCapture_StopDma();
-    return APP_PCMD_CAPTURE_HAL_ERROR;
-  }
 
   s_raw_accum_enabled = 1U;
   s_snapshot.started = 1U;
   s_snapshot.start_status = APP_PCMD_CAPTURE_OK;
-  /* One-time I2C configuration succeeded: freeze the bus. The devices keep
-   * their registers and audio flows over SAI, so I2C is never touched again
-   * (frame stalls recover via DMA-only restart). */
+  /* One-time I2C configuration succeeded: freeze the mic config. The
+   * devices keep their registers and audio flows over SAI, so the PCMD
+   * driver never touches I2C again (frame stalls recover via DMA-only
+   * restart). PD14/PD4 stay owned by the hardware I2C2 peripheral - the
+   * camera and power management keep using the bus, which is fine now
+   * that it carries real 4.7k pull-ups (the old tri-state hack was for
+   * the temporary pull-up-less rewired harness only). */
   s_pcmd_config_frozen = 1U;
   App_BringUpStatus_Ready(APP_BRINGUP_MODULE_PCMD_RAW, APP_PCMD_CAPTURE_OK);
   return APP_PCMD_CAPTURE_OK;

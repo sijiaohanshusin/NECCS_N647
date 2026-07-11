@@ -3,6 +3,7 @@
 #include "app_boot_diag.h"
 #include "app_camera.h"
 #include "app_media.h"
+#include "app_npu.h"
 #include "app_power.h"
 #include "main.h"
 #include "./LED/led.h"
@@ -307,6 +308,9 @@ void App_BringUpThreadEntry(ULONG thread_input)
       AppCamera_Poll(1000U);
       App_BringUpStatus_Heartbeat(APP_BRINGUP_MODULE_CAMERA, (int32_t)g_app_camera_last_error);
     }
+    /* Neural-ART bring-up hook: SWD writes g_app_npu_test_request to run a
+     * synthetic-input inference (init happens lazily on first request). */
+    AppNpu_Poll();
     LED0_TOGGLE();
     tx_thread_sleep(APP_HEARTBEAT_TICKS);
   }

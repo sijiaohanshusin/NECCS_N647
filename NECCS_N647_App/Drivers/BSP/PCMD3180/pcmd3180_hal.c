@@ -149,12 +149,18 @@ static void PCMD3180_HAL_SwI2CInitPins(PCMD3180_HAL_BusContextTypeDef *context)
     HAL_GPIO_WritePin(context->scl_port, context->scl_pin, GPIO_PIN_SET);
     HAL_GPIO_WritePin(context->sda_port, context->sda_pin, GPIO_PIN_SET);
 
+    /* Standard open-drain I2C on both lines: the mic bus carries real
+     * external 4.7k pull-ups since the 2026-07-10 harness rework, so edges
+     * rise cleanly and the historical push-pull-SCL workaround (needed
+     * only while the temporary rewired bus had no pull-ups at all) is
+     * gone. Open-drain keeps the pins safe against any other bus master
+     * or clock-stretching device. */
     gpio_init.Mode = GPIO_MODE_OUTPUT_OD;
     gpio_init.Pull = GPIO_PULLUP;
-    gpio_init.Speed = GPIO_SPEED_FREQ_LOW;
-
+    gpio_init.Speed = GPIO_SPEED_FREQ_MEDIUM;
     gpio_init.Pin = context->scl_pin;
     HAL_GPIO_Init(context->scl_port, &gpio_init);
+
     gpio_init.Pin = context->sda_pin;
     HAL_GPIO_Init(context->sda_port, &gpio_init);
 
@@ -736,6 +742,33 @@ void PCMD3180_HAL_DelayMs(void *context, uint32_t delay_ms)
 {
     (void)context;
     PCMD3180_HAL_Delay(delay_ms);
+}
+
+void PCMD3180_HAL_TriStateBusPins(PCMD3180_HAL_BusContextTypeDef *context)
+{
+    GPIO_InitTypeDef gpio_init = {0};
+
+    if (PCMD3180_HAL_SwPinsValid(context) == 0U)
+    {
+        return;
+    }
+
+    /* Fully release the soft-I2C wires after the one-time configuration.
+     * On the rewired harness the I2C lines are coupled/bridged with mic
+     * PDM lines: any driven level (even the open-drain pull-up, and
+     * especially the push-pull idle-high SCL) disturbs or clamps the PDM
+     * traffic. The devices never need I2C again after config freeze, so
+     * give the wires back to the PDM domain entirely. */
+    gpio_init.Mode = GPIO_MODE_INPUT;
+    gpio_init.Pull = GPIO_NOPULL;
+    gpio_init.Speed = GPIO_SPEED_FREQ_LOW;
+
+    gpio_init.Pin = context->scl_pin;
+    HAL_GPIO_Init(context->scl_port, &gpio_init);
+    gpio_init.Pin = context->sda_pin;
+    HAL_GPIO_Init(context->sda_port, &gpio_init);
+
+    context->software_i2c_active = 0U;
 }
 
 void PCMD3180_HAL_SetShutdown(void *context, uint8_t asserted)

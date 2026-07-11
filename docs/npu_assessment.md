@@ -2,6 +2,20 @@
 
 日期: 2026-07-09 · 状态: 评估完成, 集成为赛后增强项
 
+## 2026-07-11 更新: 工具链已上机验证
+
+- stedgeai v4.0 (`C:\ST\STEdgeAI\4.0`) 编译玩具声纹分类器 (3конv 1D-CNN,
+  输入 32x64 对数谱窗, 6 类) **通过**: `tools/npu/make_toy_model.py`。
+- int8 静态量化 (QDQ, 合成谱校准) 后 **6/7 epoch 映射到纯 NPU 硬件**
+  (仅 softmax 留 CPU); float 版只有 1 个 HW epoch —— 量化是必须项。
+- 内存布局与应用工程验证无冲突: 权重 12KB 放 octoFlash `0x71000000`
+  (已烧录并校验, 距启动 bundle +16MB), 激活 6KB 放 npuRAM5
+  `0x342E0000` (应用链接脚本 RAM 上限 0x34200000, NPU SRAM 全空闲)。
+- 运行时: ll_aton 自带 ThreadX OSAL (`ll_aton_osal_threadx.c`),
+  LL_ATON_PLATFORM=LL_ATON_PLAT_STM32N6。
+- 下一步 (npu-model): ll_aton + network.c 进 CubeIDE 工程, NPU/CACHEAXI
+  时钟使能, app_npu 服务挂 AppAcousticService 谱输出, UI 声源类型卡片。
+
 ## 结论 (TL;DR)
 
 - STM32N657 的 Neural-ART NPU (600 GOPS) **可用于声纹分类**（识别气体泄漏/轴承磨损/电弧放电等声源类型），是最有竞赛价值的方向。

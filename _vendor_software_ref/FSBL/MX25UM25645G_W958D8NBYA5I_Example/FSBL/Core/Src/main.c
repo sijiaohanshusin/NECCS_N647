@@ -109,6 +109,15 @@ int main(void)
 
   /* USER CODE END 2 */
 
+  /* Pre-jump settle window. Board-verified 2026-07-11: immediate jump and
+   * a 1.5 s window both produced cold-boot freezes ~1.6-1.8 s into the
+   * App (SysTick dead, right around the PCMD/SAI-DMA bring-up); with
+   * 2.5 s the full App chain (camera streaming + 30/32 PCMD slots) came
+   * up cleanly on every attempt. Do not shorten without re-running the
+   * cold-boot battery. Doubles as the SWD attach window for cold-boot
+   * debugging (BSEC debug port reopened in SystemInit). */
+  HAL_Delay(2500);
+
   /* Launch the application */
   if (BOOT_OK != BOOT_Application())
   {

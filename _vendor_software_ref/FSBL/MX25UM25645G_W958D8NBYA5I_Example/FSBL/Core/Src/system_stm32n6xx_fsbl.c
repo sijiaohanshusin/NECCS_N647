@@ -182,6 +182,28 @@ extern void *g_pfnVectors;
 
 void SystemInit(void)
 {
+  /* NECCS debug hook: reopen the debug port as the very first step of
+   * FSBL C startup. On cold external-Flash boots the BootROM closes the
+   * BSEC debug authorisation, which kills SWD (DP answers, AP0/AP1 dead)
+   * AND makes any CPU access to DBGMCU registers bus-fault - verified
+   * live 2026-07-10: the naive `DBGMCU->CR |=` here HardFaulted into
+   * BootROM lockup with BFAR=0x54001004. So: BSEC unlock only (verified
+   * to restore SWD attach in XIP mode), clocks for the debugger, and NO
+   * CPU-side DBGMCU register access. */
+  RCC->APB4ENSR2 = RCC_APB4ENSR2_BSECENS;
+  (void)RCC->APB4ENR2;
+  /* Authorise debug at the CURRENT hide-protection level (board-verified:
+   * this restored SWD attach during the FSBL stage). The Appli runs the
+   * same reopen for its own level from its SystemInit, so every boot
+   * stage is debuggable. */
+  {
+    const uint32_t hdpl = BSEC->HDPLSR & BSEC_HDPLSR_HDPL_Msk;
+    BSEC->AP_UNLOCK = 0xB4UL;
+    BSEC->DBGCR = (0xB4UL << 24) | (hdpl << 16) | (0xB4UL << 8);
+  }
+  RCC->BUSENSR = RCC_BUSENSR_APB3ENS;
+  RCC->MISCENSR = RCC_MISCENSR_DBGENS;
+  (void)RCC->MISCENR;
 
   /* Configure the Vector Table location -------------------------------------*/
 #if defined(USER_VECT_TAB_ADDRESS)

@@ -6,6 +6,7 @@
 
 #include "app_pcmd_capture.h"
 #include "app_bringup_thread.h"
+#include "app_npu.h"
 #include "main.h"
 
 #define APP_ACOUSTIC_SERVICE_TARGET_FPS          20U
@@ -908,6 +909,10 @@ static void AppAcousticService_FillSpectrum(AppAcousticServiceSnapshot_t *snapsh
   }
 
   snapshot->spectrum_peak_bin = (uint8_t)((peak_bin <= 255U) ? peak_bin : 255U);
+
+  /* Feed the Neural-ART sound classifier with the same display spectrum
+   * (rolling 32-frame window inside the NPU service). */
+  AppNpu_FeedSpectrum(snapshot->spectrum);
 }
 
 static void AppAcousticService_UpdateFps(AppAcousticServiceSnapshot_t *snapshot)

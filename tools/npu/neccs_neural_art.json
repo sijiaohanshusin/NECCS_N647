@@ -1,0 +1,9 @@
+{
+    "Globals": {},
+    "Profiles": {
+        "neccs-debug": {
+            "memory_pool": "./neccs_debug.mpool",
+            "options": "--native-float --cache-maintenance --Ocache-opt --enable-virtual-mem-pools --Os --Oauto-sched"
+        }
+    }
+}
