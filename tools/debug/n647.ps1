@@ -12,6 +12,9 @@
 #   .\tools\debug\n647.ps1 flash-release    # devboot + bundle rebuild + CubeProgrammer flash + verify
 #   .\tools\debug\n647.ps1 status           # one-shot health dump (liveness, PCMD, camera, NPU, touch, media)
 #   .\tools\debug\n647.ps1 screenshot       # capture the LCD into _debug_logs\screen_<ts>.png
+#   .\tools\debug\n647.ps1 screenshot -Freeze # pause camera DMA first: keeps the
+#                                             # acoustic overlay in the dump (else
+#                                             # DCMIPP overwrites it post-halt)
 #   .\tools\debug\n647.ps1 openocd          # (re)start the OpenOCD server only
 #
 # Conventions this script guarantees:
@@ -33,6 +36,7 @@ param(
     [string]$Config = "Debug",
 
     [switch]$SkipBuild,
+    [switch]$Freeze,
     [string]$RelayPort = "COM3",
     [int]$OffMs = 3000
 )
@@ -213,7 +217,22 @@ monitor resume
     "screenshot" {
         if (-not (Test-OpenOcdAlive)) { Start-OpenOcdServer }
         $png = Join-Path $LogDir ("screen_{0}.png" -f (Get-Date -Format "MMdd_HHmmss"))
-        & (Join-Path $PSScriptRoot "capture_n647_screen.ps1") -NoStartOpenOcd -OutPng $png
+        if ($Freeze) {
+            # Park the camera pipe so the overlay-carrying frame survives the
+            # halt. The swap worker applies the freeze right after its next
+            # overlay draw + flip (<=1 camera frame), so the dumped frame
+            # matches the screen exactly.
+            [void](Invoke-GdbScript "set g_app_camera_freeze_request = 1`nmonitor resume")
+            Start-Sleep -Milliseconds 800
+        }
+        try {
+            & (Join-Path $PSScriptRoot "capture_n647_screen.ps1") -NoStartOpenOcd -OutPng $png
+        }
+        finally {
+            if ($Freeze) {
+                [void](Invoke-GdbScript "set g_app_camera_freeze_request = 0`nmonitor resume")
+            }
+        }
         Write-Host "saved: $png"
     }
 

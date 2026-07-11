@@ -158,6 +158,29 @@ static void AppCameraDisplay_InvalidateDCache(uint32_t address, uint32_t size)
   __ISB();
 }
 
+/* Refresh stale lines WITHOUT discarding pending writes: the marker/trail
+ * bands overlap rows whose heat-blend results are still dirty in D-cache;
+ * a plain invalidate throws those away (horizontal tears through the blob
+ * wherever the crosshair box overlaps it). */
+static void AppCameraDisplay_CleanInvalidateDCache(uint32_t address, uint32_t size)
+{
+  uint32_t aligned_addr;
+  uint32_t end_addr;
+
+  if ((size == 0U) || ((SCB->CCR & SCB_CCR_DC_Msk) == 0U))
+  {
+    return;
+  }
+
+  aligned_addr = address & ~(APP_CAMERA_DISPLAY_DCACHE_LINE_BYTES - 1U);
+  end_addr = (address + size + APP_CAMERA_DISPLAY_DCACHE_LINE_BYTES - 1U) &
+             ~(APP_CAMERA_DISPLAY_DCACHE_LINE_BYTES - 1U);
+
+  SCB_CleanInvalidateDCache_by_Addr((void *)aligned_addr, (int32_t)(end_addr - aligned_addr));
+  __DSB();
+  __ISB();
+}
+
 static uint32_t AppCameraDisplay_GetUiFramebufferAddr(void)
 {
   uint32_t address = LTDC_Layer2->CFBAR;
@@ -709,9 +732,9 @@ static void AppCameraDisplay_DrawAcousticOverlay(uint32_t frame_addr)
           continue;
         }
 
-        AppCameraDisplay_InvalidateDCache(frame_addr +
-                                            ((uint32_t)dot_y0 * APP_CAMERA_DISPLAY_CAMERA_LINE_BYTES),
-                                          (uint32_t)(dot_y1 - dot_y0) * APP_CAMERA_DISPLAY_CAMERA_LINE_BYTES);
+        AppCameraDisplay_CleanInvalidateDCache(frame_addr +
+                                                 ((uint32_t)dot_y0 * APP_CAMERA_DISPLAY_CAMERA_LINE_BYTES),
+                                               (uint32_t)(dot_y1 - dot_y0) * APP_CAMERA_DISPLAY_CAMERA_LINE_BYTES);
         for (int32_t yy = dot_y0; yy < dot_y1; ++yy)
         {
           uint16_t *pixel_row = framebuffer + ((uint32_t)yy * APP_CAMERA_DISPLAY_WIDTH);
@@ -748,9 +771,9 @@ static void AppCameraDisplay_DrawAcousticOverlay(uint32_t frame_addr)
       my1 = AppCameraDisplay_MinI32(my1, (int32_t)APP_CAMERA_DISPLAY_HEIGHT);
       if (my1 > my0)
       {
-        AppCameraDisplay_InvalidateDCache(frame_addr +
-                                            ((uint32_t)my0 * APP_CAMERA_DISPLAY_CAMERA_LINE_BYTES),
-                                          (uint32_t)(my1 - my0) * APP_CAMERA_DISPLAY_CAMERA_LINE_BYTES);
+        AppCameraDisplay_CleanInvalidateDCache(frame_addr +
+                                                 ((uint32_t)my0 * APP_CAMERA_DISPLAY_CAMERA_LINE_BYTES),
+                                               (uint32_t)(my1 - my0) * APP_CAMERA_DISPLAY_CAMERA_LINE_BYTES);
         AppCameraDisplay_DrawMarker(framebuffer, &overlay.markers[i], (i == 0U) ? 1U : 0U);
         if (my0 < s_overlay_dirty_y0)
         {
@@ -1178,6 +1201,11 @@ static void AppCameraDisplay_ProcessSwap(uint32_t frame_addr)
     AppCameraDisplay_DrawAcousticOverlay(display_addr);
     LTDC_Layer1->CFBAR = display_addr;
     AppCameraDisplay_ReloadLayer(LTDC_Layer1, LTDC_LxRCR_VBR);
+
+    /* Debug screenshot freeze: this frame is fully composed and flipped;
+     * parking DMA now (only when the overlay is live) preserves exactly
+     * what the screen shows. */
+    AppCamera_FreezeIfRequested(s_acoustic_overlay.enabled);
   }
   g_app_camera_ltdc_swap_count++;
   AppCameraDisplay_SnapshotLtdc();

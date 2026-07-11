@@ -1083,11 +1083,54 @@ static void AppCamera_RunAutoWhiteBalance(uint32_t r_avg8, uint32_t g_avg8, uint
   }
 }
 
+/* GDB screenshot hook: while nonzero, the 1 Hz poll stops the sensor stream
+ * and the DCMIPP pipe, so the displayed buffer (including the drawn acoustic
+ * overlay) survives a debugger halt + memory dump instead of being ping-pong
+ * overwritten by capture DMA. Cleared -> capture restarts transparently. */
+volatile uint32_t g_app_camera_freeze_request = 0U;
+static volatile uint8_t s_camera_frozen = 0U;
+
+/* Called by the display swap worker right after an overlay pass. Parks the
+ * pipe only when this frame actually carries the acoustic overlay
+ * (overlay_drawn), so the frozen frame deterministically shows the heatmap
+ * instead of racing a momentary quality-gate dropout. With no detection at
+ * all the freeze simply never latches and the capture proceeds live. */
+void AppCamera_FreezeIfRequested(uint8_t overlay_drawn)
+{
+  if ((g_app_camera_freeze_request != 0U) && (s_camera_frozen == 0U) &&
+      (overlay_drawn != 0U) &&
+      ((g_app_camera_status.flags & APP_CAMERA_FLAG_STREAMING) != 0U))
+  {
+    /* Sensor stream off ONLY - the DCMIPP pipe stays armed and simply
+     * starves. Aborting the pipe mid-frame (PIPE_Stop) leaves a partially
+     * written buffer that shows up as banding artifacts in the dump. Any
+     * in-flight frame completes normally, then the display goes quiet. */
+    (void)AppCameraIMX219_SetStream(0U);
+    s_camera_frozen = 1U;
+  }
+}
+
 void AppCamera_Poll(uint32_t elapsed_ms)
 {
   uint32_t data_counter = 0U;
 
   g_app_camera_status.poll_count++;
+
+  if (g_app_camera_freeze_request != 0U)
+  {
+    /* Freeze pending or applied (the swap worker parks the pipe): skip the
+     * stall watchdog and stream-recovery paths below, they would restart
+     * the pipe we are trying to park. */
+    return;
+  }
+  if (s_camera_frozen != 0U)
+  {
+    /* Pipe was never stopped (sensor-only freeze): re-enabling the stream
+     * resumes the continuous double-buffer capture as-is. */
+    s_camera_frozen = 0U;
+    (void)AppCameraIMX219_SetStream(1U);
+    g_app_camera_no_frame_ms = 0U;
+  }
 
   if ((g_app_camera_status.flags & APP_CAMERA_FLAG_DCMIPP_READY) != 0U)
   {

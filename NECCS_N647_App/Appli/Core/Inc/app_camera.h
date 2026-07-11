@@ -163,6 +163,10 @@ int32_t AppCamera_StartPreview(void);
 int32_t AppCamera_Stop(void);
 int32_t AppCamera_SetTestPattern(uint8_t enable);
 void AppCamera_Poll(uint32_t elapsed_ms);
+/* Debug screenshot hook: parks the capture pipe when g_app_camera_freeze_request
+ * is set AND this frame carries the acoustic overlay; called by the display
+ * swap worker after its overlay pass. */
+void AppCamera_FreezeIfRequested(uint8_t overlay_drawn);
 void AppCamera_GetStatus(AppCameraStatus_t *status);
 
 #ifdef __cplusplus
