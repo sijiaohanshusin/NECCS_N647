@@ -31,6 +31,7 @@
 #define APP_CAMERA_DISPLAY_HEAT_ALPHA_MIN_VALUE 72U
 #define APP_CAMERA_DISPLAY_HEAT_ALPHA_BASE      56U
 #define APP_CAMERA_DISPLAY_HEAT_ALPHA_MAX       208U
+#define APP_CAMERA_DISPLAY_HEAT_EDGE_PX         24U
 #define APP_CAMERA_DISPLAY_MARKER_MIN_STRENGTH  64U
 
 extern LTDC_HandleTypeDef hltdc;
@@ -98,8 +99,15 @@ static uint16_t s_heat_palette_lut[3][256] __attribute__((aligned(32)));
 static uint8_t s_heat_alpha_lut[256] __attribute__((aligned(32)));
 static uint16_t s_heat_u0[APP_CAMERA_DISPLAY_WIDTH / 2U] __attribute__((aligned(32)));
 static uint8_t s_heat_wu[APP_CAMERA_DISPLAY_WIDTH / 2U] __attribute__((aligned(32)));
-static uint16_t s_heat_v0[APP_CAMERA_DISPLAY_HEIGHT / 2U] __attribute__((aligned(32)));
-static uint8_t s_heat_wv[APP_CAMERA_DISPLAY_HEIGHT / 2U] __attribute__((aligned(32)));
+/* Vertical maps are per ROW (not per line pair): sharing one interpolated
+ * value across a 2-row block quantizes steep field gradients into visible
+ * horizontal banding, especially over dark camera content. */
+static uint16_t s_heat_v0[APP_CAMERA_DISPLAY_HEIGHT] __attribute__((aligned(32)));
+static uint8_t s_heat_wv[APP_CAMERA_DISPLAY_HEIGHT] __attribute__((aligned(32)));
+/* Border fade (per block column / per row): stops the blob from being
+ * chopped off hard when the source sits at the FOV edge. */
+static uint8_t s_heat_edge_x[APP_CAMERA_DISPLAY_WIDTH / 2U] __attribute__((aligned(32)));
+static uint8_t s_heat_edge_y[APP_CAMERA_DISPLAY_HEIGHT] __attribute__((aligned(32)));
 /* Line-pair staging buffer: the blend must never read-modify-write HyperRAM
  * per pixel (measured ~98 ms/frame that way). Rows are burst-copied here,
  * blended in internal SRAM, then burst-copied back (~2.5 KB). */
@@ -298,7 +306,8 @@ static void AppCameraDisplay_BuildHeatLuts(void)
     }
   }
 
-  /* Fixed-point source coordinates for the 2x2-block bilinear upscale. */
+  /* Fixed-point source coordinates: 2-px blocks horizontally, per-row
+   * vertically (see the table declarations for why). */
   for (uint32_t bx = 0U; bx < (APP_CAMERA_DISPLAY_WIDTH / 2U); bx++)
   {
     const float x = ((float)(bx * 2U) + 1.0f);
@@ -317,10 +326,10 @@ static void AppCameraDisplay_BuildHeatLuts(void)
     s_heat_u0[bx] = (uint16_t)u0;
     s_heat_wu[bx] = (uint8_t)((u - (float)u0) * 255.0f);
   }
-  for (uint32_t by = 0U; by < (APP_CAMERA_DISPLAY_HEIGHT / 2U); by++)
+  for (uint32_t y = 0U; y < APP_CAMERA_DISPLAY_HEIGHT; y++)
   {
-    const float y = ((float)(by * 2U) + 1.0f);
-    float v = (y * (float)APP_CAMERA_DISPLAY_FIELD_H / (float)APP_CAMERA_DISPLAY_HEIGHT) - 0.5f;
+    float v = (((float)y + 0.5f) * (float)APP_CAMERA_DISPLAY_FIELD_H /
+               (float)APP_CAMERA_DISPLAY_HEIGHT) - 0.5f;
     uint32_t v0;
 
     if (v < 0.0f)
@@ -332,8 +341,25 @@ static void AppCameraDisplay_BuildHeatLuts(void)
     {
       v0 = APP_CAMERA_DISPLAY_FIELD_H - 2U;
     }
-    s_heat_v0[by] = (uint16_t)v0;
-    s_heat_wv[by] = (uint8_t)((v - (float)v0) * 255.0f);
+    s_heat_v0[y] = (uint16_t)v0;
+    s_heat_wv[y] = (uint8_t)((v - (float)v0) * 255.0f);
+  }
+
+  /* Border fade ramps over the outer APP_CAMERA_DISPLAY_HEAT_EDGE_PX. */
+  for (uint32_t bx = 0U; bx < (APP_CAMERA_DISPLAY_WIDTH / 2U); bx++)
+  {
+    const uint32_t px = (bx * 2U) + 1U;
+    const uint32_t d = (px < (APP_CAMERA_DISPLAY_WIDTH - 1U - px)) ?
+                       px : (APP_CAMERA_DISPLAY_WIDTH - 1U - px);
+    s_heat_edge_x[bx] = (d >= APP_CAMERA_DISPLAY_HEAT_EDGE_PX) ? 255U :
+                        (uint8_t)((d * 255U) / APP_CAMERA_DISPLAY_HEAT_EDGE_PX);
+  }
+  for (uint32_t y = 0U; y < APP_CAMERA_DISPLAY_HEIGHT; y++)
+  {
+    const uint32_t d = (y < (APP_CAMERA_DISPLAY_HEIGHT - 1U - y)) ?
+                       y : (APP_CAMERA_DISPLAY_HEIGHT - 1U - y);
+    s_heat_edge_y[y] = (d >= APP_CAMERA_DISPLAY_HEAT_EDGE_PX) ? 255U :
+                       (uint8_t)((d * 255U) / APP_CAMERA_DISPLAY_HEAT_EDGE_PX);
   }
 
   s_heat_luts_ready = 1U;
@@ -531,9 +557,9 @@ static void AppCameraDisplay_DrawMarker(uint16_t *framebuffer,
 }
 
 /* Render the 96x72 heat field over the camera frame: fixed-point bilinear
- * upscale in 2x2 pixel blocks, palette LUT colouring and per-pixel alpha.
- * Runs on the camera worker thread at swap rate; measured via DWT into
- * g_app_camera_overlay_draw_cycles. */
+ * upscale (2-px blocks horizontally, per-row vertically), palette LUT
+ * colouring, per-pixel alpha with border fade. Runs on the camera worker
+ * thread at swap rate; measured via DWT into g_app_camera_overlay_draw_cycles. */
 static void AppCameraDisplay_DrawAcousticOverlay(uint32_t frame_addr)
 {
   /* Static: ~7 KB with the 96x72 field, far too large for the worker thread
@@ -573,26 +599,36 @@ static void AppCameraDisplay_DrawAcousticOverlay(uint32_t frame_addr)
 
   for (uint32_t by = 0U; by < (APP_CAMERA_DISPLAY_HEIGHT / 2U); by++)
   {
-    const uint32_t v0 = s_heat_v0[by];
-    const uint32_t wv = s_heat_wv[by];
-    const uint32_t inv_wv = 255U - wv;
-    const uint8_t *row0 = &overlay.field[v0 * APP_CAMERA_DISPLAY_FIELD_W];
-    const uint8_t *row1 = row0 + APP_CAMERA_DISPLAY_FIELD_W;
-    uint16_t *dst0 = framebuffer + ((by * 2U) * APP_CAMERA_DISPLAY_WIDTH);
+    const uint32_t y0 = by * 2U;
+    const uint32_t y1 = y0 + 1U;
+    const uint32_t v0a = s_heat_v0[y0];
+    const uint32_t wva = s_heat_wv[y0];
+    const uint32_t v0b = s_heat_v0[y1];
+    const uint32_t wvb = s_heat_wv[y1];
+    /* Field rows feeding this line pair: v0a..v0b+1 (v0b is v0a or v0a+1). */
+    const uint8_t *rowA0 = &overlay.field[v0a * APP_CAMERA_DISPLAY_FIELD_W];
+    const uint8_t *rowA1 = rowA0 + APP_CAMERA_DISPLAY_FIELD_W;
+    const uint8_t *rowB0 = &overlay.field[v0b * APP_CAMERA_DISPLAY_FIELD_W];
+    const uint8_t *rowB1 = rowB0 + APP_CAMERA_DISPLAY_FIELD_W;
+    uint16_t *dst0 = framebuffer + (y0 * APP_CAMERA_DISPLAY_WIDTH);
     uint16_t *dst1 = dst0 + APP_CAMERA_DISPLAY_WIDTH;
     uint32_t row_max = 0U;
 
-    /* Skip whole scanline pairs when both source field rows stay below the
+    /* Skip whole scanline pairs when every feeding field row stays below the
      * transparency threshold - the common case for localized sources. */
     for (uint32_t i = 0U; i < APP_CAMERA_DISPLAY_FIELD_W; i++)
     {
-      if (row0[i] > row_max)
+      if (rowA0[i] > row_max)
       {
-        row_max = row0[i];
+        row_max = rowA0[i];
       }
-      if (row1[i] > row_max)
+      if (rowA1[i] > row_max)
       {
-        row_max = row1[i];
+        row_max = rowA1[i];
+      }
+      if (rowB1[i] > row_max)
+      {
+        row_max = rowB1[i];
       }
     }
     if (row_max < APP_CAMERA_DISPLAY_HEAT_ALPHA_MIN_VALUE)
@@ -607,8 +643,9 @@ static void AppCameraDisplay_DrawAcousticOverlay(uint32_t frame_addr)
     uint32_t cell_max = 0U;
     for (uint32_t i = 0U; i < APP_CAMERA_DISPLAY_FIELD_W; i++)
     {
-      if ((row0[i] >= APP_CAMERA_DISPLAY_HEAT_ALPHA_MIN_VALUE) ||
-          (row1[i] >= APP_CAMERA_DISPLAY_HEAT_ALPHA_MIN_VALUE))
+      if ((rowA0[i] >= APP_CAMERA_DISPLAY_HEAT_ALPHA_MIN_VALUE) ||
+          (rowA1[i] >= APP_CAMERA_DISPLAY_HEAT_ALPHA_MIN_VALUE) ||
+          (rowB1[i] >= APP_CAMERA_DISPLAY_HEAT_ALPHA_MIN_VALUE))
       {
         if (i < cell_min)
         {
@@ -659,43 +696,66 @@ static void AppCameraDisplay_DrawAcousticOverlay(uint32_t frame_addr)
     AppCameraDisplay_InvalidateDCache((uint32_t)(dst1 + px0), span_bytes);
     (void)memcpy(&s_overlay_linebuf[0][px0], dst0 + px0, span_bytes);
     (void)memcpy(&s_overlay_linebuf[1][px0], dst1 + px0, span_bytes);
-    if ((int32_t)(by * 2U) < s_overlay_dirty_y0)
+    if ((int32_t)y0 < s_overlay_dirty_y0)
     {
-      s_overlay_dirty_y0 = (int32_t)(by * 2U);
+      s_overlay_dirty_y0 = (int32_t)y0;
     }
-    if ((int32_t)((by * 2U) + 2U) > s_overlay_dirty_y1)
+    if ((int32_t)(y0 + 2U) > s_overlay_dirty_y1)
     {
-      s_overlay_dirty_y1 = (int32_t)((by * 2U) + 2U);
+      s_overlay_dirty_y1 = (int32_t)(y0 + 2U);
     }
 
     {
       uint16_t *line0 = &s_overlay_linebuf[0][px0];
       uint16_t *line1 = &s_overlay_linebuf[1][px0];
+      const uint32_t inv_wva = 255U - wva;
+      const uint32_t inv_wvb = 255U - wvb;
+      const uint32_t fade_a = ((uint32_t)s_heat_edge_y[y0] * qscale) >> 8;
+      const uint32_t fade_b = ((uint32_t)s_heat_edge_y[y1] * qscale) >> 8;
 
       for (uint32_t bx = bx_min; bx <= bx_max; bx++)
       {
         const uint32_t u0 = s_heat_u0[bx];
         const uint32_t wu = s_heat_wu[bx];
         const uint32_t inv_wu = 255U - wu;
+        const uint32_t fade_x = s_heat_edge_x[bx];
         uint32_t top;
         uint32_t bottom;
         uint32_t value;
         uint32_t alpha;
 
-        top = ((uint32_t)row0[u0] * inv_wu) + ((uint32_t)row0[u0 + 1U] * wu);
-        bottom = ((uint32_t)row1[u0] * inv_wu) + ((uint32_t)row1[u0 + 1U] * wu);
-        value = ((top * inv_wv) + (bottom * wv)) >> 16;
-
+        /* Row y0 sample. */
+        top = ((uint32_t)rowA0[u0] * inv_wu) + ((uint32_t)rowA0[u0 + 1U] * wu);
+        bottom = ((uint32_t)rowA1[u0] * inv_wu) + ((uint32_t)rowA1[u0 + 1U] * wu);
+        value = ((top * inv_wva) + (bottom * wva)) >> 16;
         alpha = s_heat_alpha_lut[value & 0xFFU];
         if (alpha != 0U)
         {
           const uint16_t color = palette[value & 0xFFU];
-          const uint8_t a = (uint8_t)((alpha * qscale) >> 8);
+          const uint8_t a = (uint8_t)(((alpha * fade_a) >> 8) * fade_x >> 8);
 
-          line0[0] = AppCameraDisplay_BlendRgb565(line0[0], color, a);
-          line0[1] = AppCameraDisplay_BlendRgb565(line0[1], color, a);
-          line1[0] = AppCameraDisplay_BlendRgb565(line1[0], color, a);
-          line1[1] = AppCameraDisplay_BlendRgb565(line1[1], color, a);
+          if (a != 0U)
+          {
+            line0[0] = AppCameraDisplay_BlendRgb565(line0[0], color, a);
+            line0[1] = AppCameraDisplay_BlendRgb565(line0[1], color, a);
+          }
+        }
+
+        /* Row y1 sample. */
+        top = ((uint32_t)rowB0[u0] * inv_wu) + ((uint32_t)rowB0[u0 + 1U] * wu);
+        bottom = ((uint32_t)rowB1[u0] * inv_wu) + ((uint32_t)rowB1[u0 + 1U] * wu);
+        value = ((top * inv_wvb) + (bottom * wvb)) >> 16;
+        alpha = s_heat_alpha_lut[value & 0xFFU];
+        if (alpha != 0U)
+        {
+          const uint16_t color = palette[value & 0xFFU];
+          const uint8_t a = (uint8_t)(((alpha * fade_b) >> 8) * fade_x >> 8);
+
+          if (a != 0U)
+          {
+            line1[0] = AppCameraDisplay_BlendRgb565(line1[0], color, a);
+            line1[1] = AppCameraDisplay_BlendRgb565(line1[1], color, a);
+          }
         }
 
         line0 += 2;
