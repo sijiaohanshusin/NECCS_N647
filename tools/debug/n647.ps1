@@ -26,7 +26,7 @@
 param(
     [Parameter(Mandatory = $true, Position = 0)]
     [ValidateSet("devboot", "xipboot", "build", "flash-debug", "flash-release",
-                 "status", "screenshot", "openocd", "relay-status")]
+                 "status", "screenshot", "openocd", "relay-status", "uitour")]
     [string]$Action,
 
     [ValidateSet("Debug", "Release")]
@@ -215,5 +215,28 @@ monitor resume
         $png = Join-Path $LogDir ("screen_{0}.png" -f (Get-Date -Format "MMdd_HHmmss"))
         & (Join-Path $PSScriptRoot "capture_n647_screen.ps1") -NoStartOpenOcd -OutPng $png
         Write-Host "saved: $png"
+    }
+
+    "uitour" {
+        # Walk every UI page via the Model's remote-screen hook and capture
+        # each one. THE verification step after any UI change.
+        if (-not (Test-OpenOcdAlive)) { Start-OpenOcdServer }
+        $pages = @(
+            @{ id = 0; name = "image" },
+            @{ id = 1; name = "mics" },
+            @{ id = 2; name = "perf" },
+            @{ id = 3; name = "settings" },
+            @{ id = 4; name = "media" }
+        )
+        $stamp = Get-Date -Format "MMdd_HHmmss"
+        foreach ($page in $pages) {
+            [void](Invoke-GdbScript "set g_app_ui_request_screen = $($page.id)`nmonitor resume")
+            Start-Sleep -Seconds 2
+            $png = Join-Path $LogDir ("uitour_{0}_{1}.png" -f $stamp, $page.name)
+            & (Join-Path $PSScriptRoot "capture_n647_screen.ps1") -NoStartOpenOcd -OutPng $png
+            Write-Host "page $($page.name): $png"
+        }
+        [void](Invoke-GdbScript "set g_app_ui_request_screen = 0`nmonitor resume")
+        Write-Host "uitour complete - review every PNG above with an image reader"
     }
 }

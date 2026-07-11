@@ -1718,7 +1718,7 @@ void TemplateView::refreshSystemPage(const AppUiSnapshot& snapshot)
     /* Live NPU telemetry in the acceleration credit line. */
     if (snapshot.npuActive != 0U)
     {
-        (void)snprintf(text, sizeof(text), "NPU 运行中 %luk 次 · %u µs/次",
+        (void)snprintf(text, sizeof(text), "NPU 运行中 %luk 次 · %u us/次",
                        static_cast<unsigned long>(snapshot.npuInferences / 1000U),
                        snapshot.npuLatencyUs);
         char line[96];
