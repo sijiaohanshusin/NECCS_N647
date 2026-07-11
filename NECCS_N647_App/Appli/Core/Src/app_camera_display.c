@@ -28,7 +28,7 @@
  * around sources, camera image elsewhere) and, just as importantly, keeps
  * the HyperRAM read-modify-write footprint small: blending the whole
  * 640x480 window against contended HyperRAM measured ~75 ms/frame. */
-#define APP_CAMERA_DISPLAY_HEAT_ALPHA_MIN_VALUE 84U
+#define APP_CAMERA_DISPLAY_HEAT_ALPHA_MIN_VALUE 72U
 #define APP_CAMERA_DISPLAY_HEAT_ALPHA_BASE      56U
 #define APP_CAMERA_DISPLAY_HEAT_ALPHA_MAX       208U
 #define APP_CAMERA_DISPLAY_MARKER_MIN_STRENGTH  64U

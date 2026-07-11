@@ -634,6 +634,14 @@ void updateAiClassifier(AppUiSnapshot& snapshot)
     snapshot.aiClass = stableClass;
     snapshot.aiConfidencePct =
         (stableClass == APP_UI_AI_LISTENING) ? 0U : (uint8_t)(confEmaX10 / 10U);
+
+    /* No locked localization → no type label. A held 2 s tone otherwise
+     * reads as "bearing whine" long after the source goes quiet. */
+    if (snapshot.sourceDisplayValid == 0U)
+    {
+        snapshot.aiClass = APP_UI_AI_LISTENING;
+        snapshot.aiConfidencePct = 0U;
+    }
 }
 
 /* Poll the acoustic service, mirror it into the UI snapshot and drive the
@@ -674,11 +682,11 @@ void pollAcoustic(AppUiSnapshot& snapshot)
     snapshot.acousticDegradedCount = acoustic.degraded_count;
     snapshot.acousticActiveChannelMask = acoustic.active_channel_mask;
     snapshot.acousticLastStatus = acoustic.last_status;
-    snapshot.thetaDeg = acoustic.theta_deg;
-    snapshot.phiDeg = acoustic.phi_deg;
     snapshot.qualityPct = acoustic.quality_pct;
     snapshot.contrastPct = acoustic.contrast_pct;
     snapshot.srpMsX100 = acoustic.srp_ms_x100;
+    snapshot.acousticPairCount = (acoustic.pair_count <= 0xFFFFU) ?
+                                 (uint16_t)acoustic.pair_count : 0xFFFFU;
     snapshot.uiFpsX10 = acoustic.fps_x10;
     snapshot.srpPreprocessCycles = acoustic.perf.preprocess_cycles;
     snapshot.srpFftCycles = acoustic.perf.fft_cycles;
@@ -688,12 +696,73 @@ void pollAcoustic(AppUiSnapshot& snapshot)
     snapshot.srpTotalCycles = acoustic.perf.total_cycles;
     memcpy(snapshot.perfLoad, acoustic.perf_load, sizeof(snapshot.perfLoad));
 
-    snapshot.candCount = (acoustic.cand_count <= 3U) ? acoustic.cand_count : 3U;
-    for (uint32_t i = 0U; i < 3U; ++i)
+    /* Angles/candidates freeze on the last *valid* detection and hold for
+     * ~2 s; without this the card and markers track SRP noise peaks while
+     * the room is quiet (random angles with fake 98% strengths).
+     *
+     * Jump debounce: single-frame outliers (reflections/sidelobes right at
+     * the quality gate) otherwise get amplified into a 2 s wrong readout by
+     * the hold. Small moves track immediately; a jump farther than ~20 deg
+     * replaces the display only when two consecutive SRP frames agree. */
+    static uint8_t sourceHoldTicks = 0U;
+    static uint32_t lastValidSeq = 0U;
+    static uint8_t jumpPending = 0U;
+    /* Audible gate: SRP prominence alone lets quiet-room noise peaks (q=3
+     * right at the gate) arm the 2 s hold with a random angle. Require the
+     * array to actually hear something (-70 dBFS; quiet room sits at -84).
+     * pcmdRawPeakDbfs is one tick stale (pollPcmd runs later), fine at 60 Hz. */
+    const bool arrayAudible =
+        ((snapshot.pcmdFlags & APP_UI_PCMD_FLAG_RAW_VALID) != 0U) &&
+        (snapshot.pcmdRawPeakDbfs > -70);
+    if (arrayAudible && (acoustic.valid != 0U) && (acoustic.output_seq != lastValidSeq))
     {
-        snapshot.candTheta[i] = (i < snapshot.candCount) ? acoustic.cand_theta[i] : 0;
-        snapshot.candPhi[i] = (i < snapshot.candCount) ? acoustic.cand_phi[i] : 0;
-        snapshot.candStrength[i] = (i < snapshot.candCount) ? acoustic.cand_strength[i] : 0U;
+        lastValidSeq = acoustic.output_seq;
+
+        const int16_t dTheta = static_cast<int16_t>(acoustic.theta_deg - snapshot.thetaDeg);
+        const int16_t dPhi = static_cast<int16_t>(acoustic.phi_deg - snapshot.phiDeg);
+        const bool nearPrev = (dTheta >= -20) && (dTheta <= 20) &&
+                              (dPhi >= -20) && (dPhi <= 20);
+        bool accept = true;
+        if ((sourceHoldTicks != 0U) && !nearPrev)
+        {
+            accept = (jumpPending != 0U); /* second far frame confirms */
+            jumpPending = accept ? 0U : 1U;
+        }
+        else
+        {
+            jumpPending = 0U;
+        }
+
+        if (accept)
+        {
+            snapshot.thetaDeg = acoustic.theta_deg;
+            snapshot.phiDeg = acoustic.phi_deg;
+            snapshot.candCount = (acoustic.cand_count <= 3U) ? acoustic.cand_count : 3U;
+            for (uint32_t i = 0U; i < 3U; ++i)
+            {
+                snapshot.candTheta[i] = (i < snapshot.candCount) ? acoustic.cand_theta[i] : 0;
+                snapshot.candPhi[i] = (i < snapshot.candCount) ? acoustic.cand_phi[i] : 0;
+                snapshot.candStrength[i] = (i < snapshot.candCount) ? acoustic.cand_strength[i] : 0U;
+            }
+        }
+        sourceHoldTicks = 120U; /* 2 s at the 60 Hz model tick */
+        snapshot.sourceDisplayValid = 1U;
+    }
+    else if (arrayAudible && (acoustic.valid != 0U))
+    {
+        /* Same SRP frame as last tick: keep displaying, no re-evaluation. */
+        snapshot.sourceDisplayValid = 1U;
+    }
+    else if (sourceHoldTicks != 0U)
+    {
+        --sourceHoldTicks;
+        snapshot.sourceDisplayValid = 1U; /* keep last detection on screen */
+    }
+    else
+    {
+        snapshot.candCount = 0U;
+        snapshot.sourceDisplayValid = 0U;
+        jumpPending = 0U;
     }
     snapshot.heatPalette = AppCameraDisplay_GetHeatPalette();
     snapshot.acousticScene = acoustic.scene;
@@ -732,19 +801,22 @@ void pollAcoustic(AppUiSnapshot& snapshot)
     const bool acousticOverlayPreview =
         APP_UI_ACOUSTIC_OVERLAY_PREVIEW_ENABLE &&
         (acoustic.processed_frames == 0U);
+    /* Gate on the 2 s display hold rather than the per-frame valid flag:
+     * marginal sources sit right at the quality threshold and a strict gate
+     * makes the whole overlay strobe on/off at SRP rate. */
     const bool acousticOverlayEnabled =
         (snapshot.activeScreen == APP_UI_SCREEN_IMAGE) &&
-        (((acoustic.valid != 0U) &&
-          (acoustic.quality_pct >= APP_UI_ACOUSTIC_OVERLAY_MIN_QUALITY)) ||
-         acousticOverlayPreview);
+        ((snapshot.sourceDisplayValid != 0U) || acousticOverlayPreview);
 
-    /* Candidate markers mapped from angles into camera-frame pixels. */
+    /* Candidate markers mapped from angles into camera-frame pixels.
+     * Uses the gated snapshot copies (not the live acoustic values) so the
+     * markers stick to the last valid detection during the hold window. */
     AppCameraDisplayMarker_t markers[3];
     uint8_t markerCount = 0U;
     for (uint32_t i = 0U; i < snapshot.candCount; ++i)
     {
-        const float theta = static_cast<float>(acoustic.cand_theta[i]);
-        const float phi = static_cast<float>(acoustic.cand_phi[i]);
+        const float theta = static_cast<float>(snapshot.candTheta[i]);
+        const float phi = static_cast<float>(snapshot.candPhi[i]);
         const float halfH = APP_ACOUSTIC_SERVICE_CAMERA_HFOV_DEG * 0.5f;
         const float halfV = APP_ACOUSTIC_SERVICE_CAMERA_VFOV_DEG * 0.5f;
 
@@ -757,22 +829,33 @@ void pollAcoustic(AppUiSnapshot& snapshot)
         const float py = ((halfV - phi) * 480.0f) / APP_ACOUSTIC_SERVICE_CAMERA_VFOV_DEG;
         markers[markerCount].x = static_cast<uint16_t>((px < 0.0f) ? 0.0f : ((px > 639.0f) ? 639.0f : px));
         markers[markerCount].y = static_cast<uint16_t>((py < 0.0f) ? 0.0f : ((py > 479.0f) ? 479.0f : py));
-        markers[markerCount].strength = acoustic.cand_strength[i];
+        markers[markerCount].strength = snapshot.candStrength[i];
         /* The primary cross carries the array peak level (dBFS estimate);
          * pcmdRawPeakDbfs is one tick stale, which is fine at 60 Hz. */
         markers[markerCount].level_dbfs = snapshot.pcmdRawPeakDbfs;
         markers[markerCount].level_valid =
             ((markerCount == 0U) &&
-             (acoustic.valid != 0U) &&
+             (snapshot.sourceDisplayValid != 0U) &&
              ((snapshot.pcmdFlags & APP_UI_PCMD_FLAG_RAW_VALID) != 0U)) ? 1U : 0U;
         ++markerCount;
     }
 
-    AppCameraDisplay_SetAcousticField(acoustic.field,
-                                      sizeof(acoustic.field),
+    /* Freeze the heat field alongside the markers: during the hold window
+     * the live field is the noise surface of invalid frames and the blob
+     * would wander away from the held crosshair. ~6.9 KB static. */
+    static uint8_t heldField[APP_ACOUSTIC_SERVICE_FIELD_COUNT];
+    static uint8_t heldQuality = 0U;
+    if ((acoustic.valid != 0U) || acousticOverlayPreview)
+    {
+        memcpy(heldField, acoustic.field, sizeof(heldField));
+        heldQuality = acoustic.quality_pct;
+    }
+
+    AppCameraDisplay_SetAcousticField(heldField,
+                                      sizeof(heldField),
                                       markers,
                                       markerCount,
-                                      snapshot.qualityPct,
+                                      heldQuality,
                                       acousticOverlayEnabled ? 1U : 0U);
 }
 

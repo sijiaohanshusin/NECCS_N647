@@ -791,16 +791,39 @@ static void AppAcousticService_FillCameraField(AppAcousticServiceSnapshot_t *sna
   }
   AppAcousticService_NormalizeField(snapshot);
 
-  snapshot->cand_count = 0U;
-  for (uint32_t i = 0U; (i < vis_frame->candidate_count) && (i < APP_ACOUSTIC_SERVICE_CAND_MAX); i++)
+  /* Strength as prominence above the field floor, not raw power ratio: the
+   * smoothed SRP surface keeps every grid point at 85-98% of the peak, so
+   * power ratios read like fake confidences (S2/S3 pinned at ~95%).
+   * Min-subtraction restores discrimination between echoes and sidelobes. */
   {
-    const AppAcousticImagingCandidate_t *cand = &vis_frame->candidate[i];
-    float strength = AppAcousticService_AbsF32(cand->power) / peak_abs;
+    float floor_abs = peak_abs;
+    float denom;
 
-    snapshot->cand_theta[i] = AppAcousticService_RoundDeg(cand->theta_deg);
-    snapshot->cand_phi[i] = AppAcousticService_RoundDeg(cand->phi_deg);
-    snapshot->cand_strength[i] = (uint8_t)((AppAcousticService_Clamp01(strength) * 255.0f) + 0.5f);
-    snapshot->cand_count++;
+    for (uint32_t i = 0U; i < vis_frame->grid_count; i++)
+    {
+      const float p = AppAcousticService_AbsF32(vis_frame->power[i]);
+      if (p < floor_abs)
+      {
+        floor_abs = p;
+      }
+    }
+    denom = peak_abs - floor_abs;
+    if (denom < 1.0e-9f)
+    {
+      denom = 1.0e-9f;
+    }
+
+    snapshot->cand_count = 0U;
+    for (uint32_t i = 0U; (i < vis_frame->candidate_count) && (i < APP_ACOUSTIC_SERVICE_CAND_MAX); i++)
+    {
+      const AppAcousticImagingCandidate_t *cand = &vis_frame->candidate[i];
+      float strength = (AppAcousticService_AbsF32(cand->power) - floor_abs) / denom;
+
+      snapshot->cand_theta[i] = AppAcousticService_RoundDeg(cand->theta_deg);
+      snapshot->cand_phi[i] = AppAcousticService_RoundDeg(cand->phi_deg);
+      snapshot->cand_strength[i] = (uint8_t)((AppAcousticService_Clamp01(strength) * 255.0f) + 0.5f);
+      snapshot->cand_count++;
+    }
   }
 }
 

@@ -1250,6 +1250,8 @@ void TemplateView::refreshStatusBar(const AppUiSnapshot& snapshot)
                    sceneName(snapshot.acousticScene),
                    profileName(activeProfile));
     modeChipLabel.setText(text);
+    modeChipLabel.setColors((snapshot.sourceDisplayValid != 0U) ? ColorBlue : ColorMuted,
+                            ColorBg, false);
 
     const bool recording = (snapshot.mediaFlags & APP_UI_MEDIA_FLAG_RECORDING) != 0U;
     if (recording != recActive)
@@ -1440,11 +1442,22 @@ void TemplateView::refreshImagePage(const AppUiSnapshot& snapshot)
 {
     char text[64];
 
-    (void)snprintf(text, sizeof(text), "方位 %+d°", snapshot.thetaDeg);
-    railTheta.setText(text);
-
-    (void)snprintf(text, sizeof(text), "俯仰 %+d°", snapshot.phiDeg);
-    railPhi.setText(text);
+    if (snapshot.sourceDisplayValid != 0U)
+    {
+        (void)snprintf(text, sizeof(text), "方位 %+d°", snapshot.thetaDeg);
+        railTheta.setText(text);
+        railTheta.setColors(ColorText, ColorBg, false);
+        (void)snprintf(text, sizeof(text), "俯仰 %+d°", snapshot.phiDeg);
+        railPhi.setText(text);
+        railPhi.setColors(ColorText, ColorBg, false);
+    }
+    else
+    {
+        railTheta.setText("方位 --");
+        railTheta.setColors(ColorMuted, ColorBg, false);
+        railPhi.setText("俯仰 --");
+        railPhi.setColors(ColorMuted, ColorBg, false);
+    }
 
     /* spectrum panel + band readout in the left column */
     spectrumPanel.setData(snapshot.spectrum,
@@ -1491,7 +1504,11 @@ void TemplateView::refreshImagePage(const AppUiSnapshot& snapshot)
         }
     }
 
-    int16_t fillW = static_cast<int16_t>((144 * snapshot.qualityPct) / 100);
+    /* Quality is SRP peak prominence, typically 0-20% (valid gate at 3%);
+     * stretch 0-20% across the whole bar so it reads as confidence. */
+    const uint32_t qScaled = (snapshot.qualityPct >= 20U) ? 100U
+                             : (static_cast<uint32_t>(snapshot.qualityPct) * 5U);
+    int16_t fillW = static_cast<int16_t>((144U * qScaled) / 100U);
     if (fillW < 4)
     {
         fillW = 4;
@@ -1566,7 +1583,11 @@ void TemplateView::refreshImagePage(const AppUiSnapshot& snapshot)
     (void)snprintf(text, sizeof(text), "相机 %lu 帧", static_cast<unsigned long>(snapshot.cameraSwapCount));
     railPerfCam.setText(text);
 
-    railModeValue.setText(profileName(activeProfile));
+    /* Mode name + its pair budget makes the three profiles visibly
+     * different at a glance (96/160/240 pairs). */
+    (void)snprintf(text, sizeof(text), "%s · %u对",
+                   profileName(activeProfile), snapshot.acousticPairCount);
+    railModeValue.setText(text);
 
     /* quick buttons: record + trigger reflect their armed/active state */
     const bool recording = (snapshot.mediaFlags & APP_UI_MEDIA_FLAG_RECORDING) != 0U;
@@ -1721,7 +1742,7 @@ void TemplateView::refreshSystemPage(const AppUiSnapshot& snapshot)
         (void)snprintf(text, sizeof(text), "NPU 运行中 %luk 次 · %u us/次",
                        static_cast<unsigned long>(snapshot.npuInferences / 1000U),
                        snapshot.npuLatencyUs);
-        char line[96];
+        char line[128];
         (void)snprintf(line, sizeof(line),
                        "N6 硬件加速: GPU2D · DMA2D · JPEG · Helium DSP · %s",
                        (snapshot.npuInferences >= 1000U) ? text : "NPU 运行中");

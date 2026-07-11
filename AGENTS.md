@@ -44,6 +44,9 @@ cd D:\Project\NECCS\Program\NECCS_N647
 .\tools\debug\n647.ps1 status
 
 # 截屏看 UI(输出 PNG 路径,用读图工具看)
+# 注意:热力图/十字标截不到 —— GDB halt 后 DCMIPP DMA 仍在覆写
+# 相机缓冲,叠加层几十 ms 内被新帧冲掉(2026-07-11 实证,绘制计数
+# 与周期数证明叠加在跑)。验证叠加效果只能肉眼看屏幕或板端截屏。
 .\tools\debug\n647.ps1 screenshot
 
 # Release 验证

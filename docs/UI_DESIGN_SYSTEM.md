@@ -95,6 +95,10 @@ RailX=844 RailW=172 右侧信息轨(卡片自上而下堆叠)
    `assets/texts/texts.xml` 各 Typography 的 `WidgetWildcardCharacters`,
    否则**不报错、直接渲染成空白**。改完跑
    `python tools/ui/check_text_glyphs.py`,0 缺字再烧录。
+   **更大的坑**:普通编译**不会**重新生成 generated/texts 下的字库
+   (2026-07-11 实证:texts.xml 加了字、编译通过、板上仍渲染 `?`)。
+   重新生成需要 TouchGFX Designer。没有 Designer 环境时,**只用字库里
+   已有的字符**,新状态优先用颜色/已有词汇表达。
 2. **invalidate 纪律**:值没变不要 invalidate(参照 AppTextLabel 的
    setter);动画只 invalidate 自己的窄矩形(参照 boot 环的
    invalidateRingBand);全屏 invalidate 只在页面切换时。违反的症状是

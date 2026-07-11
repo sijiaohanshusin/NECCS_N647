@@ -189,6 +189,7 @@ struct AppUiSnapshot
     uint16_t touchRawX;
     uint16_t touchRawY;
     uint16_t srpMsX100;
+    uint16_t acousticPairCount;
     uint16_t uiFpsX10;
     uint16_t chargerStatus;
     uint16_t mediaPreviewWidth;
@@ -223,6 +224,9 @@ struct AppUiSnapshot
     int16_t candTheta[3];
     int16_t candPhi[3];
     uint8_t candStrength[3];
+    /* 1 while a detection is live or inside the hold window; the source
+     * card shows "--" instead of noise angles when this drops to 0. */
+    uint8_t sourceDisplayValid;
     uint32_t overlayDrawCycles;
     uint32_t triggerCount;
     uint16_t mediaEncodeMs;
