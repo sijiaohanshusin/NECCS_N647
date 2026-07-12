@@ -982,6 +982,12 @@ void TemplateView::handleTickEvent()
         case 8U: setViewerOpen(false); break;
         case 9U: presenter->rebootSystem(); break;
         case 10U: presenter->powerOffSystem(); break;
+        case 11U: presenter->playToggleMedia(); break;
+        /* 12+slot: select gallery slot N (remote media E2E testing) */
+        case 12U: case 13U: case 14U: case 15U:
+            presenter->selectMediaSlot(static_cast<uint8_t>(action - 12U));
+            setViewerOpen(true);
+            break;
         default: break;
         }
     }

@@ -43,7 +43,10 @@
 #define APP_MEDIA_JPEG_DECODE_MAX_BYTES   ((APP_MEDIA_PREVIEW_WIDTH * APP_MEDIA_PREVIEW_HEIGHT * 3U) / 2U)
 #define APP_MEDIA_JPEG_QUALITY            80U
 #define APP_MEDIA_MCU_BYTES_420           384U
-#define APP_MEDIA_JPEG_TIMEOUT_MS         1000U
+/* Healthy HW decodes finish in <50 ms; a wedged codec never finishes. A
+ * short timeout turns the wedge into a fast abort+reinit retry instead of
+ * a 1 s stall per attempt (playback dropped to 0.4 fps with 1000 ms). */
+#define APP_MEDIA_JPEG_TIMEOUT_MS         250U
 #define APP_MEDIA_MAX_VIDEO_FRAMES        1800U
 #define APP_MEDIA_BMP_ROWS_PER_WRITE      64U
 #define APP_MEDIA_MIN_FREE_AFTER_WRITE    (1024ULL * 1024ULL)
@@ -129,6 +132,7 @@ static uint32_t s_playing = 0U;
 static volatile uint32_t s_jpeg_encode_active = 0U;
 static volatile uint32_t s_jpeg_encode_in_total = 0U;
 static volatile uint32_t s_jpeg_encode_out_size = 0U;
+static volatile uint32_t s_jpeg_decode_in_total = 0U;
 static uint32_t s_jpeg_encode_configured = 0U;
 static uint32_t s_jpeg_hw_encode_disabled = 0U;
 static uint32_t s_next_screenshot = 1U;
@@ -1009,10 +1013,17 @@ static uint32_t ensure_jpeg_ready(void)
 
 void HAL_JPEG_GetDataCallback(JPEG_HandleTypeDef *hjpeg, uint32_t NbDecodedData)
 {
-  /* Encode feeds one complete MCU buffer: once it is consumed, stop the
-   * input stage instead of letting the HAL re-feed from the start. The
-   * decode path keeps the historical no-op behaviour. */
+  /* Both directions feed ONE complete buffer: once it is consumed, stop
+   * the input stage instead of letting the HAL re-feed from the start.
+   * Without the decode-side pause the HAL loops its input state machine
+   * while the codec waits for data that never changes - observed live as
+   * a ~35% rate of decode timeouts on VALID bitstreams during playback. */
   if ((s_jpeg_encode_active != 0U) && (NbDecodedData >= s_jpeg_encode_in_total))
+  {
+    (void)HAL_JPEG_Pause(hjpeg, JPEG_PAUSE_RESUME_INPUT);
+  }
+  else if ((s_jpeg_encode_active == 0U) && (s_jpeg_decode_in_total != 0U) &&
+           (NbDecodedData >= s_jpeg_decode_in_total))
   {
     (void)HAL_JPEG_Pause(hjpeg, JPEG_PAUSE_RESUME_INPUT);
   }
@@ -1032,11 +1043,11 @@ static uint32_t ensure_jpeg_encode_config(void)
 {
   JPEG_ConfTypeDef conf;
 
-  if (s_jpeg_encode_configured != 0U)
-  {
-    return APP_MEDIA_ERROR_NONE;
-  }
-
+  /* Reconfigure before EVERY encode (not just the first): with a one-shot
+   * config the first frame of a session encoded clean but the second came
+   * out with mangled DHT emission (hard evidence in de163ffb - offset 159
+   * garbage where DHT should start). Config costs microseconds against a
+   * ~100 ms frame period. */
   memset(&conf, 0, sizeof(conf));
   conf.ColorSpace = JPEG_YCBCR_COLORSPACE;
   conf.ChromaSubsampling = JPEG_420_SUBSAMPLING;
@@ -1045,6 +1056,7 @@ static uint32_t ensure_jpeg_encode_config(void)
   conf.ImageQuality = APP_MEDIA_JPEG_QUALITY;
   if (HAL_JPEG_ConfigEncoding(&s_jpeg_handle, &conf) != HAL_OK)
   {
+    s_jpeg_encode_configured = 0U;
     return APP_MEDIA_ERROR_JPEG;
   }
 
@@ -1728,16 +1740,29 @@ static void set_playing(uint32_t playing)
   status_unlock();
 }
 
+#ifdef DEBUG
+/* GDB probes for the playback path. */
+volatile uint32_t g_app_media_play_calls;
+volatile uint32_t g_app_media_play_fires;
+volatile uint32_t g_app_media_play_errors;
+volatile uint32_t g_app_media_play_last_err;
+#endif
+
 /* Timed AVI playback: step one frame per record period while playing. */
 static void process_play_tick(void)
 {
   static uint32_t s_play_last_tick = 0U;
+  static uint8_t s_play_error_streak = 0U;
   const uint32_t now = tx_time_get();
 
   if (s_playing == 0U)
   {
     return;
   }
+
+#ifdef DEBUG
+  g_app_media_play_calls++;
+#endif
 
   if ((s_recording != 0U) ||
       (s_media_mounted == 0U) ||
@@ -1750,10 +1775,36 @@ static void process_play_tick(void)
   if ((s_play_last_tick == 0U) ||
       ((now - s_play_last_tick) >= APP_MEDIA_RECORD_PERIOD_TICKS))
   {
+    uint32_t error;
+
     s_play_last_tick = now;
-    if (read_selected_file() != APP_MEDIA_ERROR_NONE)
+    error = read_selected_file();
+#ifdef DEBUG
+    g_app_media_play_fires++;
+    g_app_media_play_last_err = error;
+#endif
+    if (error != APP_MEDIA_ERROR_NONE)
     {
-      set_playing(0U);
+#ifdef DEBUG
+      g_app_media_play_errors++;
+#endif
+      /* A bad frame must not wedge the cursor: skip PAST it regardless of
+       * where the failure happened (chunk header, read or decode). Only a
+       * run of consecutive failures (unreadable file) stops playback. */
+      if (s_video_play_frame_count != 0U)
+      {
+        s_video_play_frame = (s_video_play_frame + 1U) % s_video_play_frame_count;
+      }
+      s_play_error_streak++;
+      if (s_play_error_streak >= 8U)
+      {
+        s_play_error_streak = 0U;
+        set_playing(0U);
+      }
+    }
+    else
+    {
+      s_play_error_streak = 0U;
     }
   }
 }
@@ -2030,12 +2081,14 @@ static uint32_t decode_jpeg_preview(uint32_t jpeg_size, uint32_t frame_index, ui
         }
       }
 
+      s_jpeg_decode_in_total = padded_size;
       decode_status = HAL_JPEG_Decode(&s_jpeg_handle,
                                       s_jpeg_buffer,
                                       padded_size,
                                       s_jpeg_decode_buffer,
                                       output_bytes,
                                       APP_MEDIA_JPEG_TIMEOUT_MS);
+      s_jpeg_decode_in_total = 0U;
       if (decode_status == HAL_OK)
       {
         break;
@@ -2233,18 +2286,21 @@ static uint32_t load_bmp_preview(FX_FILE *file, uint32_t *bytes_read)
 
   memset(s_preview_buffer, 0, sizeof(s_preview_buffer));
   y_offset = (APP_MEDIA_PREVIEW_HEIGHT - draw_height) / 2U;
-  for (uint32_t dst_y = 0U; dst_y < draw_height; ++dst_y)
-  {
-    const uint32_t src_y_top = (dst_y * height) / draw_height;
-    const uint32_t file_y = (height - 1U) - src_y_top;
-    const uint32_t x_offset = (APP_MEDIA_PREVIEW_WIDTH - draw_width) / 2U;
-    uint16_t *dst = &s_preview_buffer[((y_offset + dst_y) * APP_MEDIA_PREVIEW_WIDTH) + x_offset];
 
-    status = fx_file_seek(file, (ULONG64)data_offset + ((ULONG64)file_y * (ULONG64)row_stride));
-    if (status == FX_SUCCESS)
-    {
-      status = file_read_exact(file, s_bmp_row, row_stride, bytes_read);
-    }
+  /* Stream the whole pixel array as ONE sequential read in 64-row chunks
+   * and downsample from memory. The previous per-row seek+3KB read pattern
+   * paid the FileX request overhead 600 times - measured 10.3 s per
+   * screenshot; bulk sequential reads take it to a few hundred ms. BMP
+   * stores rows bottom-up, so chunks walk the image from the bottom and
+   * dst rows are filled bottom-up in step. */
+  {
+    const uint32_t x_offset = (APP_MEDIA_PREVIEW_WIDTH - draw_width) / 2U;
+    const uint32_t chunk_rows_max = APP_MEDIA_BMP_ROWS_PER_WRITE;
+    uint32_t chunk_start = 0U; /* first file row resident in s_bmp_row */
+    uint32_t chunk_rows = 0U;
+    int32_t dst_y = (int32_t)draw_height - 1;
+
+    status = fx_file_seek(file, (ULONG64)data_offset);
     if (status != FX_SUCCESS)
     {
       preview_clear();
@@ -2252,16 +2308,55 @@ static uint32_t load_bmp_preview(FX_FILE *file, uint32_t *bytes_read)
       return APP_MEDIA_ERROR_FILE_READ;
     }
 
-    for (uint32_t dst_x = 0U; dst_x < draw_width; ++dst_x)
+    while (dst_y >= 0)
     {
-      const uint32_t src_x = (dst_x * width) / draw_width;
-      const uint8_t *pixel = &s_bmp_row[src_x * 3U];
-      const uint8_t b = pixel[0];
-      const uint8_t g = pixel[1];
-      const uint8_t r = pixel[2];
-      dst[dst_x] = (uint16_t)(((uint16_t)(r & 0xF8U) << 8) |
-                              ((uint16_t)(g & 0xFCU) << 3) |
-                              ((uint16_t)b >> 3));
+      const uint32_t src_y_top = ((uint32_t)dst_y * height) / draw_height;
+      const uint32_t file_y = (height - 1U) - src_y_top;
+
+      /* Advance the chunk window until it covers file_y (offsets only ever
+       * move forward; rows we skip are simply read through). */
+      while (file_y >= (chunk_start + chunk_rows))
+      {
+        uint32_t next_rows = height - (chunk_start + chunk_rows);
+
+        if (next_rows > chunk_rows_max)
+        {
+          next_rows = chunk_rows_max;
+        }
+        if (next_rows == 0U)
+        {
+          preview_clear();
+          status_set_error(APP_MEDIA_ERROR_FILE_READ);
+          return APP_MEDIA_ERROR_FILE_READ;
+        }
+        chunk_start += chunk_rows;
+        chunk_rows = next_rows;
+        status = file_read_exact(file, s_bmp_row, chunk_rows * row_stride, bytes_read);
+        if (status != FX_SUCCESS)
+        {
+          preview_clear();
+          status_set_error(APP_MEDIA_ERROR_FILE_READ);
+          return APP_MEDIA_ERROR_FILE_READ;
+        }
+      }
+
+      {
+        const uint8_t *row_bytes = &s_bmp_row[(file_y - chunk_start) * row_stride];
+        uint16_t *dst = &s_preview_buffer[((y_offset + (uint32_t)dst_y) * APP_MEDIA_PREVIEW_WIDTH) + x_offset];
+
+        for (uint32_t dst_x = 0U; dst_x < draw_width; ++dst_x)
+        {
+          const uint32_t src_x = (dst_x * width) / draw_width;
+          const uint8_t *pixel = &row_bytes[src_x * 3U];
+          const uint8_t b = pixel[0];
+          const uint8_t g = pixel[1];
+          const uint8_t r = pixel[2];
+          dst[dst_x] = (uint16_t)(((uint16_t)(r & 0xF8U) << 8) |
+                                  ((uint16_t)(g & 0xFCU) << 3) |
+                                  ((uint16_t)b >> 3));
+        }
+      }
+      --dst_y;
     }
   }
 
@@ -2565,8 +2660,16 @@ static uint32_t load_avi_preview(FX_FILE *file, const char *path, uint32_t *byte
   {
     s_video_play_frame = (frame_index + 1U) % frame_count;
   }
+  /* On failure the cursor stays put; the playback tick advances past the
+   * frame itself (uniform for header/read/decode failures) so one corrupt
+   * frame - the known record-side bug - cannot wedge the loop. */
   return error;
 }
+
+#ifdef DEBUG
+/* GDB probe: wall time of the last single-item read (SD + decode). */
+volatile uint32_t g_app_media_perf_read_ms;
+#endif
 
 static uint32_t read_selected_file(void)
 {
@@ -2575,6 +2678,9 @@ static uint32_t read_selected_file(void)
   uint32_t bytes = 0U;
   uint32_t selected_type;
   uint32_t error;
+#ifdef DEBUG
+  const uint32_t t0 = HAL_GetTick();
+#endif
 
   status_lock();
   status_set_file(path, s_status.selected_file);
@@ -2623,6 +2729,9 @@ static uint32_t read_selected_file(void)
   }
   status_unlock();
 
+#ifdef DEBUG
+  g_app_media_perf_read_ms = HAL_GetTick() - t0;
+#endif
   return error;
 }
 
