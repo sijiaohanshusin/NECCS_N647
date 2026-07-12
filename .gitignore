@@ -75,3 +75,5 @@ docs/ocrkb/run_state.json
 docs/ocrkb/source_catalog.csv
 docs/ocrkb/unique_documents.json
 docs/ocrkb/reports/quality_report.json
+
+st_ai_ws/

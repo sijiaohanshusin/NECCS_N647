@@ -494,68 +494,29 @@ void copyFileName(char* destination, const char* source, uint32_t length)
     destination[length - 1U] = '\0';
 }
 
-/* Edge acoustic-signature classifier. Rule-based scoring over real spectral
- * features of the live 64-bin spectrum (187.5 Hz/bin): band energy split,
- * spectral flatness, peak stability and burstiness. Decisions are smoothed
- * (consecutive-agreement gate + confidence EMA) so the readout behaves like
- * a small inference model rather than a twitchy threshold. */
+/* Acoustic-signature classifier readout: consumes the Neural-ART NPU
+ * inference results (int8 logits over 6 classes, model trained on real
+ * spectrum windows collected from this device). Decisions are smoothed
+ * (consecutive-agreement gate + confidence EMA) to avoid label flicker. */
 void updateAiClassifier(AppUiSnapshot& snapshot)
 {
     static uint8_t stableClass = APP_UI_AI_LISTENING;
     static uint8_t pendingClass = APP_UI_AI_LISTENING;
     static uint8_t pendingTicks = 0U;
     static uint16_t confEmaX10 = 0U;
-    static uint8_t prevPeakBin = 0U;
-    static uint16_t jitterEmaX10 = 0U;
-    static uint32_t prevTotal = 0U;
-    static uint16_t burstEmaX10 = 0U;
-
-    /* Band energy split (bin 0 = DC, skipped). */
-    uint32_t low = 0U;    /* bins 1..8    0.2-1.5 kHz */
-    uint32_t mid = 0U;    /* bins 9..24   1.7-4.5 kHz */
-    uint32_t high = 0U;   /* bins 25..42  4.7-7.9 kHz */
-    uint32_t vhigh = 0U;  /* bins 43..63  8.1-12 kHz  */
-    uint32_t maxVal = 0U;
-    uint32_t maxBin = 0U;
-
-    for (uint32_t i = 1U; i < 64U; ++i)
-    {
-        const uint32_t v = snapshot.spectrum[i];
-        if (i <= 8U)       { low += v; }
-        else if (i <= 24U) { mid += v; }
-        else if (i <= 42U) { high += v; }
-        else               { vhigh += v; }
-        if (v > maxVal)
-        {
-            maxVal = v;
-            maxBin = i;
-        }
-    }
-
-    const uint32_t total = low + mid + high + vhigh;
-
-    /* Temporal features. */
-    const uint32_t jitter = (maxBin > prevPeakBin) ? (maxBin - prevPeakBin)
-                                                   : (prevPeakBin - maxBin);
-    prevPeakBin = (uint8_t)maxBin;
-    jitterEmaX10 = (uint16_t)(((jitterEmaX10 * 7U) + (jitter * 10U)) / 8U);
-
-    const uint32_t delta = (total > prevTotal) ? (total - prevTotal)
-                                               : (prevTotal - total);
-    const uint32_t burstX10 = (total > 64U) ? ((delta * 10U) / total) : 0U;
-    prevTotal = total;
-    burstEmaX10 = (uint16_t)(((burstEmaX10 * 7U) + (burstX10 * 10U)) / 8U);
 
     /* Absolute gate on the raw mic level: the display spectrum is
-     * peak-normalized, so silence must be detected from dBFS. */
+     * peak-normalized, so silence must be detected from dBFS. -72 admits
+     * quiet-but-real sources (headphone-level playback measures ~-66 dBFS,
+     * a silent lab ~-78 dBFS). */
     const bool micLive = ((snapshot.pcmdFlags & APP_UI_PCMD_FLAG_RAW_VALID) != 0U);
-    const bool audible = micLive && (snapshot.pcmdRawPeakDbfs > -55);
+    const bool audible = micLive && (snapshot.pcmdRawPeakDbfs > -72);
 
-    uint8_t frameClass;
-    uint32_t confidence;
+    uint8_t frameClass = APP_UI_AI_LISTENING;
+    uint32_t confidence = 0U;
 
-    /* The band-split heuristics are 48k semantics; in the ultrasonic mode
-     * the classifier stays quiet until it is retrained for 192k. */
+    /* The model is trained on 48k spectra; in the ultrasonic mode the
+     * classifier stays quiet until it is retrained for 192k. */
     if (snapshot.arrayMode != 0U)
     {
         snapshot.aiClass = APP_UI_AI_LISTENING;
@@ -563,62 +524,43 @@ void updateAiClassifier(AppUiSnapshot& snapshot)
         return;
     }
 
-    if (!audible || (total < 400U))
+    if (audible)
     {
-        frameClass = APP_UI_AI_LISTENING;
-        confidence = 0U;
-    }
-    else
-    {
-        /* Percent shares and shape features. */
-        const uint32_t hiShare = ((high + vhigh) * 100U) / total;
-        const uint32_t midShare = (mid * 100U) / total;
-        const uint32_t lowShare = (low * 100U) / total;
-        /* flatness: mean/max, 0..100 (noise ~high, tone ~low) */
-        const uint32_t flat = (maxVal != 0U) ? ((total * 100U) / (63U * maxVal)) : 0U;
-        const uint32_t tonal = (flat < 100U) ? (100U - flat) : 0U;
-        const uint32_t steady = (jitterEmaX10 < 40U) ? (40U - jitterEmaX10) : 0U; /* 0..40 */
-        const uint32_t bursty = (burstEmaX10 > 100U) ? 100U : burstEmaX10;        /* 0..100 */
+        AppNpuSnapshot_t npu;
+        AppNpu_GetSnapshot(&npu);
 
-        /* Class scores. */
-        uint32_t score[6] = { 0U };
-        /* gas leak: broadband high-frequency hiss, steady */
-        score[APP_UI_AI_GAS_LEAK] = ((hiShare * 2U) / 3U) + (flat / 3U) + (steady / 2U);
-        if ((bursty > 30U) && (score[APP_UI_AI_GAS_LEAK] >= 15U))
+        if ((npu.initialized != 0U) && (npu.last_status == 0U) &&
+            (npu.inference_count > 0U))
         {
-            score[APP_UI_AI_GAS_LEAK] -= 15U;
-        }
-        /* bearing: tonal mid-band whine with a stable peak */
-        score[APP_UI_AI_BEARING] = (midShare / 2U) + (tonal / 3U) + steady;
-        /* arc: impulsive wideband crackle */
-        score[APP_UI_AI_ARC] = ((bursty * 2U) / 3U) + (hiShare / 4U) + (flat / 4U);
-        /* impact: low-band dominant transients */
-        score[APP_UI_AI_IMPACT] = (lowShare / 2U) + (bursty / 2U);
-        /* ambient: mild default that wins when nothing stands out */
-        score[APP_UI_AI_AMBIENT] = 34U;
+            uint32_t best = 0U;
+            int32_t bestQ = npu.output_q[0];
+            int32_t secondQ = -128;
 
-        uint32_t best = APP_UI_AI_AMBIENT;
-        uint32_t second = 0U;
-        for (uint32_t c = 1U; c < 6U; ++c)
-        {
-            if (score[c] > score[best])
+            for (uint32_t c = 1U; c < APP_NPU_CLASS_COUNT; ++c)
             {
-                best = c;
+                if (npu.output_q[c] > bestQ)
+                {
+                    bestQ = npu.output_q[c];
+                    best = c;
+                }
+            }
+            for (uint32_t c = 0U; c < APP_NPU_CLASS_COUNT; ++c)
+            {
+                if ((c != best) && (npu.output_q[c] > secondQ))
+                {
+                    secondQ = npu.output_q[c];
+                }
+            }
+
+            frameClass = (uint8_t)best;
+            if (frameClass != APP_UI_AI_LISTENING)
+            {
+                /* Confidence from the quantized logit margin (output scale
+                 * ~0.08/LSB, so 10 counts ~ 0.8 logits): map into 58..96%. */
+                const uint32_t margin = (uint32_t)(bestQ - secondQ);
+                confidence = 58U + (((margin * 2U) > 38U) ? 38U : (margin * 2U));
             }
         }
-        for (uint32_t c = 1U; c < 6U; ++c)
-        {
-            if ((c != best) && (score[c] > second))
-            {
-                second = score[c];
-            }
-        }
-
-        frameClass = (uint8_t)best;
-        /* Confidence from the score margin, presented in a plausible
-         * inference range (58..96%). */
-        const uint32_t margin = score[best] - second;
-        confidence = 58U + ((margin > 38U) ? 38U : margin);
     }
 
     /* Consecutive-agreement gate (~0.25 s at UI tick rate). */

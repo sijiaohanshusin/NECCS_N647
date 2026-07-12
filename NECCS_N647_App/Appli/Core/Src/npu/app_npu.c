@@ -14,18 +14,41 @@
 LL_ATON_DECLARE_NAMED_NN_INSTANCE_AND_INTERFACE(network);
 
 volatile uint32_t g_app_npu_test_request = 0U;
+/* SWD-driven: freeze the live spectrum feed so g_app_npu_test_request runs
+ * deterministic inferences without live traffic overwriting the IO buffers. */
+volatile uint32_t g_app_npu_freeze_feed = 0U;
 
 static AppNpuSnapshot_t s_npu;
 static uint8_t s_runtime_ready = 0U;
 
 static void AppNpu_EnableClocks(void)
 {
-  /* NPU (ATON) bus+kernel clocks and the CACHEAXI (NPU cache) block. */
+  /* The NPU is a bus master: without RIMC attributes its AXI transactions
+   * are issued non-secure and RISAF silently blocks every RAM access (reads
+   * as zero, writes dropped) while register programming from the CPU still
+   * works - the inference "completes" without touching memory
+   * (board-verified 2026-07-12). Grant it the same secure/privileged CID1
+   * profile the other masters (DCMIPP/DMA2D/LTDC/GPU2D) get in MX_RIF_Init. */
+  {
+    RIMC_MasterConfig_t rimc = {0};
+
+    rimc.MasterCID = RIF_CID_1;
+    rimc.SecPriv = RIF_ATTRIBUTE_SEC | RIF_ATTRIBUTE_PRIV;
+    HAL_RIF_RIMC_ConfigMasterAttributes(RIF_MASTER_INDEX_NPU, &rimc);
+    HAL_RIF_RISC_SetSlaveSecureAttributes(RIF_RISC_PERIPH_INDEX_NPU,
+                                          RIF_ATTRIBUTE_SEC | RIF_ATTRIBUTE_PRIV);
+  }
+
+  /* NPU (ATON) bus+kernel clocks and the CACHEAXI (NPU cache) block.
+   * CACHEAXI stays DISABLED (reset state = bypass): the network was compiled
+   * with mpool cacheinfo bypass_enable=1, so the generated epochs contain no
+   * NPU-cache maintenance. Enabling the cache leaves the final output write
+   * stranded in CACHEAXI (board-verified 2026-07-12: CPU read stale input
+   * bytes as logits until the cache was left in bypass). */
   __HAL_RCC_NPU_CLK_ENABLE();
   __HAL_RCC_NPU_FORCE_RESET();
   __HAL_RCC_NPU_RELEASE_RESET();
   npu_cache_enable_clocks_and_reset();
-  npu_cache_enable();
 
   /* The NPU-adjacent AXISRAM banks (0x34200000..0x343BFFFF) power up
    * disabled; the app image ends below 0x34200000, so nothing else turns
@@ -34,6 +57,33 @@ static void AppNpu_EnableClocks(void)
   __HAL_RCC_AXISRAM4_MEM_CLK_ENABLE();
   __HAL_RCC_AXISRAM5_MEM_CLK_ENABLE();
   __HAL_RCC_AXISRAM6_MEM_CLK_ENABLE();
+
+  /* Clock alone is not enough: these banks reset with RAMCFG SRAMSD
+   * (shutdown) set, so reads return zeros and writes are dropped - the
+   * CPU D-cache masks this, but the NPU sees dead RAM (board-verified
+   * 2026-07-12: CR=0x00100000 on all four banks, all-zero inference IO).
+   * Clear the shutdown bit and wait for the banks to come online. */
+  __HAL_RCC_RAMCFG_CLK_ENABLE();
+  {
+    RAMCFG_TypeDef *const banks[4] = {
+      RAMCFG_SRAM3_AXI, RAMCFG_SRAM4_AXI, RAMCFG_SRAM5_AXI, RAMCFG_SRAM6_AXI
+    };
+
+    for (uint32_t i = 0U; i < 4U; ++i)
+    {
+      banks[i]->CR &= ~RAMCFG_CR_SRAMSD;
+    }
+    for (uint32_t i = 0U; i < 4U; ++i)
+    {
+      uint32_t guard = 100000U;
+
+      while (((banks[i]->ISR & RAMCFG_ISR_SRAMBUSY) != 0U) && (guard > 0U))
+      {
+        guard--;
+      }
+    }
+  }
+  __DSB();
 }
 
 static void AppNpu_EnsureDwt(void)
@@ -182,7 +232,7 @@ void AppNpu_FeedSpectrum(const uint8_t *spectrum_64)
 {
   int8_t *row;
 
-  if (spectrum_64 == NULL)
+  if ((spectrum_64 == NULL) || (g_app_npu_freeze_feed != 0U))
   {
     return;
   }
@@ -196,9 +246,9 @@ void AppNpu_FeedSpectrum(const uint8_t *spectrum_64)
   s_spec_head = (s_spec_head + 1U) % 32U;
   s_spec_feeds++;
 
-  /* Inference every 8 frames (~0.8 s at the ~10 Hz acoustic rate), and
+  /* Inference every 4 frames (~0.4 s at the ~10 Hz acoustic rate), and
    * only once the window has fully filled at least once. */
-  if ((s_spec_feeds >= 32U) && ((s_spec_feeds & 7U) == 0U))
+  if ((s_spec_feeds >= 32U) && ((s_spec_feeds & 3U) == 0U))
   {
     /* Assemble in time order: oldest row first. */
     static int8_t ordered[32U * 64U];

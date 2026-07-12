@@ -1,4 +1,4 @@
-# 项目状态交接 — 2026-07-11
+# 项目状态交接 — 2026-07-12
 
 > 给接手的任何人/任何模型:先读根目录 `AGENTS.md` 的操作规则,再读本文。
 > 板子操作只用 `tools\debug\n647.ps1`。
@@ -17,7 +17,8 @@
 | XIP 冷启动 | 锁死根因(main 里 DBGMCU 访问)已除;SystemInit BSEC 解锁使 XIP 可调试 | f1512157 |
 | 相机画质 | ISP 链全开 + AE/AWB 伺服;亮场景收敛待实验室验证 | a051467a |
 | 图库 | DMA2D 硬件解码、点击即显、解码自愈、扫描 O(logN) | 641b8c51..de163ffb |
-| NPU | 全链路跑通:378µs/次,实时喂谱,系统页遥测 | fc751a5b, 7161be94 |
+| NPU | 真模型上线:6类声纹 CNN 全部 6 epoch 纯硬件,381µs/次,播放实测 5/5 类正确;UI 分类卡由 NPU 输出驱动 | fc751a5b, 7161be94, 本次 |
+| 192k 超声 | Core16@192k 无晶振实现(PLL2/IC7 重配),参数页可切换,切换循环稳定 | a0ae74f4, 03b382b3 |
 | 触摸 | 根因=旧 7 寸屏 GT911 配置丢失(硬件);驱动加了诊断+锁竞争区分 | f08504a5 |
 | H7 控制器 | boot1/xipboot/devboot 串口命令(COM3, 921600) | H7 Keil 工程 |
 
@@ -28,10 +29,20 @@
 2. **采购**:串口二维云台+激光头(见聊天记录 07-11 的选型结论:载激光头
    不载整机,100g 负载规格足够)、24.576MHz TCXO(192k 模式)、
    AMS1117+磁珠(麦阵独立供电)。
-3. **NPU 训练数据**:对设备播放各类声音,每类 1-2 分钟:
-   `python tools/npu/collect_spectra.py --label <类名> --seconds 90`
-   然后 `train_classifier.py` → `export_trained_onnx.py` → 量化 → stedgeai
-   → 更新 `network_weights_blob.h` + `network.c`。
+3. ~~NPU 训练数据~~ **已完成(2026-07-12)**:6 类 × ~150 窗口(PC 播放特征音采集,
+   数据在 `tools/npu/dataset/`),CNN 99.6% int8 精度,板上播放实测 5/5 类正确。
+   赛前可到实验室用真实声源(真泄漏/真轴承)重采升级。重训流程:
+   `collect_all.ps1` → `train_cnn.py` → `quantize_neccs.py` → `eval_onnx.py` →
+   `stedgeai generate` → `make_weights_blob.py` + 拷贝 network.c/h → flash-debug。
+
+### NPU 硬件解锁两大坑(2026-07-12 实证,已写入 app_npu.c,勿删)
+
+- **RAMCFG SRAMSD**:AXISRAM3-6 复位态是 shutdown,只开 RCC 时钟远远不够,
+  读返回 0、写被丢弃。必须清 `RAMCFG_SRAMx_AXI->CR` 的 SRAMSD 位。
+- **RIF 主设备属性**:NPU 是总线主设备,不配 RIMC 时发出非安全事务,
+  RISAF 静默拦截一切内存访问——推理"正常完成"但从不碰内存,输出读到的
+  是输入缓冲的旧字节。必须 `HAL_RIF_RIMC_ConfigMasterAttributes(RIF_MASTER_INDEX_NPU, CID1+SEC+PRIV)`。
+- CACHEAXI 保持 bypass(mpool 配置 bypass_enable=1,生成代码无 NPU 缓存维护)。
 
 ## 两周计划位置
 
