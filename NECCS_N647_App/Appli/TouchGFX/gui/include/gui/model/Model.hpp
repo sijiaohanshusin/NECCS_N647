@@ -310,6 +310,11 @@ public:
     /* Gallery: page navigation and tile selection (slot 0..7). */
     void requestThumbPage(uint32_t page);
     void selectMediaSlot(uint8_t slot);
+    /* Popup menu overlays the camera window: hide the LTDC camera layer so
+     * the dim scrim cannot blend with the color-key hole (purple smear). */
+    void setMenuBlocksCamera(bool blocked);
+    void rebootSystem();
+    void powerOffSystem();
 
     const AppUiSnapshot& getSnapshot() const
     {
@@ -327,6 +332,7 @@ protected:
     uint32_t triggerCooldown;
     bool triggerArmed;
     bool triggerPrevHot;
+    bool menuBlocksCamera;
 };
 
 #endif /* MODEL_HPP */

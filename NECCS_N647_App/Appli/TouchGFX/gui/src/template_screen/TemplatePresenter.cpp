@@ -32,6 +32,21 @@ void TemplatePresenter::selectScreen(uint8_t screen)
     model->setActiveScreen(screen);
 }
 
+void TemplatePresenter::setMenuBlocksCamera(bool blocked)
+{
+    model->setMenuBlocksCamera(blocked);
+}
+
+void TemplatePresenter::rebootSystem()
+{
+    model->rebootSystem();
+}
+
+void TemplatePresenter::powerOffSystem()
+{
+    model->powerOffSystem();
+}
+
 void TemplatePresenter::selectProfile(uint8_t profile)
 {
     model->setActiveProfile(profile);

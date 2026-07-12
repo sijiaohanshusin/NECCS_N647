@@ -34,7 +34,9 @@
 #define APP_ACOUSTIC_SERVICE_FIELD_FINE_GAIN    0.65f
 /* Sigma/radius are in field cells; scaled with the 96x72 field density so
  * the angular footprint of a fine bump stays the same as before. */
-#define APP_ACOUSTIC_SERVICE_FIELD_FINE_SIGMA   2.7f
+/* Wider Gaussian for the refined peaks: 2.7 produced a tight saturated core
+ * whose clipped level sets read as a rounded SQUARE on the panel. */
+#define APP_ACOUSTIC_SERVICE_FIELD_FINE_SIGMA   3.4f
 /* Frequency resolution of the Wide32/48k pipeline (48000 / 256). */
 #define APP_ACOUSTIC_SERVICE_BIN_HZ             187.5f
 #define APP_ACOUSTIC_SERVICE_TEMP_MIN_C         (-20)
@@ -61,10 +63,18 @@ static float s_field_accum[APP_ACOUSTIC_SERVICE_FIELD_COUNT]
     __attribute__((section(".EXTRAM"), aligned(32)));
 static float s_field_peak_ema;
 
-volatile uint32_t g_app_acoustic_service_disable_auto_degrade;
+/* Auto-degrade (silently dropping to FAST after 3 over-budget/error frames)
+ * predates the optimized SRP (75 ms/frame then, 6-15 ms now). It overrode
+ * the user's explicit quality selection on transient hiccups - disabled by
+ * default; clear via GDB to re-enable for experiments. */
+volatile uint32_t g_app_acoustic_service_disable_auto_degrade = 1U;
 
 static volatile AppAcousticImagingRunMode_t s_requested_mode = APP_ACOUSTIC_IMAGING_MODE_STANDARD;
 static volatile AppAcousticImagingProfile_t s_requested_profile = APP_ACOUSTIC_IMAGING_PROFILE_BALANCED;
+/* Set on the first explicit SetProfile/SetMode call: a profile the user
+ * picked must stick - auto-degrade silently snapping back to FAST reads as
+ * "the setting reverted itself" on the params page. */
+static volatile uint8_t s_profile_user_locked = 0U;
 static volatile AppAcousticImagingBinPolicy_t s_requested_bin_policy =
     APP_ACOUSTIC_IMAGING_BIN_POLICY_PROFILE_DEFAULT;
 static volatile uint8_t s_profile_change_pending;
@@ -434,21 +444,33 @@ static float AppAcousticService_FieldRowToPhi(uint32_t fy)
 }
 
 /* Catmull-Rom weight evaluation for the four taps around fractional t. */
-static void AppAcousticService_CatmullRomWeights(float t, float w[4])
+/* Normalized 4-tap Gaussian weights. Replaces Catmull-Rom for the coarse
+ * field upsample: separable Gaussians have CIRCULAR level sets, while any
+ * interpolating cubic (Catmull-Rom included) renders an isolated hot cell
+ * as a square patch - the "blocky heatmap" root cause. Also non-negative,
+ * so no overshoot clamping is needed. */
+static void AppAcousticService_GaussianWeights(float t, float w[4])
 {
-  const float t2 = t * t;
-  const float t3 = t2 * t;
+  const float inv_two_sigma_sq = 1.0f / (2.0f * 0.7f * 0.7f);
+  float sum = 0.0f;
 
-  w[0] = 0.5f * (-t3 + (2.0f * t2) - t);
-  w[1] = 0.5f * ((3.0f * t3) - (5.0f * t2) + 2.0f);
-  w[2] = 0.5f * ((-3.0f * t3) + (4.0f * t2) + t);
-  w[3] = 0.5f * (t3 - t2);
+  for (int32_t k = 0; k < 4; k++)
+  {
+    const float d = ((float)k - 1.0f) - t;
+
+    w[k] = expf(-d * d * inv_two_sigma_sq);
+    sum += w[k];
+  }
+  for (int32_t k = 0; k < 4; k++)
+  {
+    w[k] /= sum;
+  }
 }
 
 /* Resample the regular 9x9 coarse SRP grid (theta-major layout, 15 deg
- * pitch, +/-60 deg) into the camera-aspect field with Catmull-Rom bicubic
- * sampling (C1-continuous - bilinear left visible diamond-shaped steps at
- * the 15 deg grid pitch), then fuse the fine points as Gaussian bumps. */
+ * pitch, +/-60 deg) into the camera-aspect field with separable Gaussian
+ * taps (round level sets; bicubic kernels rendered square blobs), then
+ * fuse the fine points as Gaussian bumps. */
 static void AppAcousticService_BuildLinearField(const AppAcousticImagingVisFrame_t *vis_frame)
 {
   const float inv_step = 1.0f / 15.0f;
@@ -481,7 +503,7 @@ static void AppAcousticService_BuildLinearField(const AppAcousticImagingVisFrame
     {
       col_i0[fx] = n - 2;
     }
-    AppAcousticService_CatmullRomWeights(u - (float)col_i0[fx], col_w[fx]);
+    AppAcousticService_GaussianWeights(u - (float)col_i0[fx], col_w[fx]);
   }
 
   for (uint32_t fy = 0U; fy < APP_ACOUSTIC_SERVICE_FIELD_H; fy++)
@@ -505,7 +527,7 @@ static void AppAcousticService_BuildLinearField(const AppAcousticImagingVisFrame
     {
       v0 = n - 2;
     }
-    AppAcousticService_CatmullRomWeights(v - (float)v0, wv);
+    AppAcousticService_GaussianWeights(v - (float)v0, wv);
 
     /* Vertical pass: blend the four phi taps (edge-clamped) for each of the
      * nine theta columns. Layout: index = theta_idx * n + phi_idx. */
@@ -551,8 +573,8 @@ static void AppAcousticService_BuildLinearField(const AppAcousticImagingVisFrame
         sample += wu[k] * row_taps[px];
       }
 
-      /* Catmull-Rom overshoots near sharp peaks; heat power is
-       * non-negative by construction. */
+      /* Gaussian weights are non-negative; keep the clamp as a free
+       * guard for any future kernel change. */
       if (sample < 0.0f)
       {
         sample = 0.0f;
@@ -566,7 +588,7 @@ static void AppAcousticService_BuildLinearField(const AppAcousticImagingVisFrame
   {
     const float sigma = APP_ACOUSTIC_SERVICE_FIELD_FINE_SIGMA;
     const float inv_two_sigma_sq = 1.0f / (2.0f * sigma * sigma);
-    const int32_t radius = 8;
+    const int32_t radius = 10;
     const float fx_scale = (float)APP_ACOUSTIC_SERVICE_FIELD_W / APP_ACOUSTIC_SERVICE_CAMERA_HFOV_DEG;
     const float fy_scale = (float)APP_ACOUSTIC_SERVICE_FIELD_H / APP_ACOUSTIC_SERVICE_CAMERA_VFOV_DEG;
 
@@ -787,9 +809,19 @@ static void AppAcousticService_FillCameraField(AppAcousticServiceSnapshot_t *sna
 
   AppAcousticService_LoadFieldParams();
   AppAcousticService_BuildLinearField(vis_frame);
-  for (uint32_t pass = 0U; pass < s_field_active.smooth_passes; pass++)
   {
-    AppAcousticService_SmoothField();
+    /* QUALITY earns one extra smoothing pass: it runs the densest pair set,
+     * so its surface has the most sidelobe texture to melt down. */
+    uint32_t passes = s_field_active.smooth_passes;
+
+    if (s_active_profile == APP_ACOUSTIC_IMAGING_PROFILE_QUALITY)
+    {
+      passes++;
+    }
+    for (uint32_t pass = 0U; pass < passes; pass++)
+    {
+      AppAcousticService_SmoothField();
+    }
   }
   AppAcousticService_NormalizeField(snapshot);
 
@@ -1012,7 +1044,8 @@ static void AppAcousticService_UpdateDegrade(AppAcousticServiceSnapshot_t *snaps
     return;
   }
 
-  if (g_app_acoustic_service_disable_auto_degrade != 0U)
+  if ((g_app_acoustic_service_disable_auto_degrade != 0U) ||
+      (s_profile_user_locked != 0U))
   {
     s_over_budget_count = 0U;
     s_error_count = 0U;
@@ -1324,6 +1357,7 @@ AppAcousticImagingStatus_t AppAcousticService_SetProfile(AppAcousticImagingProfi
   s_requested_profile = profile;
   s_requested_bin_policy = APP_ACOUSTIC_IMAGING_BIN_POLICY_PROFILE_DEFAULT;
   s_profile_change_pending = 1U;
+  s_profile_user_locked = 1U;
 
   return APP_ACOUSTIC_IMAGING_OK;
 }
@@ -1339,6 +1373,7 @@ AppAcousticImagingStatus_t AppAcousticService_SetMode(AppAcousticImagingRunMode_
   s_requested_profile = AppAcousticService_ProfileFromMode(mode);
   s_requested_bin_policy = APP_ACOUSTIC_IMAGING_BIN_POLICY_PROFILE_DEFAULT;
   s_profile_change_pending = 1U;
+  s_profile_user_locked = 1U;
 
   return APP_ACOUSTIC_IMAGING_OK;
 }

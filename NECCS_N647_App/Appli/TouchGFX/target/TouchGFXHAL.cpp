@@ -143,17 +143,16 @@ void TouchGFXHAL::flushFrameBuffer(const touchgfx::Rect& rect)
     // defined in TouchGFXGeneratedHAL.cpp
 
     cleanFrameBufferRect(getTFTFrameBuffer(), rect);
-    AppCameraDisplay_RefreshColorKeyHole(rect.x, rect.y, rect.width, rect.height);
+    /* The camera hole is owned by the View's cameraPreviewKey box (z-ordered
+     * UNDER popups). Re-stamping the key here after every partial draw
+     * magenta'd out any widget drawn over the camera window - the menu
+     * occlusion / purple-flash bug. */
     TouchGFXGeneratedHAL::flushFrameBuffer(rect);
 }
 
 void TouchGFXHAL::flushFrameBuffer()
 {
     cleanDCacheRegion(getTFTFrameBuffer(), framebufferWidth * framebufferHeight * sizeof(uint16_t));
-    AppCameraDisplay_RefreshColorKeyHole(0,
-                                         0,
-                                         static_cast<int32_t>(framebufferWidth),
-                                         static_cast<int32_t>(framebufferHeight));
     TouchGFXGeneratedHAL::flushFrameBuffer();
 }
 

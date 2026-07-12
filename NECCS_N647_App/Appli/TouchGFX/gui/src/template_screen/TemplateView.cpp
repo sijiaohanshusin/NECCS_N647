@@ -4,6 +4,7 @@
 #include <touchgfx/Application.hpp>
 #include <touchgfx/Color.hpp>
 
+#include <math.h>
 #include <stdio.h>
 
 namespace
@@ -154,6 +155,7 @@ TemplateView::TemplateView()
       paramsPressedCallback(this, &TemplateView::onParamsPressed),
       mediaPressedCallback(this, &TemplateView::onMediaPressed),
       menuPressedCallback(this, &TemplateView::onMenuPressed),
+      systemPressedCallback(this, &TemplateView::onSystemPressed),
       bandChangedCallback(this, &TemplateView::onBandChanged),
       activeScreen(APP_UI_SCREEN_BOOT),
       activeProfile(APP_UI_PROFILE_BALANCED),
@@ -168,7 +170,8 @@ TemplateView::TemplateView()
       recActive(false),
       menuOpen(false),
       viewerOpen(false),
-      selectedSlot(0U)
+      selectedSlot(0U),
+      powerConfirmTicks(0U)
 {
 }
 
@@ -278,9 +281,13 @@ void TemplateView::setupNavigation()
 {
     /* Popup menu: dim scrim (tap outside to close) + panel under the brand
      * area with one row per page. Added last, so it overlays every page. */
+    /* Fully opaque scrim: a semi-transparent one blends with the LTDC
+     * color-key magenta inside the camera hole, producing pixels that no
+     * longer match the key - the panel then shows a purple rectangle.
+     * Opaque guarantees the hole is covered whatever the key state is. */
     menuScrim.setPosition(0, 0, ScreenW, ScreenH);
-    menuScrim.setColor(rgb(3, 6, 10));
-    menuScrim.setAlpha(140U);
+    menuScrim.setColor(rgb(5, 9, 15));
+    menuScrim.setAlpha(255U);
     add(menuScrim);
 
     menuScrimTouch.setPosition(0, 0, ScreenW, ScreenH);
@@ -325,6 +332,10 @@ void TemplateView::setupNavigation()
 void TemplateView::setMenuOpen(bool open)
 {
     menuOpen = open;
+    /* Hide the camera layer while the menu overlays it: the semi-transparent
+     * scrim otherwise blends with the LTDC color-key hole and shows up as a
+     * purple smear over the video area. */
+    presenter->setMenuBlocksCamera(open);
     menuScrim.setVisible(open);
     menuScrimTouch.setVisible(open);
     menuPanel.setVisible(open);
@@ -595,6 +606,27 @@ void TemplateView::setupSystemPage()
                "N6 硬件加速: GPU2D 渲染 · DMA2D · JPEG 编码 · Helium DSP · NPU 就绪",
                ColorBlueDim, AppTextLabel::ALIGN_CENTER);
     add(sysAccelLabel);
+
+    /* Power controls at the bottom of the perf card. */
+    sysRebootBtn.setPosition(ContentX + 48, 496, 200, 38);
+    sysRebootBtn.setStyle(ColorPanel2, 10U);
+    sysRebootBtn.setBorder(ColorLine, true);
+    add(sysRebootBtn);
+    setupLabel(sysRebootLabel, ContentX + 48, 504, 200, 22, 1, "重启", ColorText, AppTextLabel::ALIGN_CENTER);
+    add(sysRebootLabel);
+    sysRebootTouch.setPosition(ContentX + 48, 496, 200, 38);
+    sysRebootTouch.setAction(systemPressedCallback);
+    add(sysRebootTouch);
+
+    sysPowerBtn.setPosition(ContentX + 272, 496, 200, 38);
+    sysPowerBtn.setStyle(ColorPanel2, 10U);
+    sysPowerBtn.setBorder(ColorRedDim, true);
+    add(sysPowerBtn);
+    setupLabel(sysPowerLabel, ContentX + 272, 504, 200, 22, 1, "关机", ColorText, AppTextLabel::ALIGN_CENTER);
+    add(sysPowerLabel);
+    sysPowerTouch.setPosition(ContentX + 272, 496, 200, 38);
+    sysPowerTouch.setAction(systemPressedCallback);
+    add(sysPowerTouch);
 }
 
 void TemplateView::setupParamsPage()
@@ -815,73 +847,85 @@ void TemplateView::setupMediaPage()
 
 void TemplateView::setupBootPage()
 {
+    /* Layout lives in the top-left 800x480 so the temporary 4.3" panel
+     * (which scans out only that region) shows the whole sequence; on the
+     * full 1024x600 panel it reads as a slightly left-weighted composition
+     * balanced by the wave artwork on the right. */
+    constexpr int16_t BootCX = 400; /* column centre */
+
     bootBg.setPosition(0, 0, ScreenW, ScreenH);
     bootBg.setColor(ColorBg);
     add(bootBg);
 
-    /* Enclosure silkscreen wave as a subtle footer backdrop. */
+    /* Enclosure silkscreen wave as a subtle backdrop on the free right side. */
     bootDecoWave.setBitmap(touchgfx::Bitmap(BITMAP_DECO_WAVE_ID));
-    bootDecoWave.setPosition(62, 408, 900, 186);
-    bootDecoWave.setAlpha(90U);
+    bootDecoWave.setPosition(700, 300, 900, 186);
+    bootDecoWave.setAlpha(70U);
     add(bootDecoWave);
 
     /* Competition badge, top-centre above the emblem. */
     bootCompBadge.setBitmap(touchgfx::Bitmap(BITMAP_DECO_COMP_ID));
-    bootCompBadge.setPosition(232, 24, 560, 89);
+    bootCompBadge.setPosition(static_cast<int16_t>(BootCX - 280), 10, 560, 89);
     bootCompBadge.setAlpha(210U);
     add(bootCompBadge);
 
-    /* Fixed-geometry rings, animated by alpha only: rescaling images every
-     * tick redrew a ~350px square each frame and made the whole boot page
-     * shimmer (single-buffer render racing the scanout). */
-    static const int16_t ringDiameter[BootRingCount] = {150, 240, 330};
+    /* Static rings (alpha fixed): every animated redraw of the large ring
+     * bitmaps raced the single-buffer scanout and flickered; motion comes
+     * from the small orbit dot instead. */
+    static const int16_t ringDiameter[BootRingCount] = {150, 206, 262};
+    static const uint8_t ringAlpha[BootRingCount] = {96U, 56U, 30U};
     for (uint32_t i = 0U; i < BootRingCount; ++i)
     {
         const int16_t d = ringDiameter[i];
         bootRing[i].setBitmap(touchgfx::Bitmap(BITMAP_BOOT_RING_ID));
         bootRing[i].setScalingAlgorithm(touchgfx::ScalableImage::BILINEAR_INTERPOLATION);
-        bootRing[i].setPosition(static_cast<int16_t>(512 - (d / 2)),
-                                static_cast<int16_t>(192 - (d / 2)),
+        bootRing[i].setPosition(static_cast<int16_t>(BootCX - (d / 2)),
+                                static_cast<int16_t>(188 - (d / 2)),
                                 d,
                                 d);
-        bootRing[i].setAlpha(0U);
+        bootRing[i].setAlpha(ringAlpha[i]);
         add(bootRing[i]);
     }
 
     bootEmblem.setBitmap(touchgfx::Bitmap(BITMAP_BOOT_EMBLEM_ID));
-    bootEmblem.setPosition(440, 124, 144, 132);
+    bootEmblem.setPosition(static_cast<int16_t>(BootCX - 72), 122, 144, 132);
     bootEmblem.setAlpha(0U);
     add(bootEmblem);
 
-    setupLabel(bootTitle, 312, 306, 400, 40, 3, "声学成像仪", ColorText, AppTextLabel::ALIGN_CENTER);
+    bootOrbitDot.setPosition(static_cast<int16_t>(BootCX - 4), 81, 8, 8);
+    bootOrbitDot.setColor(ColorBlue);
+    add(bootOrbitDot);
+
+    setupLabel(bootTitle, static_cast<int16_t>(BootCX - 200), 290, 400, 40, 3, "声学成像仪", ColorText, AppTextLabel::ALIGN_CENTER);
     add(bootTitle);
 
-    setupLabel(bootSubtitle, 312, 352, 400, 20, 1, "ACOUSTIC CAMERA · STM32N6", ColorMuted, AppTextLabel::ALIGN_CENTER);
+    setupLabel(bootSubtitle, static_cast<int16_t>(BootCX - 200), 334, 400, 20, 1, "ACOUSTIC CAMERA · STM32N6", ColorMuted, AppTextLabel::ALIGN_CENTER);
     add(bootSubtitle);
 
     static const char* itemNames[BootItemCount] = {"电源管理", "相机", "麦克风阵列", "声学引擎", "媒体存储"};
     for (uint32_t i = 0U; i < BootItemCount; ++i)
     {
-        const int16_t y = static_cast<int16_t>(396 + (i * 26));
-        bootItemDot[i].setPosition(382, static_cast<int16_t>(y + 7), 8, 8);
+        const int16_t y = static_cast<int16_t>(360 + (i * 20));
+        bootItemDot[i].setPosition(static_cast<int16_t>(BootCX - 130), static_cast<int16_t>(y + 6), 8, 8);
         bootItemDot[i].setColor(ColorMuted);
         add(bootItemDot[i]);
 
-        setupLabel(bootItemName[i], 402, y, 130, 22, 1, itemNames[i], ColorMuted);
-        setupLabel(bootItemState[i], 520, y, 122, 22, 1, "等待", ColorMuted, AppTextLabel::ALIGN_RIGHT);
+        setupLabel(bootItemName[i], static_cast<int16_t>(BootCX - 110), y, 130, 20, 1, itemNames[i], ColorMuted);
+        setupLabel(bootItemState[i], static_cast<int16_t>(BootCX + 8), y, 122, 20, 1, "等待", ColorMuted, AppTextLabel::ALIGN_RIGHT);
         add(bootItemName[i]);
         add(bootItemState[i]);
     }
 
-    bootBarTrack.setPosition(382, 536, 260, 4);
+    bootBarTrack.setPosition(static_cast<int16_t>(BootCX - 130), 468, 260, 4);
     bootBarTrack.setColor(ColorPanel2);
     add(bootBarTrack);
 
-    bootBarFill.setPosition(382, 536, 2, 4);
+    bootBarFill.setPosition(static_cast<int16_t>(BootCX - 130), 468, 2, 4);
     bootBarFill.setColor(ColorBlue);
     add(bootBarFill);
 
-    setupLabel(bootVersion, 312, 560, 400, 20, 1, "NECCS N647 · FW " __DATE__, ColorMuted, AppTextLabel::ALIGN_CENTER);
+    /* Version sits top-right where the 4.3" panel still shows it. */
+    setupLabel(bootVersion, 560, 14, 230, 20, 1, "N647 · FW " __DATE__, ColorMuted, AppTextLabel::ALIGN_RIGHT);
     add(bootVersion);
 }
 
@@ -905,35 +949,66 @@ void TemplateView::invalidateRingBand(int16_t x, int16_t y, int16_t diameter)
     touchgfx::Application::getInstance()->invalidateArea(right);
 }
 
+/* GDB remote UI actions (blind-debug hook): write a code, the View performs
+ * the same handler a touch would. 1=menu 2=shot 3=rec 4=trigger 5=palette
+ * 6=profile-cycle 7=viewer-open(slot0) 8=viewer-close 9=reboot 10=poweroff. */
+extern "C" volatile uint32_t g_app_ui_test_action = 0U;
+
 void TemplateView::handleTickEvent()
 {
+    if (powerConfirmTicks != 0U)
+    {
+        --powerConfirmTicks;
+        if (powerConfirmTicks == 0U)
+        {
+            sysPowerLabel.setText("关机");
+            sysPowerLabel.setColors(ColorText, ColorBg, false);
+        }
+    }
+
+    if (g_app_ui_test_action != 0U)
+    {
+        const uint32_t action = g_app_ui_test_action;
+        g_app_ui_test_action = 0U;
+        switch (action)
+        {
+        case 1U: setMenuOpen(!menuOpen); break;
+        case 2U: presenter->requestScreenshot(); break;
+        case 3U: presenter->toggleRecording(); break;
+        case 4U: presenter->toggleTrigger(); break;
+        case 5U: presenter->cycleHeatPalette(); break;
+        case 6U: presenter->selectProfile(static_cast<uint8_t>((activeProfile + 1U) % ProfileCount)); break;
+        case 7U: presenter->selectMediaSlot(0U); setViewerOpen(true); break;
+        case 8U: setViewerOpen(false); break;
+        case 9U: presenter->rebootSystem(); break;
+        case 10U: presenter->powerOffSystem(); break;
+        default: break;
+        }
+    }
+
     if (activeScreen != APP_UI_SCREEN_BOOT)
     {
         return;
     }
 
-    /* Breathing rings: fixed geometry, alpha-only animation, ring-band
-     * invalidation, updated every other tick. Keeps the per-frame redraw
-     * area tiny so the single-buffer render never races the scanout. */
-    constexpr uint16_t Period = 120U;
+    /* The only boot animation: a small dot orbiting the emblem. Two 20x20
+     * invalidations per update - cannot race the scanout the way the old
+     * full-ring alpha animation did. */
+    constexpr uint16_t Period = 180U;
     bootPhase = static_cast<uint16_t>((bootPhase + 1U) % Period);
     if ((bootPhase % 2U) == 0U)
     {
-        for (uint32_t i = 0U; i < BootRingCount; ++i)
-        {
-            const uint16_t offset = static_cast<uint16_t>((bootPhase + ((Period / BootRingCount) * i)) % Period);
-            /* Triangle wave 0..255..0 across the period, squared for ease. */
-            const uint32_t tri = (offset < (Period / 2U))
-                                 ? ((offset * 510U) / Period)
-                                 : (((Period - offset) * 510U) / Period);
-            const uint8_t alpha = static_cast<uint8_t>((tri * tri * 150U) / (255U * 255U));
-
-            if (alpha != bootRing[i].getAlpha())
-            {
-                bootRing[i].setAlpha(alpha);
-                invalidateRingBand(bootRing[i].getX(), bootRing[i].getY(), bootRing[i].getWidth());
-            }
-        }
+        const float angle = (6.2831853f * static_cast<float>(bootPhase)) / static_cast<float>(Period);
+        const int16_t cx = 400;
+        const int16_t cy = 188;
+        const float r = 107.0f;
+        const int16_t nx = static_cast<int16_t>(cx + (r * sinf(angle))) - 4;
+        const int16_t ny = static_cast<int16_t>(cy - (r * cosf(angle))) - 4;
+        touchgfx::Rect old(bootOrbitDot.getX() - 6, bootOrbitDot.getY() - 6, 20, 20);
+        bootOrbitDot.setPosition(nx, ny, 8, 8);
+        touchgfx::Rect fresh(nx - 6, ny - 6, 20, 20);
+        touchgfx::Application::getInstance()->invalidateArea(old);
+        touchgfx::Application::getInstance()->invalidateArea(fresh);
     }
 
     if (bootEmblemAlpha < 255U)
@@ -956,7 +1031,7 @@ void TemplateView::handleTickEvent()
         {
             bootBarWidth = 2;
         }
-        bootBarFill.setPosition(382, 536, bootBarWidth, 4);
+        bootBarFill.setPosition(270, 468, bootBarWidth, 4);
         bootBarTrack.invalidate();
         bootBarFill.invalidate();
     }
@@ -1035,6 +1110,7 @@ void TemplateView::refreshVisibility()
     }
     bootBarTrack.setVisible(bootVisible);
     bootBarFill.setVisible(bootVisible);
+    bootOrbitDot.setVisible(bootVisible);
     bootVersion.setVisible(bootVisible);
 
     /* chrome */
@@ -1149,6 +1225,12 @@ void TemplateView::refreshVisibility()
         sysInfoName[i].setVisible(sysVisible);
         sysInfoValue[i].setVisible(sysVisible);
     }
+    sysRebootBtn.setVisible(sysVisible);
+    sysRebootLabel.setVisible(sysVisible);
+    sysRebootTouch.setVisible(sysVisible);
+    sysPowerBtn.setVisible(sysVisible);
+    sysPowerLabel.setVisible(sysVisible);
+    sysPowerTouch.setVisible(sysVisible);
 
     /* params */
     paramsTitle.setVisible(paramsVisible);
@@ -1952,6 +2034,28 @@ void TemplateView::onNavPressed(const touchgfx::AbstractButton& source)
                 presenter->requestThumbPage(0U);
             }
             return;
+        }
+    }
+}
+
+void TemplateView::onSystemPressed(const touchgfx::AbstractButton& source)
+{
+    if (&source == &sysRebootTouch)
+    {
+        presenter->rebootSystem();
+    }
+    else if (&source == &sysPowerTouch)
+    {
+        if (powerConfirmTicks != 0U)
+        {
+            presenter->powerOffSystem();
+        }
+        else
+        {
+            /* Arm a ~3 s confirm window so a stray tap cannot kill a demo. */
+            powerConfirmTicks = 180U;
+            sysPowerLabel.setText("确认关机");
+            sysPowerLabel.setColors(ColorRed, ColorBg, false);
         }
     }
 }

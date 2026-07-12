@@ -1089,6 +1089,11 @@ static void AppCamera_RunAutoWhiteBalance(uint32_t r_avg8, uint32_t g_avg8, uint
  * overwritten by capture DMA. Cleared -> capture restarts transparently. */
 volatile uint32_t g_app_camera_freeze_request = 0U;
 static volatile uint8_t s_camera_frozen = 0U;
+static uint32_t s_camera_freeze_tick = 0U;
+/* Self-expiry: an interrupted debug session can leave the request stuck at 1,
+ * which parks the sensor FOREVER (looks like "the picture never refreshes").
+ * A host capture completes in <5 s; expire well above that. */
+#define APP_CAMERA_FREEZE_TIMEOUT_MS 10000U
 
 /* Called by the display swap worker right after an overlay pass. Parks the
  * pipe only when this frame actually carries the acoustic overlay
@@ -1107,7 +1112,13 @@ void AppCamera_FreezeIfRequested(uint8_t overlay_drawn)
      * in-flight frame completes normally, then the display goes quiet. */
     (void)AppCameraIMX219_SetStream(0U);
     s_camera_frozen = 1U;
+    s_camera_freeze_tick = HAL_GetTick();
   }
+}
+
+uint8_t AppCamera_IsFrozen(void)
+{
+  return (s_camera_frozen != 0U) ? 1U : 0U;
 }
 
 void AppCamera_Poll(uint32_t elapsed_ms)
@@ -1118,6 +1129,13 @@ void AppCamera_Poll(uint32_t elapsed_ms)
 
   if (g_app_camera_freeze_request != 0U)
   {
+    if ((s_camera_frozen != 0U) &&
+        ((HAL_GetTick() - s_camera_freeze_tick) > APP_CAMERA_FREEZE_TIMEOUT_MS))
+    {
+      /* Stale request (interrupted debug host): expire it so the stream
+       * recovers on the next poll instead of staying parked forever. */
+      g_app_camera_freeze_request = 0U;
+    }
     /* Freeze pending or applied (the swap worker parks the pipe): skip the
      * stall watchdog and stream-recovery paths below, they would restart
      * the pipe we are trying to park. */

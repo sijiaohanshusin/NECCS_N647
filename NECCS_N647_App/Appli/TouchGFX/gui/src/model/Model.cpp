@@ -15,6 +15,8 @@
 
 #include <string.h>
 
+#include "stm32n6xx.h" /* NVIC_SystemReset / LTDC for the power controls */
+
 #if defined(STM32N647xx)
 /* The UI reaches the application layer exclusively through this facade. */
 #include "app_ui_bridge.h"
@@ -672,7 +674,11 @@ void pollAcoustic(AppUiSnapshot& snapshot)
     }
     if ((acoustic.initialized != 0U) || (acoustic.running != 0U))
     {
-        snapshot.activeProfile = uiProfileFromAcoustic(acoustic.active_profile);
+        /* Mirror the REQUESTED profile: the active one lags by up to a few
+         * SRP frames while the runtime re-initializes, and reflecting it
+         * made the params-page selection visually snap back to the old
+         * mode right after every tap. */
+        snapshot.activeProfile = uiProfileFromAcoustic(acoustic.requested_profile);
     }
     snapshot.acousticInputSeq = acoustic.input_seq;
     snapshot.acousticOutputSeq = acoustic.output_seq;
@@ -1075,13 +1081,23 @@ volatile uint32_t g_app_ui_debug[4];
  * demo runs); the Model consumes the request and resets it to 0xFF. */
 volatile uint32_t g_app_ui_request_screen = 0xFFU;
 
+/* GDB remote control: 0xFF = no request, 0/1 = disarm/arm the acoustic
+ * trigger (mirrors the on-screen quick button for remote debugging). */
+volatile uint32_t g_app_ui_request_trigger = 0xFFU;
+
+/* Trigger "hot" gate, GDB-tunable: raw array peak (dBFS) the detection must
+ * reach. -32 suits a real demo source; raise toward -55 for remote tests
+ * where the tone reaches the array at lower level. */
+volatile int32_t g_app_ui_trigger_min_dbfs = -32;
+
 Model::Model()
     : modelListener(0),
       tickCount(0U),
       bootTicks(0U),
       triggerCooldown(0U),
       triggerArmed(false),
-      triggerPrevHot(false)
+      triggerPrevHot(false),
+      menuBlocksCamera(false)
 {
     memset(&snapshot, 0, sizeof(snapshot));
     snapshot.activeScreen = APP_UI_SCREEN_BOOT;
@@ -1175,11 +1191,37 @@ void Model::setActiveScreen(uint8_t screen)
         snapshot.activeScreen = screen;
         /* The camera LTDC layer is only shown on the image page; owning this
          * here keeps the View free of direct app-layer calls. */
-        AppCameraDisplay_SetVisible((screen == APP_UI_SCREEN_IMAGE) ? 1U : 0U);
+        AppCameraDisplay_SetVisible(
+            ((screen == APP_UI_SCREEN_IMAGE) && !menuBlocksCamera) ? 1U : 0U);
         if (modelListener != 0)
         {
             modelListener->uiSnapshotUpdated(snapshot);
         }
+    }
+}
+
+void Model::setMenuBlocksCamera(bool blocked)
+{
+    menuBlocksCamera = blocked;
+    AppCameraDisplay_SetVisible(
+        ((snapshot.activeScreen == APP_UI_SCREEN_IMAGE) && !menuBlocksCamera) ? 1U : 0U);
+}
+
+void Model::rebootSystem()
+{
+    NVIC_SystemReset();
+}
+
+void Model::powerOffSystem()
+{
+    /* Soft power-off: the board has no self-cut rail, so stop the sensor
+     * pipeline, blank the panel and park the CPU. Wake = power cycle. */
+    (void)AppCamera_Stop();
+    LTDC->GCR &= ~LTDC_GCR_LTDCEN;
+    __disable_irq();
+    for (;;)
+    {
+        __WFI();
     }
 }
 

@@ -1240,6 +1240,17 @@ static void AppCameraDisplay_ProcessSwap(uint32_t frame_addr)
 {
   uint32_t display_addr;
 
+  /* Screenshot freeze latched: the sensor was stopped mid-stream, so any
+   * further completed capture may be TRUNCATED (top rows new, rest stale).
+   * Flipping to it would show a torn frame with old overlay remnants -
+   * hold the last fully composed frame instead. Requires the REQUEST to
+   * still be active: a stale frozen flag alone must never block display
+   * (a failed unfreeze would otherwise freeze the camera permanently). */
+  if ((g_app_camera_freeze_request != 0U) && (AppCamera_IsFrozen() != 0U))
+  {
+    return;
+  }
+
   AppCameraDisplay_SnapshotLtdc();
   if ((g_app_camera_ltdc_isr2 & APP_CAMERA_DISPLAY_LTDC_ERROR_MASK) != 0U)
   {

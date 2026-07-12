@@ -71,6 +71,7 @@ private:
     void onProfilePressed(const touchgfx::AbstractButton& source);
     void onParamsPressed(const touchgfx::AbstractButton& source);
     void onMediaPressed(const touchgfx::AbstractButton& source);
+    void onSystemPressed(const touchgfx::AbstractButton& source);
     void setViewerOpen(bool open);
     void onMenuPressed(const touchgfx::AbstractButton& source);
     void onBandChanged(uint16_t loHz, uint16_t hiHz);
@@ -160,6 +161,13 @@ private:
     AppTextLabel sysInfoName[SysInfoCount];
     AppTextLabel sysInfoValue[SysInfoCount];
     AppTextLabel sysAccelLabel;
+    /* power controls: reboot is immediate, power-off needs a confirm tap */
+    AppRoundedPanel sysRebootBtn;
+    AppTextLabel sysRebootLabel;
+    touchgfx::TouchArea sysRebootTouch;
+    AppRoundedPanel sysPowerBtn;
+    AppTextLabel sysPowerLabel;
+    touchgfx::TouchArea sysPowerTouch;
 
     /* ---- params page ---- */
     AppTextLabel paramsTitle;
@@ -221,6 +229,7 @@ private:
     AppTextLabel bootItemState[BootItemCount];
     touchgfx::Box bootBarTrack;
     touchgfx::Box bootBarFill;
+    touchgfx::Box bootOrbitDot;     /* small orbiting dot = the only boot anim */
     AppTextLabel bootVersion;
 
     touchgfx::Callback<TemplateView, const touchgfx::AbstractButton&> navPressedCallback;
@@ -229,6 +238,7 @@ private:
     touchgfx::Callback<TemplateView, const touchgfx::AbstractButton&> paramsPressedCallback;
     touchgfx::Callback<TemplateView, const touchgfx::AbstractButton&> mediaPressedCallback;
     touchgfx::Callback<TemplateView, const touchgfx::AbstractButton&> menuPressedCallback;
+    touchgfx::Callback<TemplateView, const touchgfx::AbstractButton&> systemPressedCallback;
     touchgfx::Callback<TemplateView, uint16_t, uint16_t> bandChangedCallback;
 
     uint8_t activeScreen;
@@ -246,6 +256,8 @@ private:
     bool menuOpen;
     bool viewerOpen;
     uint8_t selectedSlot;
+    /* nonzero = power-off confirm window is open (ticks remaining) */
+    uint8_t powerConfirmTicks;
 };
 
 #endif // TEMPLATE_VIEW_HPP

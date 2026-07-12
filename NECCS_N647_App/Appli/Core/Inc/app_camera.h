@@ -166,7 +166,9 @@ void AppCamera_Poll(uint32_t elapsed_ms);
 /* Debug screenshot hook: parks the capture pipe when g_app_camera_freeze_request
  * is set AND this frame carries the acoustic overlay; called by the display
  * swap worker after its overlay pass. */
+extern volatile uint32_t g_app_camera_freeze_request;
 void AppCamera_FreezeIfRequested(uint8_t overlay_drawn);
+uint8_t AppCamera_IsFrozen(void);
 void AppCamera_GetStatus(AppCameraStatus_t *status);
 
 #ifdef __cplusplus

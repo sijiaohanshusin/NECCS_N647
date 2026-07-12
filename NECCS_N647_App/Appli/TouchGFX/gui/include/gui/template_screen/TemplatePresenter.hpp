@@ -60,6 +60,9 @@ public:
     void playToggleMedia();
     void requestThumbPage(uint32_t page);
     void selectMediaSlot(uint8_t slot);
+    void setMenuBlocksCamera(bool blocked);
+    void rebootSystem();
+    void powerOffSystem();
     virtual void uiSnapshotUpdated(const AppUiSnapshot& snapshot);
 
     virtual ~TemplatePresenter()
