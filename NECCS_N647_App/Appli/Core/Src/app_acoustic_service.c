@@ -31,12 +31,8 @@
  * stays dark and only sources standing out of the background light up. */
 #define APP_ACOUSTIC_SERVICE_FIELD_EMA_ATTACK   0.65f
 #define APP_ACOUSTIC_SERVICE_FIELD_EMA_DECAY    0.12f
-#define APP_ACOUSTIC_SERVICE_FIELD_FINE_GAIN    0.65f
-/* Sigma/radius are in field cells; scaled with the 96x72 field density so
- * the angular footprint of a fine bump stays the same as before. */
-/* Wider Gaussian for the refined peaks: 2.7 produced a tight saturated core
- * whose clipped level sets read as a rounded SQUARE on the panel. */
-#define APP_ACOUSTIC_SERVICE_FIELD_FINE_SIGMA   3.4f
+/* (fine bumps removed 2026-07-12: the fine patches are resampled as real
+ * measurements in FillCameraField, no synthetic gain/sigma needed) */
 /* Frequency resolution of the Wide32/48k pipeline (48000 / 256). */
 #define APP_ACOUSTIC_SERVICE_BIN_HZ             187.5f
 #define APP_ACOUSTIC_SERVICE_TEMP_MIN_C         (-20)
@@ -583,66 +579,131 @@ static void AppAcousticService_BuildLinearField(const AppAcousticImagingVisFrame
     }
   }
 
-  /* Fine points: Gaussian bumps around the refined peaks. */
+  /* Fine patches: the fine search measured the TRUE steered response on a
+   * regular 4x4 grid (5 deg pitch) around each refined peak. Bilinearly
+   * resample those measurements over each patch footprint and blend them
+   * over the coarse surface (smoothstep to 0 at the patch border). This
+   * replaces the previous synthetic Gaussian bumps: the on-screen blob now
+   * has the measured beamformer shape at 3x the coarse resolution instead
+   * of an artificial circular stamp. Zero extra SRP compute. */
   if (vis_frame->grid_count > APP_ACOUSTIC_IMAGING_COARSE_TOTAL)
   {
-    const float sigma = APP_ACOUSTIC_SERVICE_FIELD_FINE_SIGMA;
-    const float inv_two_sigma_sq = 1.0f / (2.0f * sigma * sigma);
-    const int32_t radius = 10;
-    const float fx_scale = (float)APP_ACOUSTIC_SERVICE_FIELD_W / APP_ACOUSTIC_SERVICE_CAMERA_HFOV_DEG;
-    const float fy_scale = (float)APP_ACOUSTIC_SERVICE_FIELD_H / APP_ACOUSTIC_SERVICE_CAMERA_VFOV_DEG;
+    const uint32_t per_patch = APP_ACOUSTIC_IMAGING_FINE_GRID_SIZE *
+                               APP_ACOUSTIC_IMAGING_FINE_GRID_SIZE;
+    const uint32_t patch_count =
+        (vis_frame->grid_count - APP_ACOUSTIC_IMAGING_COARSE_TOTAL) / per_patch;
 
-    for (uint32_t i = APP_ACOUSTIC_IMAGING_COARSE_TOTAL; i < vis_frame->grid_count; i++)
+    for (uint32_t patch = 0U; patch < patch_count; patch++)
     {
-      const float theta = vis_frame->theta_deg[i];
-      const float phi = vis_frame->phi_deg[i];
-      const float value = AppAcousticService_AbsF32(vis_frame->power[i]) *
-                          APP_ACOUSTIC_SERVICE_FIELD_FINE_GAIN;
-      float gx;
-      float gy;
-      int32_t cx;
-      int32_t cy;
+      const uint32_t base = APP_ACOUSTIC_IMAGING_COARSE_TOTAL + (patch * per_patch);
+      const uint32_t n = APP_ACOUSTIC_IMAGING_FINE_GRID_SIZE;
+      /* Sample layout (RunFineSearch): idx = fi * n + fj; theta varies with
+       * fi, phi with fj, both strictly increasing and regular. */
+      float axis_theta[APP_ACOUSTIC_IMAGING_FINE_GRID_SIZE];
+      float axis_phi[APP_ACOUSTIC_IMAGING_FINE_GRID_SIZE];
 
-      if ((value <= 0.0f) ||
-          (theta < -APP_ACOUSTIC_SERVICE_CAMERA_HFOV_HALF_DEG) ||
-          (theta > APP_ACOUSTIC_SERVICE_CAMERA_HFOV_HALF_DEG) ||
-          (phi < -APP_ACOUSTIC_SERVICE_CAMERA_VFOV_HALF_DEG) ||
-          (phi > APP_ACOUSTIC_SERVICE_CAMERA_VFOV_HALF_DEG))
+      for (uint32_t k = 0U; k < n; k++)
+      {
+        axis_theta[k] = vis_frame->theta_deg[base + (k * n)];
+        axis_phi[k] = vis_frame->phi_deg[base + k];
+      }
+
+      {
+      const float th_lo = axis_theta[0];
+      const float th_hi = axis_theta[n - 1U];
+      const float ph_lo = axis_phi[0];
+      const float ph_hi = axis_phi[n - 1U];
+      const float th_pitch = (th_hi - th_lo) / (float)(n - 1U);
+      const float ph_pitch = (ph_hi - ph_lo) / (float)(n - 1U);
+
+      if ((th_pitch <= 0.0f) || (ph_pitch <= 0.0f))
       {
         continue;
       }
 
-      gx = (theta + APP_ACOUSTIC_SERVICE_CAMERA_HFOV_HALF_DEG) * fx_scale - 0.5f;
-      gy = (APP_ACOUSTIC_SERVICE_CAMERA_VFOV_HALF_DEG - phi) * fy_scale - 0.5f;
-      cx = (int32_t)(gx + 0.5f);
-      cy = (int32_t)(gy + 0.5f);
+      /* Field-cell bounding box of the patch. */
+      const float fx_scale = (float)APP_ACOUSTIC_SERVICE_FIELD_W / APP_ACOUSTIC_SERVICE_CAMERA_HFOV_DEG;
+      const float fy_scale = (float)APP_ACOUSTIC_SERVICE_FIELD_H / APP_ACOUSTIC_SERVICE_CAMERA_VFOV_DEG;
+      int32_t cx0 = (int32_t)((th_lo + APP_ACOUSTIC_SERVICE_CAMERA_HFOV_HALF_DEG) * fx_scale - 0.5f);
+      int32_t cx1 = (int32_t)((th_hi + APP_ACOUSTIC_SERVICE_CAMERA_HFOV_HALF_DEG) * fx_scale + 0.5f);
+      int32_t cy0 = (int32_t)((APP_ACOUSTIC_SERVICE_CAMERA_VFOV_HALF_DEG - ph_hi) * fy_scale - 0.5f);
+      int32_t cy1 = (int32_t)((APP_ACOUSTIC_SERVICE_CAMERA_VFOV_HALF_DEG - ph_lo) * fy_scale + 0.5f);
 
-      for (int32_t dy = -radius; dy <= radius; dy++)
+      if (cx0 < 0) { cx0 = 0; }
+      if (cy0 < 0) { cy0 = 0; }
+      if (cx1 >= (int32_t)APP_ACOUSTIC_SERVICE_FIELD_W) { cx1 = (int32_t)APP_ACOUSTIC_SERVICE_FIELD_W - 1; }
+      if (cy1 >= (int32_t)APP_ACOUSTIC_SERVICE_FIELD_H) { cy1 = (int32_t)APP_ACOUSTIC_SERVICE_FIELD_H - 1; }
+
+      for (int32_t yy = cy0; yy <= cy1; yy++)
       {
-        const int32_t yy = cy + dy;
-        if ((yy < 0) || (yy >= (int32_t)APP_ACOUSTIC_SERVICE_FIELD_H))
+        const float phi = AppAcousticService_FieldRowToPhi((uint32_t)yy);
+        /* v along the phi axis of the patch, in samples. */
+        float v = (phi - ph_lo) / ph_pitch;
+        float wy;
+
+        if ((v < 0.0f) || (v > (float)(n - 1U)))
         {
           continue;
         }
-        for (int32_t dx = -radius; dx <= radius; dx++)
+        /* Border blend weight: 1 in the patch core, 0 at the border.
+         * smoothstep over the outer sample interval on each side. */
         {
-          const int32_t xx = cx + dx;
-          float ddx;
-          float ddy;
-          float dist_sq;
-          float bump;
+          const float edge = (float)(n - 1U);
+          float dband = v;
+          if ((edge - v) < dband) { dband = edge - v; }
+          wy = dband; /* in sample units; 1 interval ramp */
+          if (wy > 1.0f) { wy = 1.0f; }
+        }
 
-          if ((xx < 0) || (xx >= (int32_t)APP_ACOUSTIC_SERVICE_FIELD_W))
+        for (int32_t xx = cx0; xx <= cx1; xx++)
+        {
+          const float theta = AppAcousticService_FieldColToTheta((uint32_t)xx);
+          float u = (theta - th_lo) / th_pitch;
+          float wx;
+          float w;
+
+          if ((u < 0.0f) || (u > (float)(n - 1U)))
+          {
+            continue;
+          }
+          {
+            const float edge = (float)(n - 1U);
+            float dband = u;
+            if ((edge - u) < dband) { dband = edge - u; }
+            wx = dband;
+            if (wx > 1.0f) { wx = 1.0f; }
+          }
+
+          w = (wx < wy) ? wx : wy;
+          /* smoothstep for a soft seam */
+          w = w * w * (3.0f - (2.0f * w));
+          if (w <= 0.0f)
           {
             continue;
           }
 
-          ddx = (float)xx - gx;
-          ddy = (float)yy - gy;
-          dist_sq = (ddx * ddx) + (ddy * ddy);
-          bump = value * expf(-dist_sq * inv_two_sigma_sq);
-          s_field_work[(yy * (int32_t)APP_ACOUSTIC_SERVICE_FIELD_W) + xx] += bump;
+          {
+            const uint32_t u0 = ((uint32_t)u >= (n - 1U)) ? (n - 2U) : (uint32_t)u;
+            const uint32_t v0 = ((uint32_t)v >= (n - 1U)) ? (n - 2U) : (uint32_t)v;
+            const float du = u - (float)u0;
+            const float dv = v - (float)v0;
+            const float p00 = AppAcousticService_AbsF32(vis_frame->power[base + (u0 * n) + v0]);
+            const float p10 = AppAcousticService_AbsF32(vis_frame->power[base + ((u0 + 1U) * n) + v0]);
+            const float p01 = AppAcousticService_AbsF32(vis_frame->power[base + (u0 * n) + v0 + 1U]);
+            const float p11 = AppAcousticService_AbsF32(vis_frame->power[base + ((u0 + 1U) * n) + v0 + 1U]);
+            const float patch_value =
+                (p00 * (1.0f - du) * (1.0f - dv)) +
+                (p10 * du * (1.0f - dv)) +
+                (p01 * (1.0f - du) * dv) +
+                (p11 * du * dv);
+            float *cell = &s_field_work[(yy * (int32_t)APP_ACOUSTIC_SERVICE_FIELD_W) + xx];
+
+            /* The fine samples and the coarse surface are the same physical
+             * quantity (|steered response|); blend, don't add. */
+            *cell = (*cell * (1.0f - w)) + (patch_value * w);
+          }
         }
+      }
       }
     }
   }

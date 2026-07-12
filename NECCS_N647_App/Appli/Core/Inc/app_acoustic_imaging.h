@@ -22,7 +22,11 @@ extern "C" {
 #define APP_ACOUSTIC_IMAGING_COARSE_GRID_SIZE          9U
 #define APP_ACOUSTIC_IMAGING_COARSE_TOTAL              (APP_ACOUSTIC_IMAGING_COARSE_GRID_SIZE * APP_ACOUSTIC_IMAGING_COARSE_GRID_SIZE)
 #define APP_ACOUSTIC_IMAGING_FINE_TOP_K                3U
-#define APP_ACOUSTIC_IMAGING_FINE_GRID_SIZE            4U
+/* 5x5 at +/-10 deg -> 4 deg pitch: the fine patches carry enough real
+ * measured detail for the display path to resample them directly (the
+ * heat blob is the true steered response, not a synthetic stamp).
+ * 6x6 was 22 KB over the RAM budget (phase LUT scales with the square). */
+#define APP_ACOUSTIC_IMAGING_FINE_GRID_SIZE            5U
 #define APP_ACOUSTIC_IMAGING_FINE_TOTAL                (APP_ACOUSTIC_IMAGING_FINE_TOP_K * APP_ACOUSTIC_IMAGING_FINE_GRID_SIZE * APP_ACOUSTIC_IMAGING_FINE_GRID_SIZE)
 #define APP_ACOUSTIC_IMAGING_GRID_TOTAL_MAX            (APP_ACOUSTIC_IMAGING_COARSE_TOTAL + APP_ACOUSTIC_IMAGING_FINE_TOTAL)
 #define APP_ACOUSTIC_IMAGING_WIDE32_FAST_PAIRS         96U
