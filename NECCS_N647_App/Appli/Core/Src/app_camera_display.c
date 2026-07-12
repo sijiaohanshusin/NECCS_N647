@@ -847,13 +847,18 @@ static void AppCameraDisplay_DrawAcousticOverlay(uint32_t frame_addr)
     }
   }
 
-  /* Write the touched band back for the LTDC scan-out. */
+  /* Write the touched band back for the LTDC scan-out. Clean+INVALIDATE,
+   * not clean: any camera-buffer line left in D-cache is dirty overlay
+   * pixels of THIS frame, and its lazy eviction hours of frames later
+   * writes stale crosshair/heat fragments over a freshly DMA-written frame
+   * (board 2026-07-12: dashed 32-byte ghost streaks across the panel).
+   * Dropping the lines after write-back leaves nothing to evict. */
   if (s_overlay_dirty_y1 > s_overlay_dirty_y0)
   {
-    AppCameraDisplay_CleanDCache(frame_addr +
-                                   ((uint32_t)s_overlay_dirty_y0 * APP_CAMERA_DISPLAY_CAMERA_LINE_BYTES),
-                                 (uint32_t)(s_overlay_dirty_y1 - s_overlay_dirty_y0) *
-                                   APP_CAMERA_DISPLAY_CAMERA_LINE_BYTES);
+    AppCameraDisplay_CleanInvalidateDCache(frame_addr +
+                                             ((uint32_t)s_overlay_dirty_y0 * APP_CAMERA_DISPLAY_CAMERA_LINE_BYTES),
+                                           (uint32_t)(s_overlay_dirty_y1 - s_overlay_dirty_y0) *
+                                             APP_CAMERA_DISPLAY_CAMERA_LINE_BYTES);
   }
 
   g_app_camera_overlay_draw_cycles = DWT->CYCCNT - cycles_start;
@@ -1339,8 +1344,13 @@ uint8_t AppCameraDisplay_CopyDisplayedFrame(uint16_t *dst)
   }
 
   /* The frame was produced by DCMIPP DMA plus the overlay worker; drop any
-   * stale cache lines before the CPU reads it. */
-  AppCameraDisplay_InvalidateDCache(frame_addr, frame_bytes);
+   * stale cache lines before the CPU reads it. Clean+invalidate, NOT plain
+   * invalidate: screenshots and the 5 fps recorder call this while the swap
+   * worker may hold in-flight dirty blend lines for this same buffer - a
+   * plain invalidate discards those mid-compose writes and leaves dashed
+   * 32-byte overlay fragments interleaved into the frame (board-captured
+   * 2026-07-12). */
+  AppCameraDisplay_CleanInvalidateDCache(frame_addr, frame_bytes);
   memcpy(dst, (const void *)frame_addr, frame_bytes);
   return 1U;
 }

@@ -99,16 +99,21 @@ typedef struct
   AppAcousticFieldParams_t params;
 } AppAcousticScenePreset_t;
 
+/* bg_gain calibration (board 2026-07-12): the real SRP surface peaks at
+ * only ~1.2x its mean for genuine mid-strength sources, so any bg_gain
+ * >= ~1.25 subtracts the whole field to zero and the heat blob never
+ * renders (it only flashed up on very strong peaks - the reported
+ * "flicker"). Keep the background floor just under the working range. */
 static const AppAcousticScenePreset_t s_scene_presets[APP_ACOUSTIC_SCENE_COUNT] =
 {
   /* GENERAL: policy-default bins, balanced rendering (verified baseline). */
-  { 0U, 0U,   { -18.0f, 1.30f, 0.10f, 1.45f, 2U } },
+  { 0U, 0U,   { -18.0f, 1.30f, 0.10f, 1.08f, 2U } },
   /* LEAK: high band, crisp and responsive. */
-  { 27U, 42U, { -12.0f, 1.25f, 0.06f, 1.30f, 1U } },
+  { 27U, 42U, { -12.0f, 1.25f, 0.06f, 1.05f, 1U } },
   /* BEARING: mid band, extra smoothing for steady hot-spots. */
-  { 11U, 32U, { -18.0f, 1.15f, 0.10f, 1.50f, 3U } },
+  { 11U, 32U, { -18.0f, 1.15f, 0.10f, 1.10f, 3U } },
   /* ELECTRICAL: upper band, high contrast. */
-  { 16U, 42U, { -14.0f, 1.35f, 0.08f, 1.40f, 2U } },
+  { 16U, 42U, { -14.0f, 1.35f, 0.08f, 1.05f, 2U } },
 };
 
 static volatile AppAcousticScene_t s_requested_scene = APP_ACOUSTIC_SCENE_GENERAL;
@@ -123,7 +128,7 @@ static uint16_t s_active_band_lo_bin;
 static uint16_t s_active_band_hi_bin;
 /* -18 dB window + gamma 1.30: wider window keeps a visible gradient inside
  * the blob core instead of one flat saturated patch (board-tuned 2026-07-12). */
-static AppAcousticFieldParams_t s_field_params = { -18.0f, 1.30f, 0.10f, 1.45f, 2U };
+static AppAcousticFieldParams_t s_field_params = { -18.0f, 1.30f, 0.10f, 1.08f, 2U };
 /* Copy used by the processing path for the current frame. */
 static AppAcousticFieldParams_t s_field_active;
 static uint8_t s_have_input_seq;

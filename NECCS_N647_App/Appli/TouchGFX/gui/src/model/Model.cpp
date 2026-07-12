@@ -666,15 +666,16 @@ void pollAcoustic(AppUiSnapshot& snapshot)
     static uint8_t jumpPending = 0U;
     static int16_t pendTheta = 0;
     static int16_t pendPhi = 0;
-    /* Audible gate: SRP prominence alone lets quiet-room noise peaks (q=3
-     * right at the gate) arm the 2 s hold with a random angle. Require the
-     * array to actually hear something (-70 dBFS; quiet room sits at -84).
-     * Core16@192k idles at ~-30 dBFS decimation noise, so the dBFS gate is
-     * ineffective there - the two-frame agreement below carries the load.
-     * pcmdRawPeakDbfs is one tick stale (pollPcmd runs later), fine at 60 Hz. */
+    /* Mic health only. A -70 dBFS "audible" gate used to sit here as well,
+     * but audible headphone-level sources measure -72..-78 dBFS on this
+     * array (board 2026-07-12) - the gate silently discarded most genuine
+     * detections, so the display only refreshed in rare loud moments and
+     * the 2 s hold cycling read as "position updates every 2 seconds".
+     * Phantom-lock rejection is carried entirely by the SRP quality gate
+     * plus the two-frame angle agreement below (quiet-room noise peaks land
+     * at random angles frame to frame and never agree twice). */
     const bool arrayAudible =
-        ((snapshot.pcmdFlags & APP_UI_PCMD_FLAG_RAW_VALID) != 0U) &&
-        ((snapshot.arrayMode != 0U) || (snapshot.pcmdRawPeakDbfs > -70));
+        ((snapshot.pcmdFlags & APP_UI_PCMD_FLAG_RAW_VALID) != 0U);
     if (arrayAudible && (acoustic.valid != 0U) && (acoustic.output_seq != lastValidSeq))
     {
         lastValidSeq = acoustic.output_seq;
@@ -686,8 +687,18 @@ void pollAcoustic(AppUiSnapshot& snapshot)
         bool accept = true;
         if ((sourceHoldTicks != 0U) && !nearPrev)
         {
-            accept = (jumpPending != 0U); /* second far frame confirms */
+            /* Jump while locked: the second far frame must agree with the
+             * FIRST far frame (both near the new position), not merely be
+             * far again - two unrelated sidelobes must not move the lock. */
+            const int16_t dpTheta = static_cast<int16_t>(acoustic.theta_deg - pendTheta);
+            const int16_t dpPhi = static_cast<int16_t>(acoustic.phi_deg - pendPhi);
+            const bool nearPend = (dpTheta >= -20) && (dpTheta <= 20) &&
+                                  (dpPhi >= -20) && (dpPhi <= 20);
+
+            accept = ((jumpPending != 0U) && nearPend);
             jumpPending = accept ? 0U : 1U;
+            pendTheta = acoustic.theta_deg;
+            pendPhi = acoustic.phi_deg;
         }
         else if (sourceHoldTicks == 0U)
         {
@@ -800,15 +811,16 @@ void pollAcoustic(AppUiSnapshot& snapshot)
         const float halfH = APP_ACOUSTIC_SERVICE_CAMERA_HFOV_DEG * 0.5f;
         const float halfV = APP_ACOUSTIC_SERVICE_CAMERA_VFOV_DEG * 0.5f;
 
-        if ((theta < -halfH) || (theta > halfH) || (phi < -halfV) || (phi > halfV))
-        {
-            continue;
-        }
-
+        /* Sources outside the camera FOV used to be dropped entirely, so a
+         * clearly audible source just off-frame showed NOTHING (the mic
+         * array hears +/-60 deg, the camera sees far less - board-measured
+         * phi +30 for a source at the top edge of the frame). Clamp to the
+         * frame border instead: an edge-pinned crosshair with the dB tag
+         * still tells the operator where to swing the camera. */
         const float px = ((theta + halfH) * 640.0f) / APP_ACOUSTIC_SERVICE_CAMERA_HFOV_DEG;
         const float py = ((halfV - phi) * 480.0f) / APP_ACOUSTIC_SERVICE_CAMERA_VFOV_DEG;
-        markers[markerCount].x = static_cast<uint16_t>((px < 0.0f) ? 0.0f : ((px > 639.0f) ? 639.0f : px));
-        markers[markerCount].y = static_cast<uint16_t>((py < 0.0f) ? 0.0f : ((py > 479.0f) ? 479.0f : py));
+        markers[markerCount].x = static_cast<uint16_t>((px < 10.0f) ? 10.0f : ((px > 629.0f) ? 629.0f : px));
+        markers[markerCount].y = static_cast<uint16_t>((py < 10.0f) ? 10.0f : ((py > 469.0f) ? 469.0f : py));
         markers[markerCount].strength = snapshot.candStrength[i];
         /* The primary cross carries the array peak level (dBFS estimate);
          * pcmdRawPeakDbfs is one tick stale, which is fine at 60 Hz. */

@@ -332,7 +332,12 @@ static AppAcousticImagingPair_t App_AcousticImaging_MakePair(const AppMicArrayMi
   pair.mic_a = index_a;
   pair.mic_b = index_b;
   pair.dx_m = ((float)mic_a->x_0p1mm - (float)mic_b->x_0p1mm) * 0.0001f;
-  pair.dy_m = ((float)mic_a->y_0p1mm - (float)mic_b->y_0p1mm) * 0.0001f;
+  /* dy sign flipped: the mic table's +y is the OPPOSITE of the camera's
+   * "up" as mounted (board-verified 2026-07-12: source visibly at the top
+   * of the camera frame localized at phi -15..-30 deg, i.e. below the
+   * camera FOV, so the heat blob never rendered). Theta was already
+   * consistent (right-channel probe -> positive theta -> right of frame). */
+  pair.dy_m = ((float)mic_b->y_0p1mm - (float)mic_a->y_0p1mm) * 0.0001f;
   pair.baseline_sq_m2 = (pair.dx_m * pair.dx_m) + (pair.dy_m * pair.dy_m);
   pair.baseline_m = App_AcousticImaging_SqrtF32(pair.baseline_sq_m2);
   pair.weight = 1.0f;
@@ -501,6 +506,11 @@ AppAcousticImagingStatus_t App_AcousticImaging_GetDefaultConfig(AppMicArrayMode_
   {
     config->algorithm = APP_ACOUSTIC_IMAGING_ALGO_CORE16_HF_NEARFIELD;
   }
+  /* Long baselines: the array spans only 94 mm, so long pairs are the only
+   * source of angular resolution (A/B on board 2026-07-12: short-baseline
+   * selection widened the SRP main lobe to the whole +/-60 grid and killed
+   * detection outright; aliasing lobes of the long pairs average out across
+   * the 160 diverse pair orientations). */
   config->pair_select = APP_ACOUSTIC_IMAGING_PAIR_SELECT_LONG_BASELINE;
   config->sample_rate_hz = App_MicArray_GetModeSampleRateHz(mode);
   config->channel_count = App_MicArray_GetModeMicCount(mode);
@@ -520,8 +530,13 @@ AppAcousticImagingStatus_t App_AcousticImaging_GetDefaultConfig(AppMicArrayMode_
   config->smoothing_alpha = APP_ACOUSTIC_IMAGING_DEFAULT_SMOOTHING_ALPHA;
   /* Core16@192k: the 32xFS decimation noise floor sits ~-30 dBFS, which
    * the Wide32 gate reads as a detection in a quiet room (board-measured
-   * valid=1/q=11 on silence, 2026-07-12). Demand a stronger peak. */
-  config->quality_min = (mode == APP_MIC_ARRAY_MODE_CORE16_192K) ? 0.12f : 0.03f;
+   * valid=1/q=11 on silence, 2026-07-12). Demand a stronger peak.
+   * Wide32 0.02: with the B24 bin set a quiet room measures q=0..1 and a
+   * genuine headphone-level source q=2..5 hovering around the old 0.03
+   * gate - half its frames were dropped for no reason (angles of q=2
+   * frames were just as consistent). The UI two-frame agreement absorbs
+   * the residual phantom risk. */
+  config->quality_min = (mode == APP_MIC_ARRAY_MODE_CORE16_192K) ? 0.12f : 0.02f;
   config->energy_min = 0.02f;
   config->adaptive_profile_enable = 1U;
 
@@ -652,7 +667,12 @@ AppAcousticImagingStatus_t App_AcousticImaging_GetDefaultRunModeArrayConfig(AppA
   case APP_ACOUSTIC_IMAGING_MODE_STANDARD:
   default:
     profile = APP_ACOUSTIC_IMAGING_PROFILE_BALANCED;
-    bin_policy = APP_ACOUSTIC_IMAGING_BIN_POLICY_STANDARD_B16;
+    /* B24 over B16: the extra low bins (3..5, unaliased on every baseline
+     * of the 94 mm array) anchor the SRP peak. A/B on board 2026-07-12:
+     * B16 angles jumped +/-30 deg frame to frame on a fixed source, B24/B40
+     * tracked within +/-4 deg; cost 160x24 vs 160x16 pair-bins (~+50% SRP,
+     * still well inside the 50 ms budget). */
+    bin_policy = APP_ACOUSTIC_IMAGING_BIN_POLICY_STANDARD_B24;
     break;
   }
 
