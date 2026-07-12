@@ -619,14 +619,17 @@ AppAcousticImagingStatus_t App_AcousticImaging_GetDefaultAlgorithmConfig(AppAcou
   return status;
 }
 
-AppAcousticImagingStatus_t App_AcousticImaging_GetDefaultRunModeConfig(AppAcousticImagingRunMode_t mode,
-                                                                       AppAcousticImagingConfig_t *config)
+AppAcousticImagingStatus_t App_AcousticImaging_GetDefaultRunModeArrayConfig(AppAcousticImagingRunMode_t mode,
+                                                                            AppMicArrayMode_t mic_mode,
+                                                                            AppAcousticImagingConfig_t *config)
 {
   AppAcousticImagingStatus_t status;
   AppAcousticImagingProfile_t profile;
   AppAcousticImagingBinPolicy_t bin_policy;
 
-  if ((config == NULL) || (App_AcousticImaging_IsValidRunMode(mode) == 0U))
+  if ((config == NULL) ||
+      (App_AcousticImaging_IsValidRunMode(mode) == 0U) ||
+      (App_MicArray_ValidateMode(mic_mode) == 0U))
   {
     return APP_ACOUSTIC_IMAGING_INVALID_ARGUMENT;
   }
@@ -650,15 +653,15 @@ AppAcousticImagingStatus_t App_AcousticImaging_GetDefaultRunModeConfig(AppAcoust
     break;
   }
 
-  status = App_AcousticImaging_GetDefaultConfig(APP_MIC_ARRAY_MODE_WIDE32_48K,
-                                                profile,
-                                                config);
+  status = App_AcousticImaging_GetDefaultConfig(mic_mode, profile, config);
   if (status != APP_ACOUSTIC_IMAGING_OK)
   {
     return status;
   }
 
   config->run_mode = mode;
+  /* SetBinPolicy maps non-Wide32 array modes onto their continuous default
+   * band internally; the Wide32 sparse tables stay as-is. */
   status = App_AcousticImaging_SetBinPolicy(config, bin_policy);
   if (status != APP_ACOUSTIC_IMAGING_OK)
   {
@@ -667,6 +670,14 @@ AppAcousticImagingStatus_t App_AcousticImaging_GetDefaultRunModeConfig(AppAcoust
 
   config->run_mode = mode;
   return App_AcousticImaging_ValidateConfig(config);
+}
+
+AppAcousticImagingStatus_t App_AcousticImaging_GetDefaultRunModeConfig(AppAcousticImagingRunMode_t mode,
+                                                                       AppAcousticImagingConfig_t *config)
+{
+  return App_AcousticImaging_GetDefaultRunModeArrayConfig(mode,
+                                                          APP_MIC_ARRAY_MODE_WIDE32_48K,
+                                                          config);
 }
 
 static uint8_t App_AcousticImaging_ConfigEnumsAndRangesOk(const AppAcousticImagingConfig_t *config)

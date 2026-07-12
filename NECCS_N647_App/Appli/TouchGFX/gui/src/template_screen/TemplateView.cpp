@@ -741,6 +741,25 @@ void TemplateView::setupParamsPage()
             add(renderStepTouch[idx]);
         }
     }
+
+    /* Array mode row: right column, aligned with the left column's last
+     * row (tap anywhere in the row to switch Wide32 <-> Core16). */
+    {
+        const int16_t y = static_cast<int16_t>(200 + (4U * 72));
+        arrayModePanel.setPosition(rightX, y, colW, 60);
+        arrayModePanel.setStyle(ColorPanel, 12U);
+        arrayModePanel.setBorder(ColorLine, true);
+        add(arrayModePanel);
+
+        setupLabel(arrayModeName, static_cast<int16_t>(rightX + 18), static_cast<int16_t>(y + 20), 130, 22, 1, "阵列模式", ColorMuted);
+        setupLabel(arrayModeValue, static_cast<int16_t>(rightX + 152), static_cast<int16_t>(y + 18), 258, 24, 2, "Wide32 · 48k", ColorText, AppTextLabel::ALIGN_RIGHT);
+        add(arrayModeName);
+        add(arrayModeValue);
+
+        arrayModeTouch.setPosition(rightX, y, colW, 60);
+        arrayModeTouch.setAction(paramsPressedCallback);
+        add(arrayModeTouch);
+    }
 }
 
 void TemplateView::setupMediaPage()
@@ -1261,6 +1280,10 @@ void TemplateView::refreshVisibility()
         tempStepTouch[i].setVisible(paramsVisible);
     }
     paramsRenderCaption.setVisible(paramsVisible);
+    arrayModePanel.setVisible(paramsVisible);
+    arrayModeName.setVisible(paramsVisible);
+    arrayModeValue.setVisible(paramsVisible);
+    arrayModeTouch.setVisible(paramsVisible);
     for (uint32_t i = 0U; i < RenderRowCount; ++i)
     {
         renderRowPanel[i].setVisible(paramsVisible);
@@ -1548,6 +1571,7 @@ void TemplateView::refreshImagePage(const AppUiSnapshot& snapshot)
     }
 
     /* spectrum panel + band readout in the left column */
+    spectrumPanel.setBinHz((snapshot.arrayMode != 0U) ? 375.0f : 187.5f);
     spectrumPanel.setData(snapshot.spectrum,
                           snapshot.acousticBandLoHz,
                           snapshot.acousticBandHiHz,
@@ -1676,6 +1700,8 @@ void TemplateView::refreshImagePage(const AppUiSnapshot& snapshot)
     (void)snprintf(text, sizeof(text), "%s · %u对",
                    profileName(activeProfile), snapshot.acousticPairCount);
     railModeValue.setText(text);
+    railModeTitle.setText((snapshot.arrayMode != 0U) ? "Core16 · 192k"
+                                                     : "Wide32 · 48k");
 
     /* quick buttons: record + trigger reflect their armed/active state */
     const bool recording = (snapshot.mediaFlags & APP_UI_MEDIA_FLAG_RECORDING) != 0U;
@@ -1868,6 +1894,17 @@ void TemplateView::refreshParamsPage(const AppUiSnapshot& snapshot)
 
     paramRowValue[4].setColors((snapshot.trailEnabled != 0U) ? ColorBlue : ColorText, ColorBg, false);
     paramRowValue[4].setText((snapshot.trailEnabled != 0U) ? "开" : "关闭");
+
+    if (snapshot.arraySwitching != 0U)
+    {
+        arrayModeValue.setColors(ColorAmber, ColorBg, false);
+        arrayModeValue.setText("启动中");
+    }
+    else
+    {
+        arrayModeValue.setColors((snapshot.arrayMode != 0U) ? ColorBlue : ColorText, ColorBg, false);
+        arrayModeValue.setText((snapshot.arrayMode != 0U) ? "Core16 · 192k" : "Wide32 · 48k");
+    }
 
     /* render parameter steppers */
     (void)snprintf(text, sizeof(text), "%d dB", snapshot.fieldDbFloor);
@@ -2122,7 +2159,11 @@ void TemplateView::onProfilePressed(const touchgfx::AbstractButton& source)
 
 void TemplateView::onParamsPressed(const touchgfx::AbstractButton& source)
 {
-    if (&source == &paramRowTouch[0])
+    if (&source == &arrayModeTouch)
+    {
+        presenter->toggleArrayMode();
+    }
+    else if (&source == &paramRowTouch[0])
     {
         presenter->cycleScene();
     }

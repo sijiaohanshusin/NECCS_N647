@@ -507,7 +507,8 @@ AppSpectrumPanel::AppSpectrumPanel()
       bandLoHz(563U),
       bandHiHz(7875U),
       peakBin(0U),
-      dragging(0U)
+      dragging(0U),
+      binHz(BinHz)
 {
     (void)memset(bars, 0, sizeof(bars));
     setTouchable(true);
@@ -549,6 +550,15 @@ void AppSpectrumPanel::setBandChangedCallback(touchgfx::GenericCallback<uint16_t
     bandChanged = &callback;
 }
 
+void AppSpectrumPanel::setBinHz(float hz)
+{
+    if ((hz > 0.0f) && (binHz != hz))
+    {
+        binHz = hz;
+        invalidate();
+    }
+}
+
 int16_t AppSpectrumPanel::binToX(uint32_t bin) const
 {
     /* Bars span the full width; bin is 1-based (bin i drawn at slot i-1). */
@@ -584,8 +594,8 @@ void AppSpectrumPanel::draw(const touchgfx::Rect& area) const
 
     const int16_t w = getWidth();
     const int16_t h = getHeight();
-    const uint32_t loBin = (uint32_t)(((float)bandLoHz / BinHz) + 0.5f);
-    const uint32_t hiBin = (uint32_t)(((float)bandHiHz / BinHz) + 0.5f);
+    const uint32_t loBin = (uint32_t)(((float)bandLoHz / binHz) + 0.5f);
+    const uint32_t hiBin = (uint32_t)(((float)bandHiHz / binHz) + 0.5f);
     const int16_t loX = binToX(loBin);
     const int16_t hiX = binToX(hiBin + 1U);
 
@@ -638,8 +648,8 @@ touchgfx::Rect AppSpectrumPanel::getSolidRect() const
 
 void AppSpectrumPanel::handleClickEvent(const touchgfx::ClickEvent& event)
 {
-    const uint32_t loBin = (uint32_t)(((float)bandLoHz / BinHz) + 0.5f);
-    const uint32_t hiBin = (uint32_t)(((float)bandHiHz / BinHz) + 0.5f);
+    const uint32_t loBin = (uint32_t)(((float)bandLoHz / binHz) + 0.5f);
+    const uint32_t hiBin = (uint32_t)(((float)bandHiHz / binHz) + 0.5f);
 
     if (event.getType() == touchgfx::ClickEvent::PRESSED)
     {
@@ -680,8 +690,8 @@ void AppSpectrumPanel::handleDragEvent(const touchgfx::DragEvent& event)
     }
 
     const uint32_t bin = xToBin(event.getNewX());
-    uint32_t loBin = (uint32_t)(((float)bandLoHz / BinHz) + 0.5f);
-    uint32_t hiBin = (uint32_t)(((float)bandHiHz / BinHz) + 0.5f);
+    uint32_t loBin = (uint32_t)(((float)bandLoHz / binHz) + 0.5f);
+    uint32_t hiBin = (uint32_t)(((float)bandHiHz / binHz) + 0.5f);
 
     if (dragging == 1U)
     {
@@ -694,7 +704,7 @@ void AppSpectrumPanel::handleDragEvent(const touchgfx::DragEvent& event)
         {
             loBin = hiBin - 3U;
         }
-        bandLoHz = static_cast<uint16_t>((float)loBin * BinHz);
+        bandLoHz = static_cast<uint16_t>((float)loBin * binHz);
     }
     else
     {
@@ -707,7 +717,7 @@ void AppSpectrumPanel::handleDragEvent(const touchgfx::DragEvent& event)
         {
             hiBin = loBin + 3U;
         }
-        bandHiHz = static_cast<uint16_t>((float)hiBin * BinHz);
+        bandHiHz = static_cast<uint16_t>((float)hiBin * binHz);
     }
 
     invalidate();

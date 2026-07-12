@@ -46,6 +46,7 @@ public:
     void selectScreen(uint8_t screen);
     void selectProfile(uint8_t profile);
     void cycleScene();
+    void toggleArrayMode();
     void adjustTemperature(int8_t deltaC);
     void cycleHeatPalette();
     void setBandHz(uint16_t loHz, uint16_t hiHz);

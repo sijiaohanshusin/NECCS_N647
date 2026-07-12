@@ -8,7 +8,6 @@
 #include "sys.h"
 
 #define SYS_AUDIO_PLL2_FREQ_HZ  245760000UL
-#define SYS_AUDIO_SAI1_FREQ_HZ  12288000UL
 
 /**
  * @brief   配置系统时钟
@@ -75,47 +74,64 @@ void sys_clock_config_debug(void)
 
 /**
  * @brief   Configure the audio clock tree used by SAI1.
+ * @param   sai1_kernel_hz  Target SAI1 kernel clock (must divide the fixed
+ *                          245.76 MHz PLL2 exactly, e.g. 12288000/24576000).
  * @retval  1: clock is ready, 0: clock configuration failed
  */
-uint8_t sys_audio_clock_config(void)
+uint8_t sys_audio_clock_config(uint32_t sai1_kernel_hz)
 {
     RCC_OscInitTypeDef rcc_osc_init_struct = {0};
     RCC_PeriphCLKInitTypeDef periph_clk_init_struct = {0};
+    uint32_t divider;
+
+    if ((sai1_kernel_hz == 0U) ||
+        ((SYS_AUDIO_PLL2_FREQ_HZ % sai1_kernel_hz) != 0U))
+    {
+        return 0U;
+    }
+    divider = SYS_AUDIO_PLL2_FREQ_HZ / sai1_kernel_hz;
+    if ((divider == 0U) || (divider > 256U))
+    {
+        return 0U;
+    }
 
     if ((HAL_RCCEx_GetPLL2CLKFreq() == SYS_AUDIO_PLL2_FREQ_HZ) &&
-        (HAL_RCCEx_GetPeriphCLKFreq(RCC_PERIPHCLK_SAI1) == SYS_AUDIO_SAI1_FREQ_HZ))
+        (HAL_RCCEx_GetPeriphCLKFreq(RCC_PERIPHCLK_SAI1) == sai1_kernel_hz))
     {
         return 1U;
     }
 
-    rcc_osc_init_struct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
-    rcc_osc_init_struct.HSIState = RCC_HSI_ON;
-    rcc_osc_init_struct.HSIDiv = RCC_HSI_DIV1;
-    rcc_osc_init_struct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
-    rcc_osc_init_struct.PLL1.PLLState = RCC_PLL_NONE;
-    rcc_osc_init_struct.PLL2.PLLState = RCC_PLL_ON;
-    rcc_osc_init_struct.PLL2.PLLSource = RCC_PLLSOURCE_HSI;
-    rcc_osc_init_struct.PLL2.PLLM = 5;
-    rcc_osc_init_struct.PLL2.PLLN = 96;
-    rcc_osc_init_struct.PLL2.PLLFractional = 0;
-    rcc_osc_init_struct.PLL2.PLLP1 = 5;
-    rcc_osc_init_struct.PLL2.PLLP2 = 1;
-    rcc_osc_init_struct.PLL3.PLLState = RCC_PLL_NONE;
-    rcc_osc_init_struct.PLL4.PLLState = RCC_PLL_NONE;
-    if (HAL_RCC_OscConfig(&rcc_osc_init_struct) != HAL_OK)
+    if (HAL_RCCEx_GetPLL2CLKFreq() != SYS_AUDIO_PLL2_FREQ_HZ)
     {
-        return 0U;
+        rcc_osc_init_struct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
+        rcc_osc_init_struct.HSIState = RCC_HSI_ON;
+        rcc_osc_init_struct.HSIDiv = RCC_HSI_DIV1;
+        rcc_osc_init_struct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
+        rcc_osc_init_struct.PLL1.PLLState = RCC_PLL_NONE;
+        rcc_osc_init_struct.PLL2.PLLState = RCC_PLL_ON;
+        rcc_osc_init_struct.PLL2.PLLSource = RCC_PLLSOURCE_HSI;
+        rcc_osc_init_struct.PLL2.PLLM = 5;
+        rcc_osc_init_struct.PLL2.PLLN = 96;
+        rcc_osc_init_struct.PLL2.PLLFractional = 0;
+        rcc_osc_init_struct.PLL2.PLLP1 = 5;
+        rcc_osc_init_struct.PLL2.PLLP2 = 1;
+        rcc_osc_init_struct.PLL3.PLLState = RCC_PLL_NONE;
+        rcc_osc_init_struct.PLL4.PLLState = RCC_PLL_NONE;
+        if (HAL_RCC_OscConfig(&rcc_osc_init_struct) != HAL_OK)
+        {
+            return 0U;
+        }
     }
 
     periph_clk_init_struct.PeriphClockSelection = RCC_PERIPHCLK_SAI1;
     periph_clk_init_struct.Sai1ClockSelection = RCC_SAI1CLKSOURCE_IC7;
     periph_clk_init_struct.ICSelection[RCC_IC7].ClockSelection = RCC_ICCLKSOURCE_PLL2;
-    periph_clk_init_struct.ICSelection[RCC_IC7].ClockDivider = 20;
+    periph_clk_init_struct.ICSelection[RCC_IC7].ClockDivider = divider;
     if (HAL_RCCEx_PeriphCLKConfig(&periph_clk_init_struct) != HAL_OK)
     {
         return 0U;
     }
 
     return ((HAL_RCCEx_GetPLL2CLKFreq() == SYS_AUDIO_PLL2_FREQ_HZ) &&
-            (HAL_RCCEx_GetPeriphCLKFreq(RCC_PERIPHCLK_SAI1) == SYS_AUDIO_SAI1_FREQ_HZ)) ? 1U : 0U;
+            (HAL_RCCEx_GetPeriphCLKFreq(RCC_PERIPHCLK_SAI1) == sai1_kernel_hz)) ? 1U : 0U;
 }

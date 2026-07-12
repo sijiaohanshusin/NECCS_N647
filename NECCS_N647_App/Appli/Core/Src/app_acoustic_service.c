@@ -33,8 +33,9 @@
 #define APP_ACOUSTIC_SERVICE_FIELD_EMA_DECAY    0.12f
 /* (fine bumps removed 2026-07-12: the fine patches are resampled as real
  * measurements in FillCameraField, no synthetic gain/sigma needed) */
-/* Frequency resolution of the Wide32/48k pipeline (48000 / 256). */
+/* Frequency resolution: Wide32 48000/256, Core16 192000/512. */
 #define APP_ACOUSTIC_SERVICE_BIN_HZ             187.5f
+#define APP_ACOUSTIC_SERVICE_BIN_HZ_CORE16      375.0f
 #define APP_ACOUSTIC_SERVICE_TEMP_MIN_C         (-20)
 #define APP_ACOUSTIC_SERVICE_TEMP_MAX_C         60
 
@@ -76,6 +77,17 @@ static volatile AppAcousticImagingBinPolicy_t s_requested_bin_policy =
 static volatile uint8_t s_profile_change_pending;
 static AppAcousticImagingRunMode_t s_active_mode = APP_ACOUSTIC_IMAGING_MODE_STANDARD;
 static AppAcousticImagingProfile_t s_active_profile = APP_ACOUSTIC_IMAGING_PROFILE_BALANCED;
+/* Array mode (Wide32@48k / Core16@192k). A change orchestrates the capture
+ * pipeline switch (clock + SAI + PCMD reconfig) before the SRP re-init. */
+static volatile AppMicArrayMode_t s_requested_array_mode = APP_MIC_ARRAY_MODE_WIDE32_48K;
+static AppMicArrayMode_t s_active_array_mode = APP_MIC_ARRAY_MODE_WIDE32_48K;
+
+static float AppAcousticService_BinHz(void)
+{
+  return (s_active_array_mode == APP_MIC_ARRAY_MODE_CORE16_192K)
+         ? APP_ACOUSTIC_SERVICE_BIN_HZ_CORE16
+         : APP_ACOUSTIC_SERVICE_BIN_HZ;
+}
 
 /* Scene / temperature / field-parameter runtime state. Scene band presets
  * are clamped to the Wide32/48k observable range (bins 3..42). bin_lo==0
@@ -305,7 +317,9 @@ static AppAcousticImagingStatus_t AppAcousticService_InitRuntime(AppAcousticImag
   const AppAcousticScenePreset_t *preset = &s_scene_presets[scene];
   const int8_t temperature_c = s_requested_temperature_c;
 
-  status = App_AcousticImaging_GetDefaultRunModeConfig(mode, &config);
+  status = App_AcousticImaging_GetDefaultRunModeArrayConfig(mode,
+                                                            s_requested_array_mode,
+                                                            &config);
   if (status != APP_ACOUSTIC_IMAGING_OK)
   {
     memset(&s_srp_ctx, 0, sizeof(s_srp_ctx));
@@ -336,8 +350,11 @@ static AppAcousticImagingStatus_t AppAcousticService_InitRuntime(AppAcousticImag
       band_lo = custom_lo;
       band_hi = custom_hi;
     }
-    else if (preset->bin_lo != 0U)
+    else if ((preset->bin_lo != 0U) &&
+             (s_requested_array_mode == APP_MIC_ARRAY_MODE_WIDE32_48K))
     {
+      /* Scene band presets are Wide32/48k bin semantics; Core16 falls back
+       * to its full ultrasonic default band (11..107). */
       band_lo = preset->bin_lo;
       band_hi = preset->bin_hi;
     }
@@ -366,6 +383,7 @@ static AppAcousticImagingStatus_t AppAcousticService_InitRuntime(AppAcousticImag
   if (status == APP_ACOUSTIC_IMAGING_OK)
   {
     s_active_mode = mode;
+    s_active_array_mode = s_requested_array_mode;
     s_active_profile = config.profile;
     s_requested_profile = config.profile;
     s_active_scene = scene;
@@ -394,8 +412,9 @@ static uint8_t AppAcousticService_CopyFrame(AppAudioFrame_t *dst, const AppAudio
       (src == NULL) ||
       (src->format != APP_AUDIO_FRAME_FORMAT_PLANAR_F32) ||
       (src->planar_f32 == NULL) ||
-      (src->channel_count != APP_MIC_ARRAY_PHYSICAL_MIC_COUNT) ||
-      (src->frame_len != APP_AUDIO_FRAME_DEFAULT_WIDE32_FRAME_LEN))
+      (src->channel_count == 0U) ||
+      (src->channel_count > APP_AUDIO_FRAME_MAX_CHANNELS) ||
+      (src->frame_len == 0U))
   {
     return 0U;
   }
@@ -1189,13 +1208,16 @@ AppAcousticImagingStatus_t AppAcousticService_Init(void)
 /* Mirror scene/temperature/band/params into the published snapshot. */
 static void AppAcousticService_FillConfigSnapshot(AppAcousticServiceSnapshot_t *snapshot)
 {
+  snapshot->array_mode = (uint8_t)s_active_array_mode;
+  snapshot->array_switching =
+      (s_requested_array_mode != s_active_array_mode) ? 1U : 0U;
   snapshot->scene = (uint8_t)s_active_scene;
   snapshot->temperature_c = s_active_temperature_c;
   snapshot->speed_mps_x10 = (uint16_t)((s_srp_ctx.config.speed_of_sound_mps * 10.0f) + 0.5f);
   snapshot->band_lo_hz =
-      (uint16_t)(((float)s_srp_ctx.config.active_bin_start * APP_ACOUSTIC_SERVICE_BIN_HZ) + 0.5f);
+      (uint16_t)(((float)s_srp_ctx.config.active_bin_start * AppAcousticService_BinHz()) + 0.5f);
   snapshot->band_hi_hz =
-      (uint16_t)(((float)s_srp_ctx.config.active_bin_end * APP_ACOUSTIC_SERVICE_BIN_HZ) + 0.5f);
+      (uint16_t)(((float)s_srp_ctx.config.active_bin_end * AppAcousticService_BinHz()) + 0.5f);
   AppAcousticService_GetFieldParams(&snapshot->field_params);
 }
 
@@ -1219,6 +1241,25 @@ static uint8_t AppAcousticService_SyncRuntimeConfig(AppAcousticServiceSnapshot_t
   snapshot->requested_mode = s_requested_mode;
   snapshot->requested_profile = s_requested_profile;
   snapshot->requested_bin_policy = s_requested_bin_policy;
+
+  /* Array-mode switch: drive the capture pipeline first (audio clock + SAI
+   * geometry + PCMD reconfig run on the capture thread), keep publishing a
+   * "switching" snapshot meanwhile, and only re-init the SRP runtime once
+   * the capture side reports the target mode. */
+  if (s_requested_array_mode != s_active_array_mode)
+  {
+    snapshot->array_switching = 1U;
+    snapshot->array_mode = (uint8_t)s_active_array_mode;
+    if ((AppPcmdCapture_IsModeSwitchPending() != 0U) ||
+        (AppPcmdCapture_GetActiveMode() != s_requested_array_mode))
+    {
+      (void)AppPcmdCapture_RequestModeSwitch(s_requested_array_mode);
+      snapshot->service_status = APP_ACOUSTIC_SERVICE_STATUS_WAIT_FRAME;
+      AppAcousticService_PublishSnapshot(snapshot);
+      return 0U;
+    }
+    s_profile_change_pending = 1U;
+  }
 
   if ((s_profile_change_pending == 0U) &&
       (s_srp_ctx.initialized != 0U) &&
@@ -1439,6 +1480,32 @@ AppAcousticImagingStatus_t AppAcousticService_SetMode(AppAcousticImagingRunMode_
   return APP_ACOUSTIC_IMAGING_OK;
 }
 
+AppAcousticImagingStatus_t AppAcousticService_SetArrayMode(AppMicArrayMode_t mode)
+{
+  if (App_MicArray_ValidateMode(mode) == 0U)
+  {
+    return APP_ACOUSTIC_IMAGING_INVALID_ARGUMENT;
+  }
+  if (mode == s_requested_array_mode)
+  {
+    return APP_ACOUSTIC_IMAGING_OK;
+  }
+
+  s_requested_array_mode = mode;
+  /* Custom band bins carry per-mode Hz semantics; fall back to the target
+   * mode's default band. */
+  s_requested_band_lo_bin = 0U;
+  s_requested_band_hi_bin = 0U;
+  s_profile_change_pending = 1U;
+
+  return APP_ACOUSTIC_IMAGING_OK;
+}
+
+AppMicArrayMode_t AppAcousticService_GetArrayMode(void)
+{
+  return s_active_array_mode;
+}
+
 AppAcousticImagingStatus_t AppAcousticService_SetScene(AppAcousticScene_t scene)
 {
   if (scene >= APP_ACOUSTIC_SCENE_COUNT)
@@ -1459,9 +1526,11 @@ AppAcousticImagingStatus_t AppAcousticService_SetScene(AppAcousticScene_t scene)
 
 AppAcousticImagingStatus_t AppAcousticService_SetBandHz(uint16_t lo_hz, uint16_t hi_hz)
 {
-  /* Observable range of the Wide32/48k pipeline: bins 3..42. */
-  const uint16_t bin_min = 3U;
-  const uint16_t bin_max = 42U;
+  /* Observable ranges: Wide32/48k bins 3..42, Core16/192k bins 11..107. */
+  const uint8_t core16 = (s_active_array_mode == APP_MIC_ARRAY_MODE_CORE16_192K) ? 1U : 0U;
+  const uint16_t bin_min = core16 ? 11U : 3U;
+  const uint16_t bin_max = core16 ? 107U : 42U;
+  const float bin_hz = AppAcousticService_BinHz();
   uint16_t lo_bin;
   uint16_t hi_bin;
 
@@ -1470,8 +1539,8 @@ AppAcousticImagingStatus_t AppAcousticService_SetBandHz(uint16_t lo_hz, uint16_t
     return APP_ACOUSTIC_IMAGING_INVALID_ARGUMENT;
   }
 
-  lo_bin = (uint16_t)(((float)lo_hz / APP_ACOUSTIC_SERVICE_BIN_HZ) + 0.5f);
-  hi_bin = (uint16_t)(((float)hi_hz / APP_ACOUSTIC_SERVICE_BIN_HZ) + 0.5f);
+  lo_bin = (uint16_t)(((float)lo_hz / bin_hz) + 0.5f);
+  hi_bin = (uint16_t)(((float)hi_hz / bin_hz) + 0.5f);
   if (lo_bin < bin_min)
   {
     lo_bin = bin_min;

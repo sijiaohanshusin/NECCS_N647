@@ -354,7 +354,7 @@ int main(void)
   App_BootDiag_SetStage(APP_BOOT_STAGE_CRC_DONE);
   SystemIsolation_Config();
   App_BootDiag_SetStage(APP_BOOT_STAGE_RIF_DONE);
-  if (sys_audio_clock_config() == 0U)
+  if (sys_audio_clock_config(SYS_AUDIO_SAI1_FREQ_WIDE32_HZ) == 0U)
   {
     Error_Handler();
   }

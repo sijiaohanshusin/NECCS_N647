@@ -25,6 +25,17 @@ typedef struct
   float cos_delta;
 } AppAcousticSrpPhaseStep_t;
 
+/* Mode invariants the union sizing relies on. */
+_Static_assert((APP_MIC_ARRAY_CORE16_MIC_COUNT * 512U) <=
+               APP_ACOUSTIC_SRP_MAX_TIME_SAMPLES,
+               "Core16 time staging exceeds workspace");
+_Static_assert((APP_ACOUSTIC_IMAGING_WIDE32_QUALITY_PAIRS * 40U) <=
+               APP_ACOUSTIC_SRP_MAX_PAIR_BINS,
+               "Wide32 pair*bin staging exceeds workspace");
+_Static_assert((APP_ACOUSTIC_IMAGING_CORE16_QUALITY_PAIRS * 97U) <=
+               APP_ACOUSTIC_SRP_MAX_PAIR_BINS,
+               "Core16 pair*bin staging exceeds workspace");
+
 typedef struct
 {
   AppAcousticImagingPair_t pairs[APP_ACOUSTIC_SRP_MAX_PAIRS];
@@ -34,10 +45,10 @@ typedef struct
   AppAcousticSrpPhaseStep_t coarse_phase[APP_ACOUSTIC_IMAGING_COARSE_TOTAL * APP_ACOUSTIC_SRP_MAX_PAIRS];
   AppAcousticSrpPhaseStep_t fine_phase[APP_ACOUSTIC_IMAGING_FINE_TOTAL * APP_ACOUSTIC_SRP_MAX_PAIRS];
   float window[APP_ACOUSTIC_SRP_MAX_NFFT];
-  float time[APP_ACOUSTIC_SRP_MAX_CHANNELS * APP_ACOUSTIC_SRP_MAX_NFFT];
-  float freq[APP_ACOUSTIC_SRP_MAX_CHANNELS * APP_ACOUSTIC_SRP_MAX_NFFT];
-  float gcc[APP_ACOUSTIC_SRP_MAX_PAIRS * APP_ACOUSTIC_SRP_MAX_ACTIVE_BINS * 2U];
-  float srp_weight[APP_ACOUSTIC_SRP_MAX_PAIRS * APP_ACOUSTIC_SRP_MAX_ACTIVE_BINS];
+  float time[APP_ACOUSTIC_SRP_MAX_TIME_SAMPLES];
+  float freq[APP_ACOUSTIC_SRP_MAX_TIME_SAMPLES];
+  float gcc[APP_ACOUSTIC_SRP_MAX_PAIR_BINS * 2U];
+  float srp_weight[APP_ACOUSTIC_SRP_MAX_PAIR_BINS];
   float srp_power[APP_ACOUSTIC_SRP_RUNTIME_GRID_TOTAL];
   float smoothed_power[APP_ACOUSTIC_SRP_RUNTIME_GRID_TOTAL];
   float fine_theta[APP_ACOUSTIC_IMAGING_FINE_TOTAL];
@@ -51,7 +62,7 @@ typedef struct
 
 typedef struct
 {
-  float selftest_planar[APP_ACOUSTIC_SRP_MAX_CHANNELS * APP_ACOUSTIC_SRP_MAX_FRAME_LEN];
+  float selftest_planar[APP_ACOUSTIC_SRP_MAX_TIME_SAMPLES];
 } AppAcousticSrpSlowWorkspace_t;
 
 static AppAcousticSrpWorkspace_t s_srp_workspace __attribute__((section(".SRP_FAST"), aligned(32)));
@@ -159,16 +170,37 @@ static AppAcousticImagingStatus_t App_AcousticSrp_ValidateRuntimeConfig(const Ap
   }
 
   active_bins = config->active_bin_count;
-  if ((config->mic_mode != APP_MIC_ARRAY_MODE_WIDE32_48K) ||
-      (config->channel_count > APP_ACOUSTIC_SRP_MAX_CHANNELS) ||
-      (config->frame_len != APP_ACOUSTIC_SRP_MAX_FRAME_LEN) ||
-      (config->nfft != APP_ACOUSTIC_SRP_MAX_NFFT) ||
+
+  /* Per-mode frame geometry: Wide32 32ch x 256, Core16 16ch x 512. */
+  if (config->mic_mode == APP_MIC_ARRAY_MODE_WIDE32_48K)
+  {
+    if ((config->frame_len != 256U) || (config->nfft != 256U))
+    {
+      return APP_ACOUSTIC_IMAGING_UNSUPPORTED_MODE;
+    }
+  }
+  else if (config->mic_mode == APP_MIC_ARRAY_MODE_CORE16_192K)
+  {
+    if ((config->frame_len != 512U) || (config->nfft != 512U))
+    {
+      return APP_ACOUSTIC_IMAGING_UNSUPPORTED_MODE;
+    }
+  }
+  else
+  {
+    return APP_ACOUSTIC_IMAGING_UNSUPPORTED_MODE;
+  }
+
+  if ((config->channel_count > APP_ACOUSTIC_SRP_MAX_CHANNELS) ||
+      ((config->channel_count * config->nfft) > APP_ACOUSTIC_SRP_MAX_TIME_SAMPLES) ||
       (config->pair_count > APP_ACOUSTIC_SRP_MAX_PAIRS) ||
       (active_bins > APP_ACOUSTIC_SRP_MAX_ACTIVE_BINS) ||
+      (((uint32_t)config->pair_count * active_bins) > APP_ACOUSTIC_SRP_MAX_PAIR_BINS) ||
       ((backend == APP_ACOUSTIC_BACKEND_NPU_HEATMAP) &&
-       ((config->profile != APP_ACOUSTIC_IMAGING_PROFILE_BALANCED) ||
+       ((config->mic_mode != APP_MIC_ARRAY_MODE_WIDE32_48K) ||
+        (config->profile != APP_ACOUSTIC_IMAGING_PROFILE_BALANCED) ||
         (config->pair_count != APP_ACOUSTIC_IMAGING_WIDE32_BALANCED_PAIRS) ||
-        (active_bins != APP_ACOUSTIC_SRP_MAX_ACTIVE_BINS) ||
+        (active_bins != 40U) ||
         (App_AcousticSrp_ConfigUsesContiguousBins(config) == 0U))))
   {
     return APP_ACOUSTIC_IMAGING_UNSUPPORTED_MODE;
@@ -1287,6 +1319,9 @@ static AppAcousticImagingStatus_t App_AcousticSrp_RunOneSyntheticCheck(AppAcoust
     return status;
   }
 
+  /* Stride is the CONFIG frame length: channel_count x frame_len fills the
+   * staging buffer exactly in both modes; the old MAX_FRAME_LEN stride
+   * would overflow it for Wide32 once the max moved to 512. */
   status = App_AcousticSynthetic_FillPlaneWave(&config,
                                                expected_theta,
                                                expected_phi,
@@ -1295,7 +1330,7 @@ static AppAcousticImagingStatus_t App_AcousticSrp_RunOneSyntheticCheck(AppAcoust
                                                0.0f,
                                                0U,
                                                s_srp_slow_workspace.selftest_planar,
-                                               APP_ACOUSTIC_SRP_MAX_FRAME_LEN,
+                                               config.frame_len,
                                                &frame);
   if (status != APP_ACOUSTIC_IMAGING_OK)
   {
@@ -1395,7 +1430,7 @@ AppAcousticImagingStatus_t App_AcousticSrp_RunSyntheticBenchmark(AppAcousticSrpC
                                                  0.04f,
                                                  seq,
                                                  s_srp_slow_workspace.selftest_planar,
-                                                 APP_ACOUSTIC_SRP_MAX_FRAME_LEN,
+                                                 config->frame_len,
                                                  &frame);
     if (status == APP_ACOUSTIC_IMAGING_OK)
     {

@@ -240,6 +240,10 @@ struct AppUiSnapshot
     uint8_t aiConfidencePct;  /* 0 or 55..96 */
     uint8_t heatPalette;
     uint8_t acousticScene;
+    /* Array mode: 0 = Wide32@48k, 1 = Core16@192k; switching = restart
+     * in flight (params page shows a transitional label). */
+    uint8_t arrayMode;
+    uint8_t arraySwitching;
     int8_t acousticTempC;
     uint16_t acousticBandLoHz;
     uint16_t acousticBandHiHz;
@@ -295,6 +299,7 @@ public:
     void setActiveProfile(uint8_t profile);
     void cycleHeatPalette();
     void cycleScene();
+    void toggleArrayMode();
     void adjustTemperature(int8_t deltaC);
     void setBandHz(uint16_t loHz, uint16_t hiHz);
     /* param: 0=db_floor 1=gamma 2=noise_gate 3=smooth_passes; dir: -1/+1 */

@@ -62,6 +62,11 @@ void TemplatePresenter::cycleScene()
     model->cycleScene();
 }
 
+void TemplatePresenter::toggleArrayMode()
+{
+    model->toggleArrayMode();
+}
+
 void TemplatePresenter::adjustTemperature(int8_t deltaC)
 {
     model->adjustTemperature(deltaC);

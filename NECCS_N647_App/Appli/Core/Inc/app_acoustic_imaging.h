@@ -177,6 +177,11 @@ AppAcousticImagingStatus_t App_AcousticImaging_GetDefaultAlgorithmConfig(AppAcou
 AppAcousticImagingStatus_t App_AcousticImaging_GetDefaultRunModeConfig(AppAcousticImagingRunMode_t mode,
                                                                        AppAcousticImagingConfig_t *config);
 
+/* Run-mode defaults on an explicit array mode (Wide32@48k / Core16@192k). */
+AppAcousticImagingStatus_t App_AcousticImaging_GetDefaultRunModeArrayConfig(AppAcousticImagingRunMode_t mode,
+                                                                            AppMicArrayMode_t mic_mode,
+                                                                            AppAcousticImagingConfig_t *config);
+
 AppAcousticImagingStatus_t App_AcousticImaging_ValidateConfig(const AppAcousticImagingConfig_t *config);
 
 const char *App_AcousticImaging_ProfileName(AppAcousticImagingProfile_t profile);

@@ -182,6 +182,11 @@ private:
     AppRoundedPanel tempStepChip[2];
     AppTextLabel tempStepLabel[2];
     touchgfx::TouchArea tempStepTouch[2];
+    /* array mode row (right column, below the render steppers) */
+    AppRoundedPanel arrayModePanel;
+    AppTextLabel arrayModeName;
+    AppTextLabel arrayModeValue;
+    touchgfx::TouchArea arrayModeTouch;
     /* render-parameter steppers: 4 rows x (-, +) */
     static const uint32_t RenderRowCount = 4U;
     AppTextLabel paramsRenderCaption;

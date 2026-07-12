@@ -17,10 +17,19 @@ extern "C" {
 #include "app_acoustic_imaging.h"
 
 #define APP_ACOUSTIC_SRP_MAX_CHANNELS          APP_MIC_ARRAY_PHYSICAL_MIC_COUNT
-#define APP_ACOUSTIC_SRP_MAX_FRAME_LEN         APP_AUDIO_FRAME_DEFAULT_WIDE32_FRAME_LEN
-#define APP_ACOUSTIC_SRP_MAX_NFFT              256U
+#define APP_ACOUSTIC_SRP_MAX_FRAME_LEN         APP_AUDIO_FRAME_DEFAULT_CORE16_FRAME_LEN
+#define APP_ACOUSTIC_SRP_MAX_NFFT              512U
 #define APP_ACOUSTIC_SRP_MAX_PAIRS             APP_ACOUSTIC_IMAGING_WIDE32_QUALITY_PAIRS
-#define APP_ACOUSTIC_SRP_MAX_ACTIVE_BINS       40U
+/* Core16 uses 97 contiguous bins (11..107 @ 375 Hz); Wide32 caps at 40. */
+#define APP_ACOUSTIC_SRP_MAX_ACTIVE_BINS       97U
+/* Per-mode maxima of channel_count x nfft: Wide32 32x256 == Core16 16x512.
+ * Time/freq staging is sized by this product, NOT channels x max-nfft. */
+#define APP_ACOUSTIC_SRP_MAX_TIME_SAMPLES      (APP_MIC_ARRAY_PHYSICAL_MIC_COUNT * \
+                                                APP_AUDIO_FRAME_DEFAULT_WIDE32_FRAME_LEN)
+/* Per-mode maxima of pair_count x active_bin_count: Wide32 240x40 = 9600,
+ * Core16 120x97 = 11640. GCC/weight staging is sized by this product so the
+ * union costs 8 KB instead of the 107 KB a 240x97 rectangle would take. */
+#define APP_ACOUSTIC_SRP_MAX_PAIR_BINS         11640U
 #define APP_ACOUSTIC_SRP_QUALITY_MIN           0.03f
 #define APP_ACOUSTIC_SRP_ENERGY_MIN            0.02f
 

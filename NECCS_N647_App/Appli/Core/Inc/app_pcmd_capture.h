@@ -117,6 +117,14 @@ AppPcmdCaptureStatus_t AppPcmdCapture_Init(AppMicArrayMode_t mode);
 
 AppPcmdCaptureStatus_t AppPcmdCapture_Start(void);
 
+/* Queue a Wide32@48k <-> Core16@192k switch; the capture thread executes it
+ * as a full restart (clock retune + SAI regeometry + PCMD reconfig). */
+AppPcmdCaptureStatus_t AppPcmdCapture_RequestModeSwitch(AppMicArrayMode_t mode);
+
+AppMicArrayMode_t AppPcmdCapture_GetActiveMode(void);
+
+uint8_t AppPcmdCapture_IsModeSwitchPending(void);
+
 AppPcmdCaptureStatus_t AppPcmdCapture_Poll(ULONG wait_ticks);
 
 void AppPcmdCapture_ThreadEntry(ULONG thread_input);

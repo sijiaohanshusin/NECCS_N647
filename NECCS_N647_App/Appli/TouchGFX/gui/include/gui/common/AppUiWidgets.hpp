@@ -116,7 +116,7 @@ class AppSpectrumPanel : public touchgfx::Widget
 {
 public:
     static const uint32_t Bins = 64U;
-    /** Frequency per bin (Wide32/48k pipeline: 48000/256). */
+    /** Default frequency per bin (Wide32/48k pipeline: 48000/256). */
     static constexpr float BinHz = 187.5f;
 
     AppSpectrumPanel();
@@ -124,6 +124,8 @@ public:
     /** New spectrum + active band from the snapshot (no-op while dragging). */
     void setData(const uint8_t* bars, uint16_t bandLoHz, uint16_t bandHiHz, uint8_t peakBin);
     void setBandChangedCallback(touchgfx::GenericCallback<uint16_t, uint16_t>& callback);
+    /** Runtime bin scale (Core16@192k uses 375 Hz/bin). */
+    void setBinHz(float hz);
 
     virtual void draw(const touchgfx::Rect& area) const;
     virtual touchgfx::Rect getSolidRect() const;
@@ -141,6 +143,7 @@ private:
     uint8_t peakBin;
     /* 0 = none, 1 = low handle, 2 = high handle */
     uint8_t dragging;
+    float binHz;
 };
 
 /** Flat panel with software-drawn rounded corners and optional 1px border. */

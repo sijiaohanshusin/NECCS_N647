@@ -8,12 +8,27 @@
 #include "app_camera.h"
 #include "app_i2c2_bus.h"
 #include "PCMD3180/pcmd3180_hal.h"
+#include "SYS/sys.h"
 
 #define APP_PCMD_CAPTURE_SLOTS_PER_BUS       APP_MIC_ARRAY_WIDE32_SLOTS_PER_BUS
 #define APP_PCMD_CAPTURE_FRAME_LEN           APP_PCMD_CAPTURE_WIDE32_FRAME_LEN
 #define APP_PCMD_CAPTURE_DMA_HALVES          2U
 #define APP_PCMD_CAPTURE_DMA_WORDS_PER_HALF  (APP_PCMD_CAPTURE_SLOTS_PER_BUS * APP_PCMD_CAPTURE_FRAME_LEN)
 #define APP_PCMD_CAPTURE_DMA_WORDS           (APP_PCMD_CAPTURE_DMA_WORDS_PER_HALF * APP_PCMD_CAPTURE_DMA_HALVES)
+
+/* Core16@192k reuses every buffer as-is: 8 slots x 512 samples equals the
+ * Wide32 16 x 256 half-buffer exactly, so only the interpretation changes
+ * at runtime. Guard the equality the whole file relies on. */
+_Static_assert((APP_MIC_ARRAY_CORE16_SLOTS_PER_BUS *
+                APP_AUDIO_FRAME_DEFAULT_CORE16_FRAME_LEN) ==
+               (APP_MIC_ARRAY_WIDE32_SLOTS_PER_BUS *
+                APP_PCMD_CAPTURE_WIDE32_FRAME_LEN),
+               "Core16 DMA half size must match Wide32");
+_Static_assert((APP_MIC_ARRAY_CORE16_MIC_COUNT *
+                APP_AUDIO_FRAME_DEFAULT_CORE16_FRAME_LEN) ==
+               (APP_MIC_ARRAY_PHYSICAL_MIC_COUNT *
+                APP_PCMD_CAPTURE_WIDE32_FRAME_LEN),
+               "Core16 float frame size must match Wide32");
 #define APP_PCMD_CAPTURE_AUDIO_SCALE         APP_MIC_ARRAY_Q15_TO_FLOAT_SCALE
 #define APP_PCMD_CAPTURE_I2C_TIMEOUT_MS      100U
 /* Bring-up timing: these are the values validated on this board (P7 run,
@@ -47,6 +62,16 @@
 
 #ifndef APP_PCMD_SDOUT_BCLK_MARGIN_FIX
 #define APP_PCMD_SDOUT_BCLK_MARGIN_FIX       1U
+#endif
+
+/* Same strobing selection as MX_SAI1_Init (main.c); needed here because the
+ * mode switch re-inits the SAI blocks with identical timing semantics. */
+#ifndef APP_PCMD_SAI_CLOCK_STROBING
+#if (APP_PCMD_SDOUT_BCLK_MARGIN_FIX != 0U)
+#define APP_PCMD_SAI_CLOCK_STROBING  SAI_CLOCKSTROBING_RISINGEDGE
+#else
+#define APP_PCMD_SAI_CLOCK_STROBING  SAI_CLOCKSTROBING_FALLINGEDGE
+#endif
 #endif
 
 /* Primary backend is the hardware I2C2 controller: the mic array sits on
@@ -118,6 +143,16 @@ static uint8_t s_pcmd_allow_partial;
  * the bus is frozen afterwards and frame stalls recover via DMA-only
  * restart, never by re-touching I2C. */
 static uint8_t s_pcmd_config_frozen;
+/* Runtime array mode. All hot paths read these cached dimensions instead of
+ * the compile-time Wide32 macros; both modes share identical buffer sizes
+ * (see the static asserts above). */
+static AppMicArrayMode_t s_active_mode = APP_MIC_ARRAY_MODE_WIDE32_48K;
+static uint32_t s_rt_slots_per_bus = APP_MIC_ARRAY_WIDE32_SLOTS_PER_BUS;
+static uint32_t s_rt_frame_len = APP_PCMD_CAPTURE_WIDE32_FRAME_LEN;
+static uint32_t s_rt_words_per_half = APP_PCMD_CAPTURE_DMA_WORDS_PER_HALF;
+/* Mode switch request (UI/debugger -> capture thread). */
+static volatile AppMicArrayMode_t s_switch_mode = APP_MIC_ARRAY_MODE_WIDE32_48K;
+static volatile uint8_t s_switch_pending;
 
 static void AppPcmdCapture_UpdateMicLevels(void);
 static void AppPcmdCapture_DeviceStatusKick(uint32_t device_index);
@@ -213,6 +248,12 @@ static uint8_t AppPcmdCapture_IsDeviceStatusExpected(uint32_t device_index,
   {
     const uint8_t expected_slot =
         (uint8_t)(s_mode_config.devices[device_index].start_slot + channel);
+    /* Only routed channels carry a defined slot value (Core16 enables 4 of
+     * 8 per device; disabled channels keep their reset defaults). */
+    if ((expected_mask & (uint8_t)(1U << channel)) == 0U)
+    {
+      continue;
+    }
     if (status->asi_ch_slot[channel] != expected_slot)
     {
       return 0U;
@@ -345,7 +386,88 @@ static PCMD3180_ArrayModeTypeDef AppPcmdCapture_ToPcmdMode(AppMicArrayMode_t mod
 
 static uint8_t AppPcmdCapture_IsSupportedMode(AppMicArrayMode_t mode)
 {
-  return (mode == APP_MIC_ARRAY_MODE_WIDE32_48K) ? 1U : 0U;
+  return ((mode == APP_MIC_ARRAY_MODE_WIDE32_48K) ||
+          (mode == APP_MIC_ARRAY_MODE_CORE16_192K)) ? 1U : 0U;
+}
+
+/* Reconfigure the SAI blocks for the active mode's TDM geometry. Mirrors
+ * the golden MX_SAI1_Init settings exactly; only frame length, slot count
+ * and slot mask differ between modes:
+ *   Wide32 : 16 slots x 16 bit, 256-bit frame @ 12.288 MHz BCLK (48 kHz)
+ *   Core16 :  8 slots x 16 bit, 128-bit frame @ 24.576 MHz BCLK (192 kHz) */
+static HAL_StatusTypeDef AppPcmdCapture_ConfigureSaiForMode(AppMicArrayMode_t mode)
+{
+  const uint8_t core16 = (mode == APP_MIC_ARRAY_MODE_CORE16_192K) ? 1U : 0U;
+  const uint32_t frame_bits = core16 ? 128U : 256U;
+  const uint32_t slot_count = core16 ? 8U : 16U;
+  const uint32_t slot_mask = core16 ? 0x000000FFUL : 0x0000FFFFUL;
+  HAL_StatusTypeDef status;
+
+  (void)HAL_SAI_DeInit(&hsai_BlockA1);
+  (void)HAL_SAI_DeInit(&hsai_BlockB1);
+
+  hsai_BlockA1.Instance = SAI1_Block_A;
+  hsai_BlockA1.Init.Protocol = SAI_FREE_PROTOCOL;
+  hsai_BlockA1.Init.AudioMode = SAI_MODEMASTER_RX;
+  hsai_BlockA1.Init.DataSize = SAI_DATASIZE_16;
+  hsai_BlockA1.Init.FirstBit = SAI_FIRSTBIT_MSB;
+  hsai_BlockA1.Init.ClockStrobing = APP_PCMD_SAI_CLOCK_STROBING;
+  hsai_BlockA1.Init.Synchro = SAI_ASYNCHRONOUS;
+  hsai_BlockA1.Init.OutputDrive = SAI_OUTPUTDRIVE_DISABLE;
+  hsai_BlockA1.Init.NoDivider = SAI_MASTERDIVIDER_DISABLE;
+  hsai_BlockA1.Init.FIFOThreshold = SAI_FIFOTHRESHOLD_EMPTY;
+  hsai_BlockA1.Init.AudioFrequency = core16 ? SAI_AUDIO_FREQUENCY_192K
+                                            : SAI_AUDIO_FREQUENCY_48K;
+  hsai_BlockA1.Init.SynchroExt = SAI_SYNCEXT_DISABLE;
+  hsai_BlockA1.Init.MckOutput = SAI_MCK_OUTPUT_DISABLE;
+  hsai_BlockA1.Init.MonoStereoMode = SAI_STEREOMODE;
+  hsai_BlockA1.Init.CompandingMode = SAI_NOCOMPANDING;
+  hsai_BlockA1.Init.PdmInit.Activation = DISABLE;
+  hsai_BlockA1.Init.PdmInit.MicPairsNbr = 1;
+  hsai_BlockA1.Init.PdmInit.ClockEnable = SAI_PDM_CLOCK1_ENABLE;
+  hsai_BlockA1.FrameInit.FrameLength = frame_bits;
+  hsai_BlockA1.FrameInit.ActiveFrameLength = 1;
+  hsai_BlockA1.FrameInit.FSDefinition = SAI_FS_STARTFRAME;
+  hsai_BlockA1.FrameInit.FSPolarity = SAI_FS_ACTIVE_HIGH;
+  hsai_BlockA1.FrameInit.FSOffset = SAI_FS_BEFOREFIRSTBIT;
+  hsai_BlockA1.SlotInit.FirstBitOffset = 0;
+  hsai_BlockA1.SlotInit.SlotSize = SAI_SLOTSIZE_DATASIZE;
+  hsai_BlockA1.SlotInit.SlotNumber = slot_count;
+  hsai_BlockA1.SlotInit.SlotActive = slot_mask;
+  status = HAL_SAI_Init(&hsai_BlockA1);
+  if (status != HAL_OK)
+  {
+    return status;
+  }
+
+  hsai_BlockB1.Instance = SAI1_Block_B;
+  hsai_BlockB1.Init.Protocol = SAI_FREE_PROTOCOL;
+  hsai_BlockB1.Init.AudioMode = SAI_MODESLAVE_RX;
+  hsai_BlockB1.Init.DataSize = SAI_DATASIZE_16;
+  hsai_BlockB1.Init.FirstBit = SAI_FIRSTBIT_MSB;
+  hsai_BlockB1.Init.ClockStrobing = APP_PCMD_SAI_CLOCK_STROBING;
+  hsai_BlockB1.Init.Synchro = SAI_SYNCHRONOUS;
+  hsai_BlockB1.Init.OutputDrive = SAI_OUTPUTDRIVE_DISABLE;
+  hsai_BlockB1.Init.NoDivider = SAI_MASTERDIVIDER_ENABLE;
+  hsai_BlockB1.Init.FIFOThreshold = SAI_FIFOTHRESHOLD_EMPTY;
+  hsai_BlockB1.Init.SynchroExt = SAI_SYNCEXT_DISABLE;
+  hsai_BlockB1.Init.MckOutput = SAI_MCK_OUTPUT_ENABLE;
+  hsai_BlockB1.Init.MonoStereoMode = SAI_STEREOMODE;
+  hsai_BlockB1.Init.CompandingMode = SAI_NOCOMPANDING;
+  hsai_BlockB1.Init.TriState = SAI_OUTPUT_NOTRELEASED;
+  hsai_BlockB1.Init.PdmInit.Activation = DISABLE;
+  hsai_BlockB1.Init.PdmInit.MicPairsNbr = 1;
+  hsai_BlockB1.Init.PdmInit.ClockEnable = SAI_PDM_CLOCK1_ENABLE;
+  hsai_BlockB1.FrameInit.FrameLength = frame_bits;
+  hsai_BlockB1.FrameInit.ActiveFrameLength = 1;
+  hsai_BlockB1.FrameInit.FSDefinition = SAI_FS_STARTFRAME;
+  hsai_BlockB1.FrameInit.FSPolarity = SAI_FS_ACTIVE_HIGH;
+  hsai_BlockB1.FrameInit.FSOffset = SAI_FS_BEFOREFIRSTBIT;
+  hsai_BlockB1.SlotInit.FirstBitOffset = 0;
+  hsai_BlockB1.SlotInit.SlotSize = SAI_SLOTSIZE_DATASIZE;
+  hsai_BlockB1.SlotInit.SlotNumber = slot_count;
+  hsai_BlockB1.SlotInit.SlotActive = slot_mask;
+  return HAL_SAI_Init(&hsai_BlockB1);
 }
 
 static void AppPcmdCapture_ClearRuntime(void)
@@ -490,6 +612,7 @@ static void AppPcmdCapture_AccumulateRawLevels(uint8_t bus,
   uint32_t ac_sum[APP_PCMD_CAPTURE_SLOTS_PER_BUS] = { 0U };
   uint16_t count[APP_PCMD_CAPTURE_SLOTS_PER_BUS] = { 0U };
   int16_t last_sample[APP_PCMD_CAPTURE_SLOTS_PER_BUS] = { 0 };
+  const uint32_t slots = s_rt_slots_per_bus;
   uint32_t rail_count = 0U;
 
   if ((bus >= APP_PCMD_CAPTURE_BUS_COUNT) || (interleaved == NULL) || (word_count == 0U))
@@ -499,7 +622,7 @@ static void AppPcmdCapture_AccumulateRawLevels(uint8_t bus,
 
   for (uint32_t word = 0U; word < word_count; word++)
   {
-    const uint32_t slot = word % APP_PCMD_CAPTURE_SLOTS_PER_BUS;
+    const uint32_t slot = word % slots;
     const int16_t sample = App_MicArray_DecodePcmdTdmSample(interleaved[word]);
     const int32_t sample_abs = (sample < 0) ? -(int32_t)sample : (int32_t)sample;
 
@@ -514,14 +637,14 @@ static void AppPcmdCapture_AccumulateRawLevels(uint8_t bus,
 
   for (uint32_t word = 0U; word < word_count; word++)
   {
-    const uint32_t slot = word % APP_PCMD_CAPTURE_SLOTS_PER_BUS;
+    const uint32_t slot = word % slots;
     const int32_t sample = (int32_t)App_MicArray_DecodePcmdTdmSample(interleaved[word]);
     const int32_t mean = (count[slot] == 0U) ? 0 : (dc_sum[slot] / (int32_t)count[slot]);
     const int32_t ac_sample = sample - mean;
     ac_sum[slot] += (uint32_t)((ac_sample < 0) ? -ac_sample : ac_sample);
   }
 
-  for (uint32_t slot = 0U; slot < APP_PCMD_CAPTURE_SLOTS_PER_BUS; slot++)
+  for (uint32_t slot = 0U; slot < slots; slot++)
   {
     if (count[slot] == 0U)
     {
@@ -643,13 +766,15 @@ static void AppPcmdCapture_UpdateMicLevels(void)
   int32_t dbfs_sum = 0;
   int8_t peak_dbfs = -90;
   uint32_t active_slots = 0U;
+  const uint32_t mode_mics = App_MicArray_GetModeMicCount(s_active_mode);
 
   for (uint32_t channel = 0U; channel < APP_MIC_ARRAY_PHYSICAL_MIC_COUNT; channel++)
   {
     AppMicArraySource_t source;
     int8_t dbfs = -90;
 
-    if ((App_MicArray_GetSource(APP_MIC_ARRAY_MODE_WIDE32_48K, channel, &source) == APP_MIC_ARRAY_OK) &&
+    if ((channel < mode_mics) &&
+        (App_MicArray_GetSource(s_active_mode, channel, &source) == APP_MIC_ARRAY_OK) &&
         (source.bus < APP_PCMD_CAPTURE_BUS_COUNT) &&
         (source.slot < APP_MIC_ARRAY_WIDE32_SLOTS_PER_BUS))
     {
@@ -658,20 +783,23 @@ static void AppPcmdCapture_UpdateMicLevels(void)
 
     s_snapshot.mic_dbfs[channel] = dbfs;
     s_snapshot.mic_level[channel] = AppPcmdCapture_ClampPercent(AppPcmdCapture_DbfsToPercent(dbfs));
-    dbfs_sum += dbfs;
-    if (dbfs > peak_dbfs)
+    if (channel < mode_mics)
     {
-      peak_dbfs = dbfs;
-    }
-    if (dbfs > -90)
-    {
-      active_slots++;
+      dbfs_sum += dbfs;
+      if (dbfs > peak_dbfs)
+      {
+        peak_dbfs = dbfs;
+      }
+      if (dbfs > -90)
+      {
+        active_slots++;
+      }
     }
   }
 
   s_snapshot.raw_peak_dbfs = peak_dbfs;
   s_snapshot.raw_avg_dbfs =
-      (int8_t)(dbfs_sum / (int32_t)APP_MIC_ARRAY_PHYSICAL_MIC_COUNT);
+      (int8_t)(dbfs_sum / (int32_t)((mode_mics != 0U) ? mode_mics : 1U));
   s_snapshot.raw_active_slot_count = (active_slots > 255U) ? 255U : (uint8_t)active_slots;
   s_snapshot.raw_rail_percent_x10 =
       (s_snapshot.raw_total_sample_count == 0U) ? 0U :
@@ -744,7 +872,7 @@ static void AppPcmdCapture_UpdateFrameRate(uint32_t now_ms)
 
 static void AppPcmdCapture_ProcessHalf(uint8_t half)
 {
-  const uint32_t base = ((uint32_t)half) * APP_PCMD_CAPTURE_DMA_WORDS_PER_HALF;
+  const uint32_t base = ((uint32_t)half) * s_rt_words_per_half;
   const int16_t *bus_a = &s_bus_a_rx[base];
   const int16_t *bus_b = &s_bus_b_rx[base];
   const uint32_t next_seq = s_frame_seq + 1U;
@@ -753,12 +881,12 @@ static void AppPcmdCapture_ProcessHalf(uint8_t half)
   float *samples = s_frame_samples[frame_index];
 
   if (App_AudioFrame_FromTdmI16PlanarF32(frame,
-                                        APP_MIC_ARRAY_MODE_WIDE32_48K,
+                                        s_active_mode,
                                         bus_a,
                                         bus_b,
-                                        APP_PCMD_CAPTURE_FRAME_LEN,
+                                        s_rt_frame_len,
                                         samples,
-                                        APP_PCMD_CAPTURE_FRAME_LEN,
+                                        s_rt_frame_len,
                                         next_seq,
                                         AppPcmdCapture_TimestampUs(),
                                         APP_PCMD_CAPTURE_AUDIO_SCALE) != APP_AUDIO_FRAME_OK)
@@ -1040,6 +1168,75 @@ static void AppPcmdCapture_RequestRestart(uint32_t reason)
   App_BringUpStatus_Fail(APP_BRINGUP_MODULE_AUDIO_FRAME, (int32_t)reason);
 }
 
+AppPcmdCaptureStatus_t AppPcmdCapture_RequestModeSwitch(AppMicArrayMode_t mode)
+{
+  if (AppPcmdCapture_IsSupportedMode(mode) == 0U)
+  {
+    return APP_PCMD_CAPTURE_UNSUPPORTED_MODE;
+  }
+  if ((mode == s_active_mode) && (s_switch_pending == 0U))
+  {
+    return APP_PCMD_CAPTURE_OK;
+  }
+
+  s_switch_mode = mode;
+  s_switch_pending = 1U;
+  return APP_PCMD_CAPTURE_OK;
+}
+
+AppMicArrayMode_t AppPcmdCapture_GetActiveMode(void)
+{
+  return s_active_mode;
+}
+
+uint8_t AppPcmdCapture_IsModeSwitchPending(void)
+{
+  return (s_switch_pending != 0U) ? 1U : 0U;
+}
+
+/* Full mode change, executed on the capture thread: park the stream, move
+ * the SAI kernel clock (PLL2/IC7 divider), re-init the SAI geometry, then
+ * drop `initialized` so the normal bring-up path reconfigures the PCMD3180s
+ * for the new mode inside the usual I2C lock window. */
+static void AppPcmdCapture_ExecuteModeSwitch(void)
+{
+  const AppMicArrayMode_t target = s_switch_mode;
+  const uint32_t kernel_hz = (target == APP_MIC_ARRAY_MODE_CORE16_192K)
+                             ? SYS_AUDIO_SAI1_FREQ_CORE16_HZ
+                             : SYS_AUDIO_SAI1_FREQ_WIDE32_HZ;
+
+  s_snapshot.recovering = 1U;
+  AppPcmdCapture_StopDma();
+  AppPcmdCapture_ClearPendingDmaEvents();
+
+  if (sys_audio_clock_config(kernel_hz) == 0U)
+  {
+    /* Clock synthesis failed: stay on the old mode, clear the request.
+     * s_switch_mode must track the running mode again so later lazy
+     * re-inits do not pick up the unreachable target. */
+    s_switch_mode = s_active_mode;
+    s_switch_pending = 0U;
+    s_snapshot.start_status = APP_PCMD_CAPTURE_HAL_ERROR;
+    s_snapshot.started = 0U;
+    return;
+  }
+
+  if (AppPcmdCapture_ConfigureSaiForMode(target) != HAL_OK)
+  {
+    /* Restore the known-good Wide32 clock + geometry and bail out. */
+    (void)sys_audio_clock_config(SYS_AUDIO_SAI1_FREQ_WIDE32_HZ);
+    (void)AppPcmdCapture_ConfigureSaiForMode(APP_MIC_ARRAY_MODE_WIDE32_48K);
+    s_switch_mode = APP_MIC_ARRAY_MODE_WIDE32_48K;
+  }
+
+  /* Force the full bring-up path (PCMD reconfig included) for the target. */
+  s_pcmd_config_frozen = 0U;
+  s_pcmd_allow_partial = 0U;
+  s_snapshot.initialized = 0U;
+  s_snapshot.started = 0U;
+  s_switch_pending = 0U;
+}
+
 /* Recover a frame stall without touching I2C: the PCMD3180 devices keep
  * their verified (frozen) register configuration, so only the SAI/DMA
  * capture path is torn down and restarted. `started` stays latched, so the
@@ -1220,6 +1417,13 @@ AppPcmdCaptureStatus_t AppPcmdCapture_Init(AppMicArrayMode_t mode)
   s_snapshot.frame_len = s_mode_config.frame_samples;
   s_snapshot.slots_per_bus = s_mode_config.tdm_slots_per_bus;
 
+  /* Cache the runtime geometry for the hot paths (sizes proven equal across
+   * modes by the static asserts at the top of the file). */
+  s_active_mode = mode;
+  s_rt_slots_per_bus = s_mode_config.tdm_slots_per_bus;
+  s_rt_frame_len = s_mode_config.frame_samples;
+  s_rt_words_per_half = s_rt_slots_per_bus * s_rt_frame_len;
+
   for (uint32_t index = 0U; index < APP_PCMD_CAPTURE_DEVICE_COUNT; index++)
   {
     pcmd_status = PCMD3180_Init(&s_pcmd_handles[index],
@@ -1256,6 +1460,13 @@ AppPcmdCaptureStatus_t AppPcmdCapture_Init(AppMicArrayMode_t mode)
      * value is PWR_CFG=0x60 (PLL+PDM only). Tested 2026-07-10: bias on
      * only lifted the noise floor slightly, no lanes woke up. */
     s_pcmd_configs[index].enable_micbias = 0U;
+    if (mode == APP_MIC_ARRAY_MODE_CORE16_192K)
+    {
+      /* 192 kHz: the default 64xFS divider would put 12.288 MHz on the PDM
+       * mics - beyond their spec. 32xFS keeps PDMCLK at 6.144 MHz, the
+       * documented PCMD3180 clocking for 192 kHz output. */
+      s_pcmd_configs[index].pdmclk_divider = PCMD3180_PDMCLK_DIV_32FS;
+    }
   }
 
   s_snapshot.initialized = 1U;
@@ -1270,7 +1481,7 @@ AppPcmdCaptureStatus_t AppPcmdCapture_Start(void)
 
   if (s_snapshot.initialized == 0U)
   {
-    AppPcmdCaptureStatus_t init_status = AppPcmdCapture_Init(APP_MIC_ARRAY_MODE_WIDE32_48K);
+    AppPcmdCaptureStatus_t init_status = AppPcmdCapture_Init(s_switch_mode);
     if (init_status != APP_PCMD_CAPTURE_OK)
     {
       return init_status;
@@ -1471,9 +1682,22 @@ void AppPcmdCapture_ThreadEntry(ULONG thread_input)
 
   while (1)
   {
+    if (s_switch_pending != 0U)
+    {
+      if ((boosted == 0U) && (self != TX_NULL))
+      {
+        (void)tx_thread_priority_change(self,
+                                        APP_PCMD_CAPTURE_THREAD_BOOST_PRIORITY,
+                                        &discard_priority);
+        boosted = 1U;
+      }
+      AppPcmdCapture_ExecuteModeSwitch();
+      start_attempts = 0U;
+    }
+
     if (s_snapshot.initialized == 0U)
     {
-      (void)AppPcmdCapture_Init(APP_MIC_ARRAY_MODE_WIDE32_48K);
+      (void)AppPcmdCapture_Init(s_switch_mode);
     }
 
     if (s_snapshot.started == 0U)

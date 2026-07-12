@@ -554,6 +554,15 @@ void updateAiClassifier(AppUiSnapshot& snapshot)
     uint8_t frameClass;
     uint32_t confidence;
 
+    /* The band-split heuristics are 48k semantics; in the ultrasonic mode
+     * the classifier stays quiet until it is retrained for 192k. */
+    if (snapshot.arrayMode != 0U)
+    {
+        snapshot.aiClass = APP_UI_AI_LISTENING;
+        snapshot.aiConfidencePct = 0U;
+        return;
+    }
+
     if (!audible || (total < 400U))
     {
         frameClass = APP_UI_AI_LISTENING;
@@ -772,6 +781,8 @@ void pollAcoustic(AppUiSnapshot& snapshot)
     }
     snapshot.heatPalette = AppCameraDisplay_GetHeatPalette();
     snapshot.acousticScene = acoustic.scene;
+    snapshot.arrayMode = acoustic.array_mode;
+    snapshot.arraySwitching = acoustic.array_switching;
     snapshot.acousticTempC = acoustic.temperature_c;
     snapshot.acousticBandLoHz = acoustic.band_lo_hz;
     snapshot.acousticBandHiHz = acoustic.band_hi_hz;
@@ -1379,6 +1390,25 @@ void Model::cycleScene()
     if (modelListener != 0)
     {
         modelListener->uiSnapshotUpdated(snapshot);
+    }
+}
+
+void Model::toggleArrayMode()
+{
+    const AppMicArrayMode_t target =
+        (snapshot.arrayMode == static_cast<uint8_t>(APP_MIC_ARRAY_MODE_CORE16_192K))
+            ? APP_MIC_ARRAY_MODE_WIDE32_48K
+            : APP_MIC_ARRAY_MODE_CORE16_192K;
+
+    if (AppAcousticService_SetArrayMode(target) == APP_ACOUSTIC_IMAGING_OK)
+    {
+        /* The pipeline restart takes seconds; show the transitional state
+         * immediately, the service snapshot confirms/refreshes it. */
+        snapshot.arraySwitching = 1U;
+        if (modelListener != 0)
+        {
+            modelListener->uiSnapshotUpdated(snapshot);
+        }
     }
 }
 

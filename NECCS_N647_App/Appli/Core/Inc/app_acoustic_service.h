@@ -91,6 +91,10 @@ typedef struct
   uint8_t quality_pct;
   uint8_t contrast_pct;
   uint8_t scene;
+  /* AppMicArrayMode_t of the running pipeline + 1 while a Wide32<->Core16
+   * switch is in flight (capture clock/SAI/PCMD restart). */
+  uint8_t array_mode;
+  uint8_t array_switching;
   int8_t temperature_c;
   uint16_t band_lo_hz;
   uint16_t band_hi_hz;
@@ -120,6 +124,11 @@ AppAcousticImagingStatus_t AppAcousticService_SetProfile(AppAcousticImagingProfi
 AppAcousticImagingStatus_t AppAcousticService_SetMode(AppAcousticImagingRunMode_t mode);
 
 AppAcousticImagingStatus_t AppAcousticService_SetBinPolicy(AppAcousticImagingBinPolicy_t policy);
+
+/* Array mode (Wide32@48k / Core16@192k ultrasonic). Orchestrates the full
+ * capture pipeline switch; progress is visible via snapshot.array_switching. */
+AppAcousticImagingStatus_t AppAcousticService_SetArrayMode(AppMicArrayMode_t mode);
+AppMicArrayMode_t AppAcousticService_GetArrayMode(void);
 
 /* Scene preset: frequency band (SRP re-init) + field parameter bundle. */
 AppAcousticImagingStatus_t AppAcousticService_SetScene(AppAcousticScene_t scene);
