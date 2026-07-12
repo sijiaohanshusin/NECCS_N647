@@ -1036,9 +1036,13 @@ void TemplateView::handleTickEvent()
         touchgfx::Application::getInstance()->invalidateArea(fresh);
     }
 
-    if (bootEmblemAlpha < 255U)
+    /* Emblem fade-in in 5 coarse steps instead of 42 fine ones: every
+     * emblem invalidate redraws a 144x132 region against the live scanout
+     * (single framebuffer), and the per-tick fade was the last remaining
+     * boot flicker source. Five spaced redraws still read as a fade. */
+    if ((bootEmblemAlpha < 255U) && ((bootPhase % 8U) == 0U))
     {
-        const uint16_t next = static_cast<uint16_t>(bootEmblemAlpha + 6U);
+        const uint16_t next = static_cast<uint16_t>(bootEmblemAlpha + 51U);
         bootEmblemAlpha = (next >= 255U) ? 255U : static_cast<uint8_t>(next);
         bootEmblem.setAlpha(bootEmblemAlpha);
         bootEmblem.invalidate();
@@ -1509,30 +1513,35 @@ void TemplateView::refreshBootPage(const AppUiSnapshot& snapshot)
             }
         }
 
+        touchgfx::colortype dotColor = ColorMuted;
         switch (state)
         {
         case APP_UI_BOOT_MODULE_READY:
-            bootItemDot[i].setColor(ColorGreen);
+            dotColor = ColorGreen;
             bootItemState[i].setColors(ColorGreen, ColorBg, false);
             bootItemState[i].setText("就绪");
             break;
         case APP_UI_BOOT_MODULE_FAILED:
-            bootItemDot[i].setColor(ColorRed);
+            dotColor = ColorRed;
             bootItemState[i].setColors(ColorRed, ColorBg, false);
             bootItemState[i].setText("失败");
             break;
         case APP_UI_BOOT_MODULE_SKIPPED:
-            bootItemDot[i].setColor(ColorMuted);
             bootItemState[i].setColors(ColorMuted, ColorBg, false);
             bootItemState[i].setText("跳过");
             break;
         default:
-            bootItemDot[i].setColor(ColorMuted);
             bootItemState[i].setColors(ColorMuted, ColorBg, false);
             bootItemState[i].setText("等待");
             break;
         }
-        bootItemDot[i].invalidate();
+        /* refreshBootPage runs every model tick: redraw a dot only when its
+         * state actually changed, not 60 times a second. */
+        if (bootItemDot[i].getColor() != dotColor)
+        {
+            bootItemDot[i].setColor(dotColor);
+            bootItemDot[i].invalidate();
+        }
     }
 
     if (watchedCount == 0U)
