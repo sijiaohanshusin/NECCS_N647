@@ -1194,6 +1194,11 @@ uint8_t AppPcmdCapture_IsModeSwitchPending(void)
   return (s_switch_pending != 0U) ? 1U : 0U;
 }
 
+uint8_t AppPcmdCapture_IsStreaming(void)
+{
+  return (s_snapshot.started != 0U) ? 1U : 0U;
+}
+
 /* Full mode change, executed on the capture thread: park the stream, move
  * the SAI kernel clock (PLL2/IC7 divider), re-init the SAI geometry, then
  * drop `initialized` so the normal bring-up path reconfigures the PCMD3180s
@@ -1211,13 +1216,13 @@ static void AppPcmdCapture_ExecuteModeSwitch(void)
 
   if (sys_audio_clock_config(kernel_hz) == 0U)
   {
-    /* Clock synthesis failed: stay on the old mode, clear the request.
-     * s_switch_mode must track the running mode again so later lazy
-     * re-inits do not pick up the unreachable target. */
-    s_switch_mode = s_active_mode;
-    s_switch_pending = 0U;
+    /* Transient clock reconfig failure (both targets divide the running
+     * PLL2 exactly, so this is a verify race, not a hard fault): keep the
+     * request pending and retry on the next thread pass. Round-trip cycle
+     * testing caught the old give-up path leaving capture and service on
+     * DIFFERENT array modes. */
     s_snapshot.start_status = APP_PCMD_CAPTURE_HAL_ERROR;
-    s_snapshot.started = 0U;
+    AppPcmdCapture_DelayMs(APP_PCMD_CAPTURE_RETRY_DELAY_MS);
     return;
   }
 

@@ -518,7 +518,10 @@ AppAcousticImagingStatus_t App_AcousticImaging_GetDefaultConfig(AppMicArrayMode_
   config->temperature_c = APP_ACOUSTIC_IMAGING_DEFAULT_TEMP_C;
   config->speed_of_sound_mps = APP_ACOUSTIC_IMAGING_SPEED_OF_SOUND_MPS;
   config->smoothing_alpha = APP_ACOUSTIC_IMAGING_DEFAULT_SMOOTHING_ALPHA;
-  config->quality_min = 0.03f;
+  /* Core16@192k: the 32xFS decimation noise floor sits ~-30 dBFS, which
+   * the Wide32 gate reads as a detection in a quiet room (board-measured
+   * valid=1/q=11 on silence, 2026-07-12). Demand a stronger peak. */
+  config->quality_min = (mode == APP_MIC_ARRAY_MODE_CORE16_192K) ? 0.12f : 0.03f;
   config->energy_min = 0.02f;
   config->adaptive_profile_enable = 1U;
 

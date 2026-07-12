@@ -1250,8 +1250,13 @@ static uint8_t AppAcousticService_SyncRuntimeConfig(AppAcousticServiceSnapshot_t
   {
     snapshot->array_switching = 1U;
     snapshot->array_mode = (uint8_t)s_active_array_mode;
+    /* Wait until the capture side is FULLY over: switch executed, target
+     * mode active AND the stream restarted. Falling through any earlier
+     * raced against capture-side retries and split the two layers onto
+     * different array modes (caught in round-trip cycle testing). */
     if ((AppPcmdCapture_IsModeSwitchPending() != 0U) ||
-        (AppPcmdCapture_GetActiveMode() != s_requested_array_mode))
+        (AppPcmdCapture_GetActiveMode() != s_requested_array_mode) ||
+        (AppPcmdCapture_IsStreaming() == 0U))
     {
       (void)AppPcmdCapture_RequestModeSwitch(s_requested_array_mode);
       snapshot->service_status = APP_ACOUSTIC_SERVICE_STATUS_WAIT_FRAME;

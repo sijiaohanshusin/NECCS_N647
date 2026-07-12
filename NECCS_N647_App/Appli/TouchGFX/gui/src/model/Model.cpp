@@ -722,13 +722,17 @@ void pollAcoustic(AppUiSnapshot& snapshot)
     static uint8_t sourceHoldTicks = 0U;
     static uint32_t lastValidSeq = 0U;
     static uint8_t jumpPending = 0U;
+    static int16_t pendTheta = 0;
+    static int16_t pendPhi = 0;
     /* Audible gate: SRP prominence alone lets quiet-room noise peaks (q=3
      * right at the gate) arm the 2 s hold with a random angle. Require the
      * array to actually hear something (-70 dBFS; quiet room sits at -84).
+     * Core16@192k idles at ~-30 dBFS decimation noise, so the dBFS gate is
+     * ineffective there - the two-frame agreement below carries the load.
      * pcmdRawPeakDbfs is one tick stale (pollPcmd runs later), fine at 60 Hz. */
     const bool arrayAudible =
         ((snapshot.pcmdFlags & APP_UI_PCMD_FLAG_RAW_VALID) != 0U) &&
-        (snapshot.pcmdRawPeakDbfs > -70);
+        ((snapshot.arrayMode != 0U) || (snapshot.pcmdRawPeakDbfs > -70));
     if (arrayAudible && (acoustic.valid != 0U) && (acoustic.output_seq != lastValidSeq))
     {
         lastValidSeq = acoustic.output_seq;
@@ -742,6 +746,23 @@ void pollAcoustic(AppUiSnapshot& snapshot)
         {
             accept = (jumpPending != 0U); /* second far frame confirms */
             jumpPending = accept ? 0U : 1U;
+        }
+        else if (sourceHoldTicks == 0U)
+        {
+            /* Fresh lock: require two consecutive SRP frames agreeing
+             * within 20 deg. Noise peaks land at RANDOM angles frame to
+             * frame (they pass the prominence gate on the elevated 192k
+             * floor), so this suppresses phantom locks in both modes at
+             * the cost of one SRP frame (~50-100 ms) of latency. */
+            const int16_t dpTheta = static_cast<int16_t>(acoustic.theta_deg - pendTheta);
+            const int16_t dpPhi = static_cast<int16_t>(acoustic.phi_deg - pendPhi);
+            const bool nearPend = (dpTheta >= -20) && (dpTheta <= 20) &&
+                                  (dpPhi >= -20) && (dpPhi <= 20);
+
+            accept = ((jumpPending != 0U) && nearPend);
+            jumpPending = accept ? 0U : 1U;
+            pendTheta = acoustic.theta_deg;
+            pendPhi = acoustic.phi_deg;
         }
         else
         {

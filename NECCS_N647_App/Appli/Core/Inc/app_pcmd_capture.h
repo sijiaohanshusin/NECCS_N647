@@ -125,6 +125,8 @@ AppMicArrayMode_t AppPcmdCapture_GetActiveMode(void);
 
 uint8_t AppPcmdCapture_IsModeSwitchPending(void);
 
+uint8_t AppPcmdCapture_IsStreaming(void);
+
 AppPcmdCaptureStatus_t AppPcmdCapture_Poll(ULONG wait_ticks);
 
 void AppPcmdCapture_ThreadEntry(ULONG thread_input);
