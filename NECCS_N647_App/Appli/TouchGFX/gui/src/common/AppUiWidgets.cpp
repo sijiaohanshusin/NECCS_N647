@@ -723,6 +723,78 @@ void AppSpectrumPanel::handleDragEvent(const touchgfx::DragEvent& event)
     invalidate();
 }
 
+AppLevelHistory::AppLevelHistory()
+    : head(0U),
+      hot(false)
+{
+    (void)memset(levels, 0, sizeof(levels));
+}
+
+void AppLevelHistory::push(uint8_t level)
+{
+    levels[head % Slots] = level;
+    head++;
+    invalidate();
+}
+
+void AppLevelHistory::clear()
+{
+    (void)memset(levels, 0, sizeof(levels));
+    head = 0U;
+    invalidate();
+}
+
+void AppLevelHistory::setHot(bool value)
+{
+    if (hot != value)
+    {
+        hot = value;
+        invalidate();
+    }
+}
+
+void AppLevelHistory::draw(const touchgfx::Rect& area) const
+{
+    const touchgfx::colortype colBg = touchgfx::Color::getColorFromRGB(10, 16, 24);
+    const touchgfx::colortype colBar = hot ? touchgfx::Color::getColorFromRGB(150, 52, 56)
+                                           : touchgfx::Color::getColorFromRGB(38, 74, 122);
+    const touchgfx::colortype colBarHead = hot ? touchgfx::Color::getColorFromRGB(229, 72, 77)
+                                               : touchgfx::Color::getColorFromRGB(61, 126, 255);
+    const touchgfx::colortype colBaseline = touchgfx::Color::getColorFromRGB(24, 38, 56);
+
+    const int16_t w = getWidth();
+    const int16_t h = getHeight();
+    const int16_t slotW = static_cast<int16_t>(w / (int16_t)Slots);
+    const int16_t barW = (slotW > 3) ? static_cast<int16_t>(slotW - 2) : slotW;
+
+    fillLocalRect(*this, area, touchgfx::Rect(0, 0, w, h), colBg);
+    fillLocalRect(*this, area, touchgfx::Rect(0, static_cast<int16_t>(h - 2), w, 2), colBaseline);
+
+    for (uint32_t i = 0U; i < Slots; ++i)
+    {
+        /* Oldest sample leftmost; the ring's write head points past newest. */
+        const uint8_t level = levels[(head + i) % Slots];
+        const int16_t barH = static_cast<int16_t>(((uint32_t)level * (uint32_t)(h - 4)) / 255U);
+
+        if (barH <= 0)
+        {
+            continue;
+        }
+        fillLocalRect(*this,
+                      area,
+                      touchgfx::Rect(static_cast<int16_t>(i * slotW + 1),
+                                     static_cast<int16_t>(h - 2 - barH),
+                                     barW,
+                                     barH),
+                      (i >= (Slots - 2U)) ? colBarHead : colBar);
+    }
+}
+
+touchgfx::Rect AppLevelHistory::getSolidRect() const
+{
+    return touchgfx::Rect(0, 0, getWidth(), getHeight());
+}
+
 AppBeamAimSurface::AppBeamAimSurface()
     : aimCallback(0)
 {

@@ -146,6 +146,30 @@ private:
     float binHz;
 };
 
+/** Rolling level-history strip (directional recording): newest sample
+ * enters on the right and the trace scrolls left. Levels are 0..255,
+ * mapped from dBFS by the caller. */
+class AppLevelHistory : public touchgfx::Widget
+{
+public:
+    static const uint32_t Slots = 64U;
+
+    AppLevelHistory();
+
+    void push(uint8_t level);
+    void clear();
+    /** Recording styling: red bars instead of blue. */
+    void setHot(bool value);
+
+    virtual void draw(const touchgfx::Rect& area) const;
+    virtual touchgfx::Rect getSolidRect() const;
+
+private:
+    uint8_t levels[Slots];
+    uint32_t head;
+    bool hot;
+};
+
 /** Transparent aim surface for directional recording: reports press and
  * drag positions (local pixel coordinates) through one callback so the view
  * can steer the beam by tapping/dragging on the camera window. */

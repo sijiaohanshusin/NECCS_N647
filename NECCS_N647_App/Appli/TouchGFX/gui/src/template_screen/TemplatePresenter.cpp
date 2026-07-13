@@ -132,11 +132,6 @@ void TemplatePresenter::toggleTrail()
     model->toggleTrail();
 }
 
-void TemplatePresenter::toggleBeamMode()
-{
-    model->toggleBeamMode();
-}
-
 void TemplatePresenter::toggleBeamRecording()
 {
     model->toggleBeamRecording();

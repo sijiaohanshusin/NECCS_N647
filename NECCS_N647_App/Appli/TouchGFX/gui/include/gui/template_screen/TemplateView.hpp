@@ -35,8 +35,8 @@ public:
     void updateSnapshot(const AppUiSnapshot& snapshot);
 
 private:
-    static const uint32_t NavCount = 5U;
-    static const uint32_t QuickCount = 6U;
+    static const uint32_t NavCount = 6U;
+    static const uint32_t QuickCount = 5U;
     static const uint32_t RailCardCount = 4U;
     static const uint32_t RailStateRows = 3U;
     static const uint32_t MicCount = 32U;
@@ -50,7 +50,7 @@ private:
     void setupStatusBar();
     void setupNavigation();
     void setupImagePage();
-    void setupBeamBar();
+    void setupBeamPage();
     void setupMicPage();
     void setupSystemPage();
     void setupParamsPage();
@@ -62,7 +62,7 @@ private:
     void refreshStatusBar(const AppUiSnapshot& snapshot);
     void refreshBootPage(const AppUiSnapshot& snapshot);
     void refreshImagePage(const AppUiSnapshot& snapshot);
-    void refreshBeamUi(const AppUiSnapshot& snapshot);
+    void refreshBeamPage(const AppUiSnapshot& snapshot);
     void refreshMicPage(const AppUiSnapshot& snapshot);
     void refreshSystemPage(const AppUiSnapshot& snapshot);
     void refreshParamsPage(const AppUiSnapshot& snapshot);
@@ -147,22 +147,36 @@ private:
     touchgfx::Box aiConfFill;
     AppTextLabel spectrumBandLabel;
 
-    /* ---- directional recording (beam mode) ---- */
+    /* ---- beam page (directional recording station) ---- */
+    touchgfx::Box beamCamFrame[4];      /* camera window border on this page */
     AppBeamAimSurface beamAimSurface;   /* tap/drag steering over the camera */
-    AppRoundedPanel beamBar;            /* control bar replacing the spectrum strip */
-    AppRoundedPanel beamAutoBtn;
-    AppTextLabel beamAutoLabel;
-    touchgfx::TouchArea beamAutoTouch;
-    AppTextLabel beamDirLabel;
-    touchgfx::Box beamLevelTrack;
-    touchgfx::Box beamLevelFill;
-    AppTextLabel beamLevelLabel;
-    AppRoundedPanel beamRecBtn;
+    AppRoundedPanel beamRecBtn;         /* left column: big record button */
     AppTextLabel beamRecLabel;
     touchgfx::TouchArea beamRecTouch;
-    AppRoundedPanel beamCloseBtn;
-    AppTextLabel beamCloseLabel;
-    touchgfx::TouchArea beamCloseTouch;
+    AppRoundedPanel beamAutoBtn;        /* auto-track / manual toggle */
+    AppTextLabel beamAutoLabel;
+    touchgfx::TouchArea beamAutoTouch;
+    AppRoundedPanel beamClipsCard;      /* clip counter + interaction hint */
+    AppTextLabel beamClipsTitle;
+    AppTextLabel beamClipsValue;
+    AppTextLabel beamHintLabel;
+    AppRoundedPanel beamDirCard;        /* rail: direction readout + dial */
+    AppTextLabel beamDirTitle;
+    AppTextLabel beamThetaLabel;
+    AppTextLabel beamPhiLabel;
+    AppRoundedPanel beamDialFace;
+    touchgfx::Box beamDialCrossH;
+    touchgfx::Box beamDialCrossV;
+    touchgfx::Box beamDialDot;
+    AppRoundedPanel beamLevelCard;      /* rail: level meter */
+    AppTextLabel beamLevelTitle;
+    AppTextLabel beamLevelValue;
+    touchgfx::Box beamLevelTrack;
+    touchgfx::Box beamLevelFill;
+    AppRoundedPanel beamStateCard;      /* rail: stream/state info */
+    AppTextLabel beamStateTitle;
+    AppTextLabel beamStateLine[3];
+    AppLevelHistory beamHistory;        /* bottom strip: rolling level trace */
     touchgfx::Box beamDot;              /* top-bar recording tick (blue) */
 
     /* ---- array page ---- */
@@ -284,8 +298,7 @@ private:
     bool recActive;
     bool menuOpen;
     bool viewerOpen;
-    bool beamUiActive;      /* beam widgets shown (mirrors snapshot.beamActive) */
-    bool beamUiRecording;
+    bool beamUiRecording;   /* record-button state cache (invalidate on change) */
     uint8_t selectedSlot;
     /* nonzero = power-off confirm window is open (ticks remaining) */
     uint8_t powerConfirmTicks;

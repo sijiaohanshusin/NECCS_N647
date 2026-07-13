@@ -1046,31 +1046,44 @@ void pollMedia(AppUiSnapshot& snapshot)
     }
 }
 
-/* Directional-recording glue: auto-track steers the beam onto the displayed
- * source, the beam snapshot feeds the control bar, and the camera reticle
- * mirrors the applied steering. Runs after pollAcoustic (source angles) and
- * pollMedia (recording state). */
+/* Directional-recording glue: the beam engages whenever the beam page is
+ * shown (or a recording is still running after navigating away), auto-track
+ * steers it onto the displayed source, the beam snapshot feeds the page and
+ * the camera reticle mirrors the applied steering. Runs after pollAcoustic
+ * (source angles) and pollMedia (recording state). */
 void pollBeam(AppUiSnapshot& snapshot)
 {
-    if (snapshot.beamActive == 0U)
-    {
-        return;
-    }
+    const bool onPage = (snapshot.activeScreen == APP_UI_SCREEN_BEAM);
+    /* 48k-only: in the 192k array mode the page shows a hint instead. */
+    const bool shouldRun = (snapshot.arrayMode == 0U) &&
+                           (onPage || (snapshot.beamRecording != 0U));
 
-    /* The beamformer is 48k-only: an array-mode switch mid-session shuts
-     * the feature down cleanly instead of steering a dead pipeline. */
-    if (snapshot.arrayMode != 0U)
+    if (!shouldRun)
     {
         if (snapshot.beamRecording != 0U)
         {
+            /* Only reachable via an array-mode switch mid-recording. */
             (void)AppMedia_RequestBeamStop();
             snapshot.beamRecording = 0U;
         }
-        snapshot.beamActive = 0U;
-        snapshot.beamManual = 0U;
-        AppBeamRecord_SetActive(0U);
-        AppCameraDisplay_SetBeamReticle(0U, 0U, APP_CAMERA_DISPLAY_BEAM_HIDDEN);
+        if (snapshot.beamActive != 0U)
+        {
+            snapshot.beamActive = 0U;
+            snapshot.beamManual = 0U;
+            AppBeamRecord_SetActive(0U);
+            AppCameraDisplay_SetBeamReticle(0U, 0U, APP_CAMERA_DISPLAY_BEAM_HIDDEN);
+        }
         return;
+    }
+
+    if (snapshot.beamActive == 0U)
+    {
+        snapshot.beamActive = 1U;
+        snapshot.beamManual = 0U;
+        AppBeamRecord_SetSteering(
+            (snapshot.sourceDisplayValid != 0U) ? snapshot.thetaDeg : 0,
+            (snapshot.sourceDisplayValid != 0U) ? snapshot.phiDeg : 0);
+        AppBeamRecord_SetActive(1U);
     }
 
     if ((snapshot.beamManual == 0U) && (snapshot.sourceDisplayValid != 0U))
@@ -1227,7 +1240,8 @@ void Model::tick()
     g_app_ui_debug[2] = snapshot.activeScreen;
     g_app_ui_debug[3] = (snapshot.bringupEnabledMask << 16) | (snapshot.bringupReadyMask & 0xFFFFU);
 
-    if ((g_app_ui_request_screen <= APP_UI_SCREEN_MEDIA) &&
+    if (((g_app_ui_request_screen <= APP_UI_SCREEN_MEDIA) ||
+         (g_app_ui_request_screen == APP_UI_SCREEN_BEAM)) &&
         (snapshot.activeScreen != APP_UI_SCREEN_BOOT))
     {
         const uint8_t requested = static_cast<uint8_t>(g_app_ui_request_screen);
@@ -1241,15 +1255,21 @@ void Model::tick()
     }
 }
 
+/* Pages that show the live camera window (LTDC layer 1 + color-key hole). */
+static bool screenShowsCamera(uint8_t screen)
+{
+    return (screen == APP_UI_SCREEN_IMAGE) || (screen == APP_UI_SCREEN_BEAM);
+}
+
 void Model::setActiveScreen(uint8_t screen)
 {
-    if (screen <= APP_UI_SCREEN_MEDIA)
+    if ((screen <= APP_UI_SCREEN_MEDIA) || (screen == APP_UI_SCREEN_BEAM))
     {
         snapshot.activeScreen = screen;
-        /* The camera LTDC layer is only shown on the image page; owning this
-         * here keeps the View free of direct app-layer calls. */
+        /* The camera LTDC layer is shown on the imaging and beam pages;
+         * owning this here keeps the View free of direct app-layer calls. */
         AppCameraDisplay_SetVisible(
-            ((screen == APP_UI_SCREEN_IMAGE) && !menuBlocksCamera) ? 1U : 0U);
+            (screenShowsCamera(screen) && !menuBlocksCamera) ? 1U : 0U);
         if (modelListener != 0)
         {
             modelListener->uiSnapshotUpdated(snapshot);
@@ -1261,7 +1281,7 @@ void Model::setMenuBlocksCamera(bool blocked)
 {
     menuBlocksCamera = blocked;
     AppCameraDisplay_SetVisible(
-        ((snapshot.activeScreen == APP_UI_SCREEN_IMAGE) && !menuBlocksCamera) ? 1U : 0U);
+        (screenShowsCamera(snapshot.activeScreen) && !menuBlocksCamera) ? 1U : 0U);
 }
 
 void Model::rebootSystem()
@@ -1420,39 +1440,6 @@ void Model::toggleTrail()
     const uint8_t next = (AppCameraDisplay_GetTrailEnabled() != 0U) ? 0U : 1U;
     AppCameraDisplay_SetTrailEnabled(next);
     snapshot.trailEnabled = next;
-    if (modelListener != 0)
-    {
-        modelListener->uiSnapshotUpdated(snapshot);
-    }
-}
-
-void Model::toggleBeamMode()
-{
-    if (snapshot.beamActive != 0U)
-    {
-        if (snapshot.beamRecording != 0U)
-        {
-            (void)AppMedia_RequestBeamStop();
-            snapshot.beamRecording = 0U;
-        }
-        snapshot.beamActive = 0U;
-        snapshot.beamManual = 0U;
-        AppBeamRecord_SetActive(0U);
-        AppCameraDisplay_SetBeamReticle(0U, 0U, APP_CAMERA_DISPLAY_BEAM_HIDDEN);
-    }
-    else
-    {
-        if (snapshot.arrayMode != 0U)
-        {
-            return; /* 48k-only feature; entry blocked in the 192k mode */
-        }
-        snapshot.beamActive = 1U;
-        snapshot.beamManual = 0U;
-        AppBeamRecord_SetSteering(
-            (snapshot.sourceDisplayValid != 0U) ? snapshot.thetaDeg : 0,
-            (snapshot.sourceDisplayValid != 0U) ? snapshot.phiDeg : 0);
-        AppBeamRecord_SetActive(1U);
-    }
     if (modelListener != 0)
     {
         modelListener->uiSnapshotUpdated(snapshot);

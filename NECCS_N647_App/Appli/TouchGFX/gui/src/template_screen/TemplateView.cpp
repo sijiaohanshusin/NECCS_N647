@@ -172,7 +172,6 @@ TemplateView::TemplateView()
       recActive(false),
       menuOpen(false),
       viewerOpen(false),
-      beamUiActive(false),
       beamUiRecording(false),
       selectedSlot(0U),
       powerConfirmTicks(0U)
@@ -191,7 +190,7 @@ void TemplateView::setupScreen()
     add(cameraPreviewKey);
 
     setupImagePage();
-    setupBeamBar();
+    setupBeamPage();
     setupMicPage();
     setupSystemPage();
     setupParamsPage();
@@ -307,14 +306,15 @@ void TemplateView::setupNavigation()
     menuScrimTouch.setAction(menuPressedCallback);
     add(menuScrimTouch);
 
-    menuPanel.setPosition(10, BarH + 6, 250, 5 * 62 + 20);
+    menuPanel.setPosition(10, BarH + 6, 250, 6 * 62 + 20);
     menuPanel.setStyle(ColorPanel2, 14U);
     menuPanel.setBorder(ColorBlueDim, true);
     add(menuPanel);
 
-    static const char* labels[NavCount] = {"实时成像", "麦克风阵列", "参数设置", "媒体中心", "系统状态"};
+    static const char* labels[NavCount] = {"实时成像", "声源录音", "麦克风阵列", "参数设置", "媒体中心", "系统状态"};
     static const uint16_t icons[NavCount] = {
         BITMAP_UI_IMAGE_ID,
+        BITMAP_UI_MIC_ID,
         BITMAP_UI_MIC_ID,
         BITMAP_UI_SETTINGS_ID,
         BITMAP_UI_MEDIA_ID,
@@ -399,33 +399,31 @@ void TemplateView::setupImagePage()
     }
 
     /* left quick-action column */
-    static const char* quickNames[QuickCount] = {"截屏", "录像", "触发", "调色板", "模式", "声源录音"};
+    static const char* quickNames[QuickCount] = {"截屏", "录像", "触发", "调色板", "模式"};
     static const uint16_t quickIcons[QuickCount] = {
         BITMAP_UI_SNAPSHOT_ID,
         BITMAP_UI_RECORD_ID,
         BITMAP_UI_PEAK_ID,
         BITMAP_UI_QUALITY_ID,
-        BITMAP_UI_STANDARD_ID,
-        BITMAP_UI_MIC_ID
+        BITMAP_UI_STANDARD_ID
     };
-    /* Quick actions fill the left column freed by the popup navigation.
-     * 72 px pitch fits six buttons in the camera-height column. */
+    /* Quick actions fill the left column freed by the popup navigation. */
     for (uint32_t i = 0U; i < QuickCount; ++i)
     {
-        const int16_t y = static_cast<int16_t>(CamY + (i * 72));
-        quickButton[i].setPosition(16, y, 160, 64);
+        const int16_t y = static_cast<int16_t>(CamY + (i * 86));
+        quickButton[i].setPosition(16, y, 160, 78);
         quickButton[i].setStyle(ColorPanel2, 12U);
         quickButton[i].setBorder(ColorLine, true);
         add(quickButton[i]);
 
         quickIcon[i].setBitmap(touchgfx::Bitmap(quickIcons[i]));
-        quickIcon[i].setPosition(84, static_cast<int16_t>(y + 8), 24, 24);
+        quickIcon[i].setPosition(84, static_cast<int16_t>(y + 12), 24, 24);
         add(quickIcon[i]);
 
-        setupLabel(quickLabel[i], 16, static_cast<int16_t>(y + 38), 160, 20, 1, quickNames[i], ColorText, AppTextLabel::ALIGN_CENTER);
+        setupLabel(quickLabel[i], 16, static_cast<int16_t>(y + 46), 160, 20, 1, quickNames[i], ColorText, AppTextLabel::ALIGN_CENTER);
         add(quickLabel[i]);
 
-        quickTouch[i].setPosition(16, y, 160, 64);
+        quickTouch[i].setPosition(16, y, 160, 78);
         quickTouch[i].setAction(quickPressedCallback);
         add(quickTouch[i]);
     }
@@ -530,78 +528,138 @@ void TemplateView::setupImagePage()
     add(spectrumBandLabel);
 }
 
-/* Directional-recording UI: transparent aim surface over the camera window
- * plus an opaque control bar that swaps in for the spectrum strip while the
- * mode is engaged. Deliberately OUTSIDE the camera hole: semi-transparent
- * panels over the LTDC color-key area blend into purple smears. */
-void TemplateView::setupBeamBar()
+/* Directional-recording station: dedicated page around the fixed camera
+ * window (the LTDC layer/color-key hole cannot move, so the skeleton stays
+ * "left column + camera + right rail + bottom strip"). All chrome sits
+ * OUTSIDE the camera hole - semi-transparent panels over the color-key
+ * area would blend into purple smears. */
+void TemplateView::setupBeamPage()
 {
+    /* Camera window border (this page's own frame). */
+    beamCamFrame[0].setPosition(CamX - 3, CamY - 3, CamW + 6, 2);
+    beamCamFrame[1].setPosition(CamX - 3, CamY + CamH + 1, CamW + 6, 2);
+    beamCamFrame[2].setPosition(CamX - 3, CamY - 3, 2, CamH + 6);
+    beamCamFrame[3].setPosition(CamX + CamW + 1, CamY - 3, 2, CamH + 6);
+    for (uint32_t i = 0U; i < 4U; ++i)
+    {
+        beamCamFrame[i].setColor(ColorLine);
+        add(beamCamFrame[i]);
+    }
+
+    /* Aim surface: tap-to-jump / drag-to-follow steering. */
     beamAimSurface.setPosition(CamX, CamY, CamW, CamH);
     beamAimSurface.setAimCallback(beamAimCallback);
     beamAimSurface.setVisible(false);
     beamAimSurface.setTouchable(false);
     add(beamAimSurface);
 
-    beamBar.setPosition(CamX, 544, CamW, 50);
-    beamBar.setStyle(ColorPanel, 10U);
-    beamBar.setBorder(ColorBlueDim, true);
-    beamBar.setVisible(false);
-    add(beamBar);
-
-    beamAutoBtn.setPosition(CamX + 8, 551, 86, 36);
-    beamAutoBtn.setStyle(ColorBlueDim, 10U);
-    beamAutoBtn.setBorder(ColorBlue, true);
-    beamAutoBtn.setVisible(false);
-    add(beamAutoBtn);
-    setupLabel(beamAutoLabel, CamX + 8, 559, 86, 20, 1, "自动", ColorText, AppTextLabel::ALIGN_CENTER);
-    beamAutoLabel.setVisible(false);
-    add(beamAutoLabel);
-    beamAutoTouch.setPosition(CamX + 8, 551, 86, 36);
-    beamAutoTouch.setAction(beamPressedCallback);
-    beamAutoTouch.setVisible(false);
-    add(beamAutoTouch);
-
-    setupLabel(beamDirLabel, CamX + 102, 559, 130, 20, 1, "--", ColorText, AppTextLabel::ALIGN_CENTER);
-    beamDirLabel.setVisible(false);
-    add(beamDirLabel);
-
-    beamLevelTrack.setPosition(CamX + 240, 565, 110, 8);
-    beamLevelTrack.setColor(ColorPanel2);
-    beamLevelTrack.setVisible(false);
-    add(beamLevelTrack);
-    beamLevelFill.setPosition(CamX + 240, 565, 2, 8);
-    beamLevelFill.setColor(ColorGreen);
-    beamLevelFill.setVisible(false);
-    add(beamLevelFill);
-    setupLabel(beamLevelLabel, CamX + 356, 559, 62, 20, 1, "--", ColorMuted, AppTextLabel::ALIGN_LEFT);
-    beamLevelLabel.setVisible(false);
-    add(beamLevelLabel);
-
-    beamRecBtn.setPosition(CamX + 424, 551, 122, 36);
-    beamRecBtn.setStyle(ColorRedDim, 10U);
+    /* Left column: big record button, tracking toggle, clip counter. */
+    beamRecBtn.setPosition(16, CamY, 160, 96);
+    beamRecBtn.setStyle(ColorRedDim, 14U);
     beamRecBtn.setBorder(ColorRed, true);
-    beamRecBtn.setVisible(false);
     add(beamRecBtn);
-    setupLabel(beamRecLabel, CamX + 424, 559, 122, 20, 1, "录制", ColorText, AppTextLabel::ALIGN_CENTER);
-    beamRecLabel.setVisible(false);
+    setupLabel(beamRecLabel, 16, CamY + 38, 160, 22, 2, "录制", ColorRed, AppTextLabel::ALIGN_CENTER);
     add(beamRecLabel);
-    beamRecTouch.setPosition(CamX + 424, 551, 122, 36);
+    beamRecTouch.setPosition(16, CamY, 160, 96);
     beamRecTouch.setAction(beamPressedCallback);
-    beamRecTouch.setVisible(false);
     add(beamRecTouch);
 
-    beamCloseBtn.setPosition(CamX + 554, 551, 78, 36);
-    beamCloseBtn.setStyle(ColorPanel2, 10U);
-    beamCloseBtn.setBorder(ColorLine, true);
-    beamCloseBtn.setVisible(false);
-    add(beamCloseBtn);
-    setupLabel(beamCloseLabel, CamX + 554, 559, 78, 20, 1, "关闭", ColorMuted, AppTextLabel::ALIGN_CENTER);
-    beamCloseLabel.setVisible(false);
-    add(beamCloseLabel);
-    beamCloseTouch.setPosition(CamX + 554, 551, 78, 36);
-    beamCloseTouch.setAction(beamPressedCallback);
-    beamCloseTouch.setVisible(false);
-    add(beamCloseTouch);
+    beamAutoBtn.setPosition(16, CamY + 108, 160, 64);
+    beamAutoBtn.setStyle(ColorBlueDim, 12U);
+    beamAutoBtn.setBorder(ColorBlue, true);
+    add(beamAutoBtn);
+    setupLabel(beamAutoLabel, 16, CamY + 130, 160, 20, 1, "自动", ColorBlue, AppTextLabel::ALIGN_CENTER);
+    add(beamAutoLabel);
+    beamAutoTouch.setPosition(16, CamY + 108, 160, 64);
+    beamAutoTouch.setAction(beamPressedCallback);
+    add(beamAutoTouch);
+
+    beamClipsCard.setPosition(16, CamY + 184, 160, 96);
+    beamClipsCard.setStyle(ColorPanel, 12U);
+    beamClipsCard.setBorder(ColorLine, true);
+    add(beamClipsCard);
+    /* "段" only exists in the Small typography, so the unit lives in the
+     * title and the big value stays numeric. */
+    setupLabel(beamClipsTitle, 30, CamY + 194, 132, 18, 1, "已录 (段)", ColorMuted);
+    add(beamClipsTitle);
+    setupLabel(beamClipsValue, 30, CamY + 216, 132, 26, 2, "0", ColorText);
+    add(beamClipsValue);
+    setupLabel(beamHintLabel, 30, CamY + 248, 132, 20, 1, "触摸点选方位", ColorMuted);
+    add(beamHintLabel);
+
+    /* Right rail: direction card (readout + dial). */
+    beamDirCard.setPosition(RailX, 60, RailW, 214);
+    beamDirCard.setStyle(ColorPanel, 10U);
+    beamDirCard.setBorder(ColorLine, true);
+    add(beamDirCard);
+    setupLabel(beamDirTitle, RailX + 14, 68, 144, 18, 1, "方位 · 俯仰", ColorMuted);
+    add(beamDirTitle);
+    setupLabel(beamThetaLabel, RailX + 14, 88, 68, 24, 2, "+0°", ColorText);
+    add(beamThetaLabel);
+    setupLabel(beamPhiLabel, RailX + 88, 88, 70, 24, 2, "+0°", ColorText);
+    add(beamPhiLabel);
+
+    /* Dial: square face + crosshair + steering dot. Face 120x120 centred. */
+    {
+        const int16_t dialX = static_cast<int16_t>(RailX + ((RailW - 120) / 2));
+        const int16_t dialY = 128;
+
+        beamDialFace.setPosition(dialX, dialY, 120, 120);
+        beamDialFace.setStyle(ColorPanel2, 16U);
+        beamDialFace.setBorder(ColorBlueDim, true);
+        add(beamDialFace);
+        beamDialCrossH.setPosition(dialX + 6, dialY + 59, 108, 2);
+        beamDialCrossH.setColor(ColorLine);
+        add(beamDialCrossH);
+        beamDialCrossV.setPosition(dialX + 59, dialY + 6, 2, 108);
+        beamDialCrossV.setColor(ColorLine);
+        add(beamDialCrossV);
+        beamDialDot.setPosition(dialX + 56, dialY + 56, 8, 8);
+        beamDialDot.setColor(ColorBlue);
+        add(beamDialDot);
+    }
+
+    /* Right rail: level card. */
+    beamLevelCard.setPosition(RailX, 282, RailW, 108);
+    beamLevelCard.setStyle(ColorPanel, 10U);
+    beamLevelCard.setBorder(ColorLine, true);
+    add(beamLevelCard);
+    /* Unit in the Small-typography title: the big Title face has no 'd'. */
+    setupLabel(beamLevelTitle, RailX + 14, 290, 144, 18, 1, "电平 dBFS", ColorMuted);
+    add(beamLevelTitle);
+    setupLabel(beamLevelValue, RailX + 14, 312, 144, 30, 3, "--", ColorText);
+    add(beamLevelValue);
+    beamLevelTrack.setPosition(RailX + 14, 360, 144, 10);
+    beamLevelTrack.setColor(ColorPanel2);
+    add(beamLevelTrack);
+    beamLevelFill.setPosition(RailX + 14, 360, 2, 10);
+    beamLevelFill.setColor(ColorGreen);
+    add(beamLevelFill);
+
+    /* Right rail: state card. */
+    beamStateCard.setPosition(RailX, 398, RailW, 110);
+    beamStateCard.setStyle(ColorPanel, 10U);
+    beamStateCard.setBorder(ColorLine, true);
+    add(beamStateCard);
+    setupLabel(beamStateTitle, RailX + 14, 406, 144, 18, 1, "状态", ColorMuted);
+    add(beamStateTitle);
+    static const char* stateDefaults[3] = {"48k · 32麦", "WAV 录音", "待机"};
+    for (uint32_t i = 0U; i < 3U; ++i)
+    {
+        setupLabel(beamStateLine[i],
+                   RailX + 14,
+                   static_cast<int16_t>(428 + (i * 24)),
+                   144,
+                   20,
+                   1,
+                   stateDefaults[i],
+                   ColorText);
+        add(beamStateLine[i]);
+    }
+
+    /* Bottom strip: rolling beam-level trace. */
+    beamHistory.setPosition(CamX, 548, CamW, 46);
+    add(beamHistory);
 }
 
 void TemplateView::setupMicPage()
@@ -1097,7 +1155,7 @@ void TemplateView::handleTickEvent()
             setViewerOpen(true);
             break;
         /* directional recording (remote testing) */
-        case 16U: presenter->toggleBeamMode(); break;
+        case 16U: presenter->selectScreen(APP_UI_SCREEN_BEAM); break;
         case 17U: presenter->toggleBeamRecording(); break;
         case 18U: presenter->beamAutoTrack(); break;
         default: break;
@@ -1188,6 +1246,9 @@ void TemplateView::updateSnapshot(const AppUiSnapshot& snapshot)
     case APP_UI_SCREEN_IMAGE:
         refreshImagePage(snapshot);
         break;
+    case APP_UI_SCREEN_BEAM:
+        refreshBeamPage(snapshot);
+        break;
     case APP_UI_SCREEN_MICS:
         refreshMicPage(snapshot);
         break;
@@ -1207,6 +1268,7 @@ void TemplateView::refreshVisibility()
 {
     const bool bootVisible = (activeScreen == APP_UI_SCREEN_BOOT);
     const bool imageVisible = (activeScreen == APP_UI_SCREEN_IMAGE) && !bootVisible;
+    const bool beamVisible = (activeScreen == APP_UI_SCREEN_BEAM);
     const bool micVisible = (activeScreen == APP_UI_SCREEN_MICS);
     const bool sysVisible = (activeScreen == APP_UI_SCREEN_PERF);
     const bool paramsVisible = (activeScreen == APP_UI_SCREEN_SETTINGS);
@@ -1267,8 +1329,8 @@ void TemplateView::refreshVisibility()
         navActiveDot[i].setVisible(popupVisible);
     }
 
-    /* imaging */
-    cameraPreviewKey.setVisible(imageVisible);
+    /* imaging (the color-key hole also serves the beam page's camera view) */
+    cameraPreviewKey.setVisible(imageVisible || beamVisible);
     for (uint32_t i = 0U; i < 4U; ++i)
     {
         cameraFrame[i].setVisible(imageVisible);
@@ -1308,8 +1370,8 @@ void TemplateView::refreshVisibility()
     railSceneValue.setVisible(imageVisible);
     railCandLabel[0].setVisible(imageVisible);
     railCandLabel[1].setVisible(imageVisible);
-    spectrumPanel.setVisible(imageVisible && !beamUiActive);
-    spectrumBandLabel.setVisible(imageVisible && !beamUiActive);
+    spectrumPanel.setVisible(imageVisible);
+    spectrumBandLabel.setVisible(imageVisible);
     aiCard.setVisible(imageVisible);
     aiTitle.setVisible(imageVisible);
     aiClassLabel.setVisible(imageVisible);
@@ -1317,27 +1379,43 @@ void TemplateView::refreshVisibility()
     aiConfFill.setVisible(imageVisible);
     aiConfLabel.setVisible(imageVisible);
 
-    /* directional recording (widgets shown only while the mode is engaged) */
+    /* beam page (directional recording station) */
+    for (uint32_t i = 0U; i < 4U; ++i)
     {
-        const bool beamVisible = imageVisible && beamUiActive;
-
-        beamAimSurface.setVisible(beamVisible);
-        beamAimSurface.setTouchable(beamVisible);
-        beamBar.setVisible(beamVisible);
-        beamAutoBtn.setVisible(beamVisible);
-        beamAutoLabel.setVisible(beamVisible);
-        beamAutoTouch.setVisible(beamVisible);
-        beamDirLabel.setVisible(beamVisible);
-        beamLevelTrack.setVisible(beamVisible);
-        beamLevelFill.setVisible(beamVisible);
-        beamLevelLabel.setVisible(beamVisible);
-        beamRecBtn.setVisible(beamVisible);
-        beamRecLabel.setVisible(beamVisible);
-        beamRecTouch.setVisible(beamVisible);
-        beamCloseBtn.setVisible(beamVisible);
-        beamCloseLabel.setVisible(beamVisible);
-        beamCloseTouch.setVisible(beamVisible);
+        beamCamFrame[i].setVisible(beamVisible);
     }
+    beamAimSurface.setVisible(beamVisible);
+    beamAimSurface.setTouchable(beamVisible);
+    beamRecBtn.setVisible(beamVisible);
+    beamRecLabel.setVisible(beamVisible);
+    beamRecTouch.setVisible(beamVisible);
+    beamAutoBtn.setVisible(beamVisible);
+    beamAutoLabel.setVisible(beamVisible);
+    beamAutoTouch.setVisible(beamVisible);
+    beamClipsCard.setVisible(beamVisible);
+    beamClipsTitle.setVisible(beamVisible);
+    beamClipsValue.setVisible(beamVisible);
+    beamHintLabel.setVisible(beamVisible);
+    beamDirCard.setVisible(beamVisible);
+    beamDirTitle.setVisible(beamVisible);
+    beamThetaLabel.setVisible(beamVisible);
+    beamPhiLabel.setVisible(beamVisible);
+    beamDialFace.setVisible(beamVisible);
+    beamDialCrossH.setVisible(beamVisible);
+    beamDialCrossV.setVisible(beamVisible);
+    beamDialDot.setVisible(beamVisible);
+    beamLevelCard.setVisible(beamVisible);
+    beamLevelTitle.setVisible(beamVisible);
+    beamLevelValue.setVisible(beamVisible);
+    beamLevelTrack.setVisible(beamVisible);
+    beamLevelFill.setVisible(beamVisible);
+    beamStateCard.setVisible(beamVisible);
+    beamStateTitle.setVisible(beamVisible);
+    for (uint32_t i = 0U; i < 3U; ++i)
+    {
+        beamStateLine[i].setVisible(beamVisible);
+    }
+    beamHistory.setVisible(beamVisible);
 
     /* array */
     micTitle.setVisible(micVisible);
@@ -1458,6 +1536,7 @@ void TemplateView::refreshNavigation()
 {
     static const uint8_t navScreens[NavCount] = {
         APP_UI_SCREEN_IMAGE,
+        APP_UI_SCREEN_BEAM,
         APP_UI_SCREEN_MICS,
         APP_UI_SCREEN_SETTINGS,
         APP_UI_SCREEN_MEDIA,
@@ -1856,75 +1935,22 @@ void TemplateView::refreshImagePage(const AppUiSnapshot& snapshot)
 
     quickLabel[4].setText(profileName(activeProfile));
 
-    const bool beamOn = (snapshot.beamActive != 0U);
-    quickButton[5].setFillColor(beamOn ? ColorBlueDim : ColorPanel2);
-    quickButton[5].setBorder(beamOn ? ColorBlue : ColorLine, true);
-    quickLabel[5].setColors(beamOn ? ColorBlue : ColorText, ColorBg, false);
-    quickLabel[5].setText("声源录音");
-
     railSceneValue.setText(sceneName(snapshot.acousticScene));
-
-    refreshBeamUi(snapshot);
 }
 
-/* Directional-recording control bar + aim state. */
-void TemplateView::refreshBeamUi(const AppUiSnapshot& snapshot)
+/* Directional-recording page: buttons, dial, level meter, history, state. */
+void TemplateView::refreshBeamPage(const AppUiSnapshot& snapshot)
 {
-    const bool active = (snapshot.beamActive != 0U);
     const bool recording = (snapshot.beamRecording != 0U);
+    const bool manual = (snapshot.beamManual != 0U);
+    const bool available = (snapshot.arrayMode == 0U);
     char text[32];
 
-    if (active != beamUiActive)
-    {
-        beamUiActive = active;
-        refreshVisibility();
-        /* Rare transition: repaint the whole strip area (spectrum <-> bar). */
-        invalidate();
-    }
-
-    if (!active)
-    {
-        beamUiRecording = false;
-        return;
-    }
-
-    const bool manual = (snapshot.beamManual != 0U);
-    beamAutoLabel.setText(manual ? "点选" : "自动");
-    beamAutoLabel.setColors(manual ? ColorAmber : ColorBlue, ColorBg, false);
-    beamAutoBtn.setFillColor(manual ? ColorPanel2 : ColorBlueDim);
-
-    (void)snprintf(text, sizeof(text), "%+d° / %+d°",
-                   snapshot.beamTheta, snapshot.beamPhi);
-    beamDirLabel.setText(text);
-
-    /* Level meter: -90..0 dBFS across the 110 px track. */
-    {
-        int32_t level = snapshot.beamRmsDbfs;
-        int16_t fillW;
-
-        if (level < -90) { level = -90; }
-        if (level > 0) { level = 0; }
-        fillW = static_cast<int16_t>(((level + 90) * 110) / 90);
-        if (fillW < 2)
-        {
-            fillW = 2;
-        }
-        if (beamLevelFill.getWidth() != fillW)
-        {
-            beamLevelFill.setPosition(CamX + 240, 565, fillW, 8);
-            beamLevelFill.setColor((level > -15) ? ColorRed :
-                                   ((level > -35) ? ColorAmber : ColorGreen));
-            beamLevelTrack.invalidate();
-            beamLevelFill.invalidate();
-        }
-
-        (void)snprintf(text, sizeof(text), "%lddB", static_cast<long>(level));
-        beamLevelLabel.setText(text);
-    }
-
+    /* Record button (page主键). "停录" not "停止": the Body typography that
+     * backs this scale-2 label has no 止 glyph. */
     if (recording)
     {
-        (void)snprintf(text, sizeof(text), "停止 %02u:%02u",
+        (void)snprintf(text, sizeof(text), "停录 %02u:%02u",
                        snapshot.beamSeconds / 60U, snapshot.beamSeconds % 60U);
         beamRecLabel.setText(text);
         beamRecLabel.setColors(ColorText, ColorBg, false);
@@ -1932,9 +1958,9 @@ void TemplateView::refreshBeamUi(const AppUiSnapshot& snapshot)
     }
     else
     {
-        beamRecLabel.setText("录制");
-        beamRecLabel.setColors(ColorRed, ColorBg, false);
-        beamRecBtn.setFillColor(ColorRedDim);
+        beamRecLabel.setText(available ? "录制" : "限48k");
+        beamRecLabel.setColors(available ? ColorRed : ColorMuted, ColorBg, false);
+        beamRecBtn.setFillColor(available ? ColorRedDim : ColorPanel2);
     }
     if (recording != beamUiRecording)
     {
@@ -1942,6 +1968,93 @@ void TemplateView::refreshBeamUi(const AppUiSnapshot& snapshot)
         beamRecBtn.invalidate();
         beamRecLabel.invalidate();
     }
+
+    /* Auto-track / manual toggle. */
+    beamAutoLabel.setText(manual ? "点选" : "自动");
+    beamAutoLabel.setColors(manual ? ColorAmber : ColorBlue, ColorBg, false);
+    beamAutoBtn.setFillColor(manual ? ColorPanel2 : ColorBlueDim);
+    beamAutoBtn.setBorder(manual ? ColorAmber : ColorBlue, true);
+
+    /* Direction readout + dial dot (theta -> x, phi -> y, +/-52 px throw). */
+    (void)snprintf(text, sizeof(text), "%+d°", snapshot.beamTheta);
+    beamThetaLabel.setText(text);
+    (void)snprintf(text, sizeof(text), "%+d°", snapshot.beamPhi);
+    beamPhiLabel.setText(text);
+    {
+        const int16_t dialX = static_cast<int16_t>(RailX + ((RailW - 120) / 2));
+        const int16_t dialY = 128;
+        int32_t dx = (static_cast<int32_t>(snapshot.beamTheta) * 52) / 60;
+        int32_t dy = -(static_cast<int32_t>(snapshot.beamPhi) * 52) / 50;
+
+        if (dx < -52) { dx = -52; }
+        if (dx > 52) { dx = 52; }
+        if (dy < -52) { dy = -52; }
+        if (dy > 52) { dy = 52; }
+
+        const int16_t nx = static_cast<int16_t>(dialX + 60 + dx - 4);
+        const int16_t ny = static_cast<int16_t>(dialY + 60 + dy - 4);
+
+        if ((beamDialDot.getX() != nx) || (beamDialDot.getY() != ny))
+        {
+            beamDialDot.invalidate();
+            beamDialDot.setPosition(nx, ny, 8, 8);
+            beamDialDot.invalidate();
+        }
+        beamDialDot.setColor(recording ? ColorRed : (manual ? ColorAmber : ColorBlue));
+    }
+
+    /* Level: big value, bar, rolling history strip. */
+    {
+        int32_t level = snapshot.beamRmsDbfs;
+        int16_t fillW;
+
+        if (level < -90) { level = -90; }
+        if (level > 0) { level = 0; }
+
+        (void)snprintf(text, sizeof(text), "%ld", static_cast<long>(level));
+        beamLevelValue.setText(text);
+
+        fillW = static_cast<int16_t>(((level + 90) * 144) / 90);
+        if (fillW < 2)
+        {
+            fillW = 2;
+        }
+        if (beamLevelFill.getWidth() != fillW)
+        {
+            beamLevelFill.setPosition(RailX + 14, 360, fillW, 10);
+            beamLevelFill.setColor((level > -15) ? ColorRed :
+                                   ((level > -35) ? ColorAmber : ColorGreen));
+            beamLevelTrack.invalidate();
+            beamLevelFill.invalidate();
+        }
+
+        beamHistory.setHot(recording);
+        beamHistory.push(static_cast<uint8_t>(level + 90)); /* 0..90 */
+    }
+
+    /* Clip counter + interaction hint. */
+    (void)snprintf(text, sizeof(text), "%lu", static_cast<unsigned long>(snapshot.beamClips));
+    beamClipsValue.setText(text);
+    beamHintLabel.setText(manual ? "按自动回声源" : "触摸点选方位");
+
+    /* State card. */
+    beamStateLine[0].setText(available ? "48k · 32麦" : "限48k模式");
+    beamStateLine[0].setColors(available ? ColorText : ColorAmber, ColorBg, false);
+    if (recording)
+    {
+        (void)snprintf(text, sizeof(text), "REC %02u:%02u",
+                       snapshot.beamSeconds / 60U, snapshot.beamSeconds % 60U);
+        beamStateLine[1].setText(text);
+        beamStateLine[1].setColors(ColorRed, ColorBg, false);
+    }
+    else
+    {
+        beamStateLine[1].setText("WAV 待机");
+        beamStateLine[1].setColors(ColorMuted, ColorBg, false);
+    }
+    beamStateLine[2].setText((snapshot.sourceDisplayValid != 0U) ? "有声源" : "无声源");
+    beamStateLine[2].setColors((snapshot.sourceDisplayValid != 0U) ? ColorGreen : ColorMuted,
+                               ColorBg, false);
 }
 
 void TemplateView::refreshMicPage(const AppUiSnapshot& snapshot)
@@ -2281,6 +2394,7 @@ void TemplateView::onNavPressed(const touchgfx::AbstractButton& source)
 {
     static const uint8_t navScreens[NavCount] = {
         APP_UI_SCREEN_IMAGE,
+        APP_UI_SCREEN_BEAM,
         APP_UI_SCREEN_MICS,
         APP_UI_SCREEN_SETTINGS,
         APP_UI_SCREEN_MEDIA,
@@ -2365,10 +2479,6 @@ void TemplateView::onQuickPressed(const touchgfx::AbstractButton& source)
     {
         presenter->selectProfile(static_cast<uint8_t>((activeProfile + 1U) % ProfileCount));
     }
-    else if (&source == &quickTouch[5])
-    {
-        presenter->toggleBeamMode();
-    }
 }
 
 void TemplateView::onBeamPressed(const touchgfx::AbstractButton& source)
@@ -2380,10 +2490,6 @@ void TemplateView::onBeamPressed(const touchgfx::AbstractButton& source)
     else if (&source == &beamRecTouch)
     {
         presenter->toggleBeamRecording();
-    }
-    else if (&source == &beamCloseTouch)
-    {
-        presenter->toggleBeamMode();
     }
 }
 

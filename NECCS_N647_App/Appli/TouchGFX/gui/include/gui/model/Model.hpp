@@ -25,7 +25,9 @@ enum AppUiScreen
     APP_UI_SCREEN_SETTINGS = 3,
     APP_UI_SCREEN_MEDIA = 4,
     /* Boot/self-check page; entered only at startup, never via navigation. */
-    APP_UI_SCREEN_BOOT = 5
+    APP_UI_SCREEN_BOOT = 5,
+    /* Directional recording station (beamformer aim + WAV capture). */
+    APP_UI_SCREEN_BEAM = 6
 };
 
 /* Boot checklist module states derived from the bring-up snapshot. */
@@ -317,8 +319,8 @@ public:
     void toggleTrail();
     void requestScreenshot();
     void toggleRecording();
-    /* Directional recording: mode toggle, record toggle, steering. */
-    void toggleBeamMode();
+    /* Directional recording: the beam engages whenever the beam page is
+     * active (or a recording is running); no explicit mode toggle. */
     void toggleBeamRecording();
     void beamAutoTrack();
     /* Manual steering from the aim surface (camera-frame pixels 0..639/0..479). */
