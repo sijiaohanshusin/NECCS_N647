@@ -3,6 +3,7 @@
 #include "app_camera.h"
 #include "main.h"
 #include "tx_api.h"
+#include <math.h>
 #include <string.h>
 
 #define APP_CAMERA_DISPLAY_FLAG_READY (1UL << 0)
@@ -52,6 +53,9 @@ typedef struct
   uint8_t quality_pct;
   uint8_t marker_count;
   uint8_t trail_enabled;
+  uint8_t beam_style; /* APP_CAMERA_DISPLAY_BEAM_* */
+  uint16_t beam_x;
+  uint16_t beam_y;
   AppCameraDisplayMarker_t markers[APP_CAMERA_DISPLAY_MARKER_MAX];
   AppCameraDisplayTrailDot_t trail[APP_CAMERA_DISPLAY_TRAIL_MAX];
   uint8_t field[APP_CAMERA_DISPLAY_FIELD_COUNT];
@@ -556,6 +560,134 @@ static void AppCameraDisplay_DrawMarker(uint16_t *framebuffer,
   }
 }
 
+/* Beam-steering reticle: annulus ring + centre dot (+ compass ticks when
+ * locked/recording). Per-row spans against the staged framebuffer, same
+ * cache discipline as the markers. */
+static void AppCameraDisplay_DrawBeamReticle(uint16_t *framebuffer,
+                                             uint32_t frame_addr,
+                                             const AppCameraDisplayAcousticOverlay_t *overlay)
+{
+  const int32_t cx = (int32_t)overlay->beam_x;
+  const int32_t cy = (int32_t)overlay->beam_y;
+  const uint8_t style = overlay->beam_style;
+  const int32_t r_out = (style == APP_CAMERA_DISPLAY_BEAM_AIM) ? 18 : 22;
+  const int32_t thick = (style == APP_CAMERA_DISPLAY_BEAM_RECORDING) ? 3 : 2;
+  const int32_t r_in = r_out - thick;
+  const int32_t tick_len = 7;
+  const uint16_t color =
+      (style == APP_CAMERA_DISPLAY_BEAM_RECORDING) ? AppCameraDisplay_Rgb565(255U, 96U, 84U) :
+      (style == APP_CAMERA_DISPLAY_BEAM_LOCKED)    ? AppCameraDisplay_Rgb565(245U, 246U, 240U)
+                                                   : AppCameraDisplay_Rgb565(120U, 214U, 255U);
+  const uint8_t alpha = 216U;
+  const int32_t band = r_out + tick_len + 2;
+  const int32_t y0 = AppCameraDisplay_MaxI32(cy - band, 0);
+  const int32_t y1 = AppCameraDisplay_MinI32(cy + band + 1, (int32_t)APP_CAMERA_DISPLAY_HEIGHT);
+
+  if (y1 <= y0)
+  {
+    return;
+  }
+
+  AppCameraDisplay_CleanInvalidateDCache(frame_addr +
+                                           ((uint32_t)y0 * APP_CAMERA_DISPLAY_CAMERA_LINE_BYTES),
+                                         (uint32_t)(y1 - y0) * APP_CAMERA_DISPLAY_CAMERA_LINE_BYTES);
+
+  for (int32_t yy = y0; yy < y1; ++yy)
+  {
+    const int32_t dy = yy - cy;
+    const int32_t abs_dy = (dy < 0) ? -dy : dy;
+    uint16_t *row = framebuffer + ((uint32_t)yy * APP_CAMERA_DISPLAY_WIDTH);
+
+    /* Ring annulus. */
+    if (abs_dy <= r_out)
+    {
+      const int32_t outer_w = (int32_t)sqrtf((float)((r_out * r_out) - (dy * dy)));
+      const int32_t inner_w = (abs_dy <= r_in) ?
+          (int32_t)sqrtf((float)((r_in * r_in) - (dy * dy))) : -1;
+      int32_t spans[2][2];
+      uint32_t span_count;
+
+      if (inner_w < 0)
+      {
+        spans[0][0] = cx - outer_w;
+        spans[0][1] = cx + outer_w;
+        span_count = 1U;
+      }
+      else
+      {
+        spans[0][0] = cx - outer_w;
+        spans[0][1] = cx - inner_w - 1;
+        spans[1][0] = cx + inner_w + 1;
+        spans[1][1] = cx + outer_w;
+        span_count = 2U;
+      }
+
+      for (uint32_t s = 0U; s < span_count; ++s)
+      {
+        const int32_t sx0 = AppCameraDisplay_MaxI32(spans[s][0], 0);
+        const int32_t sx1 = AppCameraDisplay_MinI32(spans[s][1], (int32_t)APP_CAMERA_DISPLAY_WIDTH - 1);
+
+        for (int32_t xx = sx0; xx <= sx1; ++xx)
+        {
+          row[xx] = AppCameraDisplay_BlendRgb565(row[xx], color, alpha);
+        }
+      }
+    }
+
+    /* Centre dot (r=2). */
+    if (abs_dy <= 2)
+    {
+      const int32_t sx0 = AppCameraDisplay_MaxI32(cx - 2, 0);
+      const int32_t sx1 = AppCameraDisplay_MinI32(cx + 2, (int32_t)APP_CAMERA_DISPLAY_WIDTH - 1);
+
+      for (int32_t xx = sx0; xx <= sx1; ++xx)
+      {
+        row[xx] = AppCameraDisplay_BlendRgb565(row[xx], color, alpha);
+      }
+    }
+
+    /* Compass ticks (locked/recording): N/S vertical strokes... */
+    if ((style != APP_CAMERA_DISPLAY_BEAM_AIM) && (abs_dy >= (r_out + 2)) && (abs_dy <= (r_out + tick_len)))
+    {
+      const int32_t sx0 = AppCameraDisplay_MaxI32(cx - 1, 0);
+      const int32_t sx1 = AppCameraDisplay_MinI32(cx + 1, (int32_t)APP_CAMERA_DISPLAY_WIDTH - 1);
+
+      for (int32_t xx = sx0; xx <= sx1; ++xx)
+      {
+        row[xx] = AppCameraDisplay_BlendRgb565(row[xx], color, alpha);
+      }
+    }
+    /* ...and E/W horizontal strokes on the centre rows. */
+    if ((style != APP_CAMERA_DISPLAY_BEAM_AIM) && (abs_dy <= 1))
+    {
+      const int32_t seg[2][2] = {
+        { cx - r_out - tick_len, cx - r_out - 2 },
+        { cx + r_out + 2, cx + r_out + tick_len }
+      };
+
+      for (uint32_t s = 0U; s < 2U; ++s)
+      {
+        const int32_t sx0 = AppCameraDisplay_MaxI32(seg[s][0], 0);
+        const int32_t sx1 = AppCameraDisplay_MinI32(seg[s][1], (int32_t)APP_CAMERA_DISPLAY_WIDTH - 1);
+
+        for (int32_t xx = sx0; xx <= sx1; ++xx)
+        {
+          row[xx] = AppCameraDisplay_BlendRgb565(row[xx], color, alpha);
+        }
+      }
+    }
+  }
+
+  if (y0 < s_overlay_dirty_y0)
+  {
+    s_overlay_dirty_y0 = y0;
+  }
+  if (y1 > s_overlay_dirty_y1)
+  {
+    s_overlay_dirty_y1 = y1;
+  }
+}
+
 /* Render the 96x72 heat field over the camera frame: fixed-point bilinear
  * upscale (2-px blocks horizontally, per-row vertically), palette LUT
  * colouring, per-pixel alpha with border fade. Runs on the camera worker
@@ -580,7 +712,10 @@ static void AppCameraDisplay_DrawAcousticOverlay(uint32_t frame_addr)
     __enable_irq();
   }
 
-  if ((overlay.enabled == 0U) || (frame_addr == 0U))
+  /* The beam reticle renders independently of the acoustic overlay gate:
+   * aiming must stay visible when no source is locked. */
+  if ((frame_addr == 0U) ||
+      ((overlay.enabled == 0U) && (overlay.beam_style == APP_CAMERA_DISPLAY_BEAM_HIDDEN)))
   {
     return;
   }
@@ -597,7 +732,7 @@ static void AppCameraDisplay_DrawAcousticOverlay(uint32_t frame_addr)
   s_overlay_dirty_y0 = (int32_t)APP_CAMERA_DISPLAY_HEIGHT;
   s_overlay_dirty_y1 = 0;
 
-  for (uint32_t by = 0U; by < (APP_CAMERA_DISPLAY_HEIGHT / 2U); by++)
+  for (uint32_t by = 0U; (overlay.enabled != 0U) && (by < (APP_CAMERA_DISPLAY_HEIGHT / 2U)); by++)
   {
     const uint32_t y0 = by * 2U;
     const uint32_t y1 = y0 + 1U;
@@ -768,7 +903,7 @@ static void AppCameraDisplay_DrawAcousticOverlay(uint32_t frame_addr)
   }
 
   /* Fading dot trail of the primary source path. */
-  if (overlay.trail_enabled != 0U)
+  if ((overlay.enabled != 0U) && (overlay.trail_enabled != 0U))
   {
     for (uint32_t i = 0U; i < APP_CAMERA_DISPLAY_TRAIL_MAX; i++)
     {
@@ -819,7 +954,7 @@ static void AppCameraDisplay_DrawAcousticOverlay(uint32_t frame_addr)
     }
   }
 
-  for (uint32_t i = 0U; i < overlay.marker_count; i++)
+  for (uint32_t i = 0U; (overlay.enabled != 0U) && (i < overlay.marker_count); i++)
   {
     if (overlay.markers[i].strength >= APP_CAMERA_DISPLAY_MARKER_MIN_STRENGTH)
     {
@@ -845,6 +980,11 @@ static void AppCameraDisplay_DrawAcousticOverlay(uint32_t frame_addr)
         }
       }
     }
+  }
+
+  if (overlay.beam_style != APP_CAMERA_DISPLAY_BEAM_HIDDEN)
+  {
+    AppCameraDisplay_DrawBeamReticle(framebuffer, frame_addr, &overlay);
   }
 
   /* Write the touched band back for the LTDC scan-out. Clean+INVALIDATE,
@@ -1146,6 +1286,30 @@ void AppCameraDisplay_SetTrailEnabled(uint8_t enabled)
   s_acoustic_overlay.trail_enabled = (enabled != 0U) ? 1U : 0U;
 }
 
+void AppCameraDisplay_SetBeamReticle(uint16_t x, uint16_t y, uint8_t style)
+{
+  uint32_t primask = __get_PRIMASK();
+
+  if (x >= APP_CAMERA_DISPLAY_WIDTH)
+  {
+    x = APP_CAMERA_DISPLAY_WIDTH - 1U;
+  }
+  if (y >= APP_CAMERA_DISPLAY_HEIGHT)
+  {
+    y = APP_CAMERA_DISPLAY_HEIGHT - 1U;
+  }
+
+  __disable_irq();
+  s_acoustic_overlay.beam_x = x;
+  s_acoustic_overlay.beam_y = y;
+  s_acoustic_overlay.beam_style =
+      (style <= APP_CAMERA_DISPLAY_BEAM_RECORDING) ? style : APP_CAMERA_DISPLAY_BEAM_HIDDEN;
+  if (primask == 0U)
+  {
+    __enable_irq();
+  }
+}
+
 uint8_t AppCameraDisplay_GetTrailEnabled(void)
 {
   return s_acoustic_overlay.trail_enabled;
@@ -1279,9 +1443,10 @@ static void AppCameraDisplay_ProcessSwap(uint32_t frame_addr)
     AppCameraDisplay_ReloadLayer(LTDC_Layer1, LTDC_LxRCR_VBR);
 
     /* Debug screenshot freeze: this frame is fully composed and flipped;
-     * parking DMA now (only when the overlay is live) preserves exactly
-     * what the screen shows. */
-    AppCamera_FreezeIfRequested(s_acoustic_overlay.enabled);
+     * parking DMA now (only when the overlay or beam reticle is live)
+     * preserves exactly what the screen shows. */
+    AppCamera_FreezeIfRequested((s_acoustic_overlay.enabled != 0U) ||
+                                (s_acoustic_overlay.beam_style != APP_CAMERA_DISPLAY_BEAM_HIDDEN));
   }
   g_app_camera_ltdc_swap_count++;
   AppCameraDisplay_SnapshotLtdc();

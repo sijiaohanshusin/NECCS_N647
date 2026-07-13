@@ -7,6 +7,7 @@
 
 #include "app_media.h"
 
+#include "app_beam_record.h"
 #include "app_camera_display.h"
 #include "app_media_jpeg.h"
 #include "main.h"
@@ -54,7 +55,15 @@
 
 #define APP_MEDIA_SCREEN_DIR              "NECCS/SCREEN"
 #define APP_MEDIA_VIDEO_DIR               "NECCS/VIDEO"
+#define APP_MEDIA_AUDIO_DIR               "NECCS/AUDIO"
 #define APP_MEDIA_ROOT_DIR                "NECCS"
+
+/* Beam WAV drain chunk: 500 ms of 48 kHz mono int16 per FileX call (48 KB).
+ * Fewer, larger sequential writes: per-call FileX overhead at 19 KB chunks
+ * measured slower than the 96 KB/s fill rate once the file grew. */
+#define APP_MEDIA_BEAM_CHUNK_SAMPLES      24000U
+#define APP_MEDIA_BEAM_BYTES_PER_SECOND   (APP_BEAM_RECORD_SAMPLE_RATE_HZ * 2U)
+#define APP_MEDIA_WAV_HEADER_BYTES        44U
 
 typedef enum
 {
@@ -66,7 +75,9 @@ typedef enum
   APP_MEDIA_CMD_READ_SELECTED = 6,
   APP_MEDIA_CMD_PLAY_TOGGLE = 7,
   APP_MEDIA_CMD_THUMB_PAGE = 8,   /* arg = page */
-  APP_MEDIA_CMD_SELECT_ITEM = 9   /* arg = type | (index << 4) */
+  APP_MEDIA_CMD_SELECT_ITEM = 9,  /* arg = type | (index << 4) */
+  APP_MEDIA_CMD_BEAM_START = 10,
+  APP_MEDIA_CMD_BEAM_STOP = 11
 } AppMediaCommand_t;
 
 /* Queue messages carry the command in the low byte and an argument above. */
@@ -137,6 +148,13 @@ static uint32_t s_jpeg_encode_configured = 0U;
 static uint32_t s_jpeg_hw_encode_disabled = 0U;
 static uint32_t s_next_screenshot = 1U;
 static uint32_t s_next_video = 1U;
+static uint32_t s_next_audio = 1U;
+/* Beamformed WAV recording (drained from app_beam_record's ring). */
+static FX_FILE s_beam_file;
+static uint32_t s_beam_open = 0U;
+static uint32_t s_beam_data_bytes = 0U;
+static int16_t s_beam_chunk[APP_MEDIA_BEAM_CHUNK_SAMPLES]
+    __attribute__((section(".EXTRAM"), aligned(32)));
 static uint32_t s_video_play_frame = 0U;
 static uint32_t s_video_play_frame_count = 0U;
 static uint32_t s_record_file_pos = 0U;
@@ -463,6 +481,11 @@ static void make_video_path(uint32_t index, char *path, uint32_t path_len)
   (void)snprintf(path, path_len, APP_MEDIA_VIDEO_DIR "/VID%05lu.AVI", (unsigned long)index);
 }
 
+static void make_audio_path(uint32_t index, char *path, uint32_t path_len)
+{
+  (void)snprintf(path, path_len, APP_MEDIA_AUDIO_DIR "/AUD%05lu.WAV", (unsigned long)index);
+}
+
 static void make_thumb_path(uint32_t type, uint32_t index, char *path, uint32_t path_len)
 {
   if (type == APP_MEDIA_SELECTED_VIDEO)
@@ -488,13 +511,22 @@ static uint32_t file_exists(const char *path)
   return 0U;
 }
 
-static uint32_t sequence_entry_exists(uint32_t is_video, uint32_t index)
+/* Sequence kinds probed by count_sequence(). */
+#define APP_MEDIA_SEQ_SCREENSHOT 0U
+#define APP_MEDIA_SEQ_VIDEO      1U
+#define APP_MEDIA_SEQ_AUDIO      2U
+
+static uint32_t sequence_entry_exists(uint32_t kind, uint32_t index)
 {
   char path[APP_MEDIA_FILE_NAME_LEN];
 
-  if (is_video != 0U)
+  if (kind == APP_MEDIA_SEQ_VIDEO)
   {
     make_video_path(index, path, sizeof(path));
+  }
+  else if (kind == APP_MEDIA_SEQ_AUDIO)
+  {
+    make_audio_path(index, path, sizeof(path));
   }
   else
   {
@@ -508,14 +540,14 @@ static uint32_t sequence_entry_exists(uint32_t is_video, uint32_t index)
  * be found with an exponential probe plus binary search: O(log N) directory
  * lookups instead of the old linear walk (hundreds of fx_file_open calls on
  * every mount/refresh once the gallery fills up). */
-static uint32_t count_sequence(uint32_t is_video)
+static uint32_t count_sequence(uint32_t kind)
 {
   uint32_t known = 0U;
   uint32_t probe = 1U;
   uint32_t low;
   uint32_t high;
 
-  while ((probe <= 99999U) && (sequence_entry_exists(is_video, probe) != 0U))
+  while ((probe <= 99999U) && (sequence_entry_exists(kind, probe) != 0U))
   {
     known = probe;
     probe <<= 1;
@@ -532,7 +564,7 @@ static uint32_t count_sequence(uint32_t is_video)
   {
     const uint32_t mid = low + ((high - low) / 2U);
 
-    if (sequence_entry_exists(is_video, mid) != 0U)
+    if (sequence_entry_exists(kind, mid) != 0U)
     {
       low = mid;
     }
@@ -575,16 +607,19 @@ static void select_latest(void)
 
 static void scan_media_files(void)
 {
-  const uint32_t screenshots = count_sequence(0U);
-  const uint32_t videos = count_sequence(1U);
+  const uint32_t screenshots = count_sequence(APP_MEDIA_SEQ_SCREENSHOT);
+  const uint32_t videos = count_sequence(APP_MEDIA_SEQ_VIDEO);
+  const uint32_t audio_clips = count_sequence(APP_MEDIA_SEQ_AUDIO);
 
   status_lock();
   s_status.screenshots = screenshots;
   s_status.videos = videos;
+  s_status.audio_clips = audio_clips;
   status_unlock();
 
   s_next_screenshot = screenshots + 1U;
   s_next_video = videos + 1U;
+  s_next_audio = audio_clips + 1U;
   select_latest();
   reset_video_playback();
   preview_clear();
@@ -713,6 +748,10 @@ static UINT mount_or_format_media(void)
   if (status == FX_SUCCESS)
   {
     status = ensure_directory((const CHAR *)APP_MEDIA_VIDEO_DIR);
+  }
+  if (status == FX_SUCCESS)
+  {
+    status = ensure_directory((const CHAR *)APP_MEDIA_AUDIO_DIR);
   }
 
   if (status != FX_SUCCESS)
@@ -1604,8 +1643,9 @@ static uint32_t start_recording(void)
     return APP_MEDIA_ERROR_NOT_MOUNTED;
   }
 
-  if (s_recording != 0U)
+  if ((s_recording != 0U) || (s_beam_open != 0U))
   {
+    /* Also excludes an active beam WAV: see start_beam_recording. */
     status_set_error(APP_MEDIA_ERROR_ALREADY_RECORDING);
     return APP_MEDIA_ERROR_ALREADY_RECORDING;
   }
@@ -1737,6 +1777,176 @@ static void set_playing(uint32_t playing)
   {
     s_status.flags &= ~APP_MEDIA_FLAG_PLAYING;
   }
+  status_unlock();
+}
+
+/* ------------------------------------------------------------------ */
+/* Beamformed mono WAV recording                                       */
+/* ------------------------------------------------------------------ */
+
+static UINT beam_write_wav_header(uint32_t data_bytes)
+{
+  uint8_t header[APP_MEDIA_WAV_HEADER_BYTES];
+
+  memcpy(&header[0], "RIFF", 4U);
+  put_u32_le(&header[4], 36U + data_bytes);
+  memcpy(&header[8], "WAVE", 4U);
+  memcpy(&header[12], "fmt ", 4U);
+  put_u32_le(&header[16], 16U);
+  put_u16_le(&header[20], 1U); /* PCM */
+  put_u16_le(&header[22], 1U); /* mono */
+  put_u32_le(&header[24], APP_BEAM_RECORD_SAMPLE_RATE_HZ);
+  put_u32_le(&header[28], APP_MEDIA_BEAM_BYTES_PER_SECOND);
+  put_u16_le(&header[32], 2U);  /* block align */
+  put_u16_le(&header[34], 16U); /* bits per sample */
+  memcpy(&header[36], "data", 4U);
+  put_u32_le(&header[40], data_bytes);
+
+  return fx_file_write(&s_beam_file, header, sizeof(header));
+}
+
+static uint32_t start_beam_recording(void)
+{
+  char path[APP_MEDIA_FILE_NAME_LEN];
+  UINT status;
+
+  if (s_beam_open != 0U)
+  {
+    return APP_MEDIA_ERROR_NONE;
+  }
+  if (s_media_mounted == 0U)
+  {
+    status_set_error(APP_MEDIA_ERROR_NOT_MOUNTED);
+    return APP_MEDIA_ERROR_NOT_MOUNTED;
+  }
+  /* Mutually exclusive with AVI recording: two files interleaving writes
+   * through the 16 KB FileX cache collapse the SD throughput below the
+   * 96 KB/s the WAV needs (board 2026-07-13: ~700 dropped frames in 10 s
+   * of concurrency; solo recording drops zero). */
+  if (s_recording != 0U)
+  {
+    status_set_error(APP_MEDIA_ERROR_ALREADY_RECORDING);
+    return APP_MEDIA_ERROR_ALREADY_RECORDING;
+  }
+  /* ~5.5 MB per minute; require room for a couple of minutes. */
+  if (has_free_space(4U * 1024U * 1024U) == 0U)
+  {
+    status_set_error(APP_MEDIA_ERROR_NO_SPACE);
+    return APP_MEDIA_ERROR_NO_SPACE;
+  }
+
+  make_audio_path(s_next_audio, path, sizeof(path));
+  status = fx_file_create(&s_media, (CHAR *)path);
+  if ((status != FX_SUCCESS) && (status != FX_ALREADY_CREATED))
+  {
+    status_set_error(APP_MEDIA_ERROR_FILE_CREATE);
+    return APP_MEDIA_ERROR_FILE_CREATE;
+  }
+  status = fx_file_open(&s_media, &s_beam_file, (CHAR *)path, FX_OPEN_FOR_WRITE);
+  if (status != FX_SUCCESS)
+  {
+    status_set_error(APP_MEDIA_ERROR_FILE_OPEN);
+    return APP_MEDIA_ERROR_FILE_OPEN;
+  }
+  (void)fx_file_truncate(&s_beam_file, 0U);
+
+  s_beam_data_bytes = 0U;
+  if (beam_write_wav_header(0U) != FX_SUCCESS)
+  {
+    (void)fx_file_close(&s_beam_file);
+    status_set_error(APP_MEDIA_ERROR_FILE_WRITE);
+    return APP_MEDIA_ERROR_FILE_WRITE;
+  }
+
+  s_beam_open = 1U;
+  AppBeamRecord_SetRecording(1U);
+
+  status_lock();
+  s_status.flags |= APP_MEDIA_FLAG_BEAM_RECORDING;
+  s_status.beam_seconds = 0U;
+  status_set_file(s_status.last_file, path);
+  status_unlock();
+
+  return APP_MEDIA_ERROR_NONE;
+}
+
+/* Drain the beamformer ring into the WAV file. Capped at two chunks per
+ * call (1 s of audio, ~5x the fill rate): an uncapped loop never exited
+ * while the producer kept pace and starved the media queue - the STOP
+ * command could not be processed (board 2026-07-13). */
+static void beam_drain_ring(void)
+{
+  for (uint32_t burst = 0U; burst < 2U; burst++)
+  {
+    const uint32_t samples = AppBeamRecord_Read(s_beam_chunk, APP_MEDIA_BEAM_CHUNK_SAMPLES);
+
+    if (samples == 0U)
+    {
+      break;
+    }
+    if (fx_file_write(&s_beam_file, s_beam_chunk, samples * 2U) != FX_SUCCESS)
+    {
+      status_set_error(APP_MEDIA_ERROR_FILE_WRITE);
+      break;
+    }
+    s_beam_data_bytes += samples * 2U;
+
+    if (samples < APP_MEDIA_BEAM_CHUNK_SAMPLES)
+    {
+      break;
+    }
+  }
+}
+
+static uint32_t stop_beam_recording(void)
+{
+  uint8_t patch[4];
+
+  if (s_beam_open == 0U)
+  {
+    return APP_MEDIA_ERROR_NONE;
+  }
+
+  AppBeamRecord_SetRecording(0U);
+  beam_drain_ring();
+
+  /* Patch RIFF and data chunk sizes now that the length is known. */
+  put_u32_le(patch, 36U + s_beam_data_bytes);
+  if (fx_file_seek(&s_beam_file, 4U) == FX_SUCCESS)
+  {
+    (void)fx_file_write(&s_beam_file, patch, 4U);
+  }
+  put_u32_le(patch, s_beam_data_bytes);
+  if (fx_file_seek(&s_beam_file, 40U) == FX_SUCCESS)
+  {
+    (void)fx_file_write(&s_beam_file, patch, 4U);
+  }
+  (void)fx_file_close(&s_beam_file);
+  (void)fx_media_flush(&s_media);
+
+  s_beam_open = 0U;
+  s_next_audio++;
+
+  status_lock();
+  s_status.flags &= ~APP_MEDIA_FLAG_BEAM_RECORDING;
+  s_status.audio_clips = s_next_audio - 1U;
+  status_unlock();
+  update_space_status();
+
+  return APP_MEDIA_ERROR_NONE;
+}
+
+static void process_beam_tick(void)
+{
+  if (s_beam_open == 0U)
+  {
+    return;
+  }
+
+  beam_drain_ring();
+
+  status_lock();
+  s_status.beam_seconds = s_beam_data_bytes / APP_MEDIA_BEAM_BYTES_PER_SECOND;
   status_unlock();
 }
 
@@ -2799,6 +3009,12 @@ static void process_command(AppMediaCommand_t command, uint32_t arg)
     set_playing(0U);
     select_item(arg & 0x0FU, arg >> 4);
     break;
+  case APP_MEDIA_CMD_BEAM_START:
+    (void)start_beam_recording();
+    break;
+  case APP_MEDIA_CMD_BEAM_STOP:
+    (void)stop_beam_recording();
+    break;
   default:
     break;
   }
@@ -2842,6 +3058,7 @@ static void AppMedia_ThreadEntry(ULONG thread_input)
 
     process_record_tick();
     process_play_tick();
+    process_beam_tick();
   }
 }
 
@@ -3013,6 +3230,16 @@ uint32_t AppMedia_RequestRecordStart(void)
 uint32_t AppMedia_RequestRecordStop(void)
 {
   return post_command(APP_MEDIA_CMD_RECORD_STOP);
+}
+
+uint32_t AppMedia_RequestBeamStart(void)
+{
+  return post_command(APP_MEDIA_CMD_BEAM_START);
+}
+
+uint32_t AppMedia_RequestBeamStop(void)
+{
+  return post_command(APP_MEDIA_CMD_BEAM_STOP);
 }
 
 uint32_t AppMedia_RequestRefresh(void)

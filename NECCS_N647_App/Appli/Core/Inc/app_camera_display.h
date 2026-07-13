@@ -110,6 +110,14 @@ uint8_t AppCameraDisplay_GetHeatPalette(void);
 /* Fading dot trail of the primary source position. */
 void AppCameraDisplay_SetTrailEnabled(uint8_t enabled);
 uint8_t AppCameraDisplay_GetTrailEnabled(void);
+/* Beam-steering reticle (directional recording): camera-frame pixel position
+ * plus style. 0=hidden, 1=aiming (manual), 2=locked on tracked source,
+ * 3=recording. Drawn by the overlay compositor after the source markers. */
+#define APP_CAMERA_DISPLAY_BEAM_HIDDEN    0U
+#define APP_CAMERA_DISPLAY_BEAM_AIM       1U
+#define APP_CAMERA_DISPLAY_BEAM_LOCKED    2U
+#define APP_CAMERA_DISPLAY_BEAM_RECORDING 3U
+void AppCameraDisplay_SetBeamReticle(uint16_t x, uint16_t y, uint8_t style);
 /* Copy the currently displayed camera frame (with heat overlay) into dst
  * (APP_CAMERA_DISPLAY_WIDTH x HEIGHT RGB565). Returns 1 when the layer is
  * visible and a frame was copied; used by the screenshot compositor. */

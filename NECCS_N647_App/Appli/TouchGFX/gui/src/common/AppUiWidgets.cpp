@@ -723,6 +723,34 @@ void AppSpectrumPanel::handleDragEvent(const touchgfx::DragEvent& event)
     invalidate();
 }
 
+AppBeamAimSurface::AppBeamAimSurface()
+    : aimCallback(0)
+{
+    setTouchable(true);
+}
+
+void AppBeamAimSurface::setAimCallback(touchgfx::GenericCallback<int16_t, int16_t>& callback)
+{
+    aimCallback = &callback;
+}
+
+void AppBeamAimSurface::handleClickEvent(const touchgfx::ClickEvent& event)
+{
+    if ((event.getType() == touchgfx::ClickEvent::PRESSED) &&
+        (aimCallback != 0) && aimCallback->isValid())
+    {
+        aimCallback->execute(event.getX(), event.getY());
+    }
+}
+
+void AppBeamAimSurface::handleDragEvent(const touchgfx::DragEvent& event)
+{
+    if ((aimCallback != 0) && aimCallback->isValid())
+    {
+        aimCallback->execute(event.getNewX(), event.getNewY());
+    }
+}
+
 AppRoundedPanel::AppRoundedPanel()
     : fillColor(touchgfx::Color::getColorFromRGB(15, 23, 35)),
       borderColor(touchgfx::Color::getColorFromRGB(36, 53, 74)),

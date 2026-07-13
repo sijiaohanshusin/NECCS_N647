@@ -55,6 +55,11 @@ public:
     void toggleTrail();
     void requestScreenshot();
     void toggleRecording();
+    /* Directional recording (beamformer). */
+    void toggleBeamMode();
+    void toggleBeamRecording();
+    void beamAutoTrack();
+    void setBeamManualTargetPx(int16_t px, int16_t py);
     void refreshMedia();
     void selectNextMedia();
     void readSelectedMedia();

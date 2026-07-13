@@ -36,7 +36,7 @@ public:
 
 private:
     static const uint32_t NavCount = 5U;
-    static const uint32_t QuickCount = 5U;
+    static const uint32_t QuickCount = 6U;
     static const uint32_t RailCardCount = 4U;
     static const uint32_t RailStateRows = 3U;
     static const uint32_t MicCount = 32U;
@@ -50,6 +50,7 @@ private:
     void setupStatusBar();
     void setupNavigation();
     void setupImagePage();
+    void setupBeamBar();
     void setupMicPage();
     void setupSystemPage();
     void setupParamsPage();
@@ -61,6 +62,7 @@ private:
     void refreshStatusBar(const AppUiSnapshot& snapshot);
     void refreshBootPage(const AppUiSnapshot& snapshot);
     void refreshImagePage(const AppUiSnapshot& snapshot);
+    void refreshBeamUi(const AppUiSnapshot& snapshot);
     void refreshMicPage(const AppUiSnapshot& snapshot);
     void refreshSystemPage(const AppUiSnapshot& snapshot);
     void refreshParamsPage(const AppUiSnapshot& snapshot);
@@ -75,6 +77,8 @@ private:
     void setViewerOpen(bool open);
     void onMenuPressed(const touchgfx::AbstractButton& source);
     void onBandChanged(uint16_t loHz, uint16_t hiHz);
+    void onBeamPressed(const touchgfx::AbstractButton& source);
+    void onBeamAim(int16_t px, int16_t py);
     void setMenuOpen(bool open);
     /* Invalidate only the ring outline strips of a boot ring bounding box,
      * keeping the emblem region untouched (prevents logo flicker). */
@@ -142,6 +146,24 @@ private:
     touchgfx::Box aiConfTrack;
     touchgfx::Box aiConfFill;
     AppTextLabel spectrumBandLabel;
+
+    /* ---- directional recording (beam mode) ---- */
+    AppBeamAimSurface beamAimSurface;   /* tap/drag steering over the camera */
+    AppRoundedPanel beamBar;            /* control bar replacing the spectrum strip */
+    AppRoundedPanel beamAutoBtn;
+    AppTextLabel beamAutoLabel;
+    touchgfx::TouchArea beamAutoTouch;
+    AppTextLabel beamDirLabel;
+    touchgfx::Box beamLevelTrack;
+    touchgfx::Box beamLevelFill;
+    AppTextLabel beamLevelLabel;
+    AppRoundedPanel beamRecBtn;
+    AppTextLabel beamRecLabel;
+    touchgfx::TouchArea beamRecTouch;
+    AppRoundedPanel beamCloseBtn;
+    AppTextLabel beamCloseLabel;
+    touchgfx::TouchArea beamCloseTouch;
+    touchgfx::Box beamDot;              /* top-bar recording tick (blue) */
 
     /* ---- array page ---- */
     AppTextLabel micTitle;
@@ -245,6 +267,8 @@ private:
     touchgfx::Callback<TemplateView, const touchgfx::AbstractButton&> menuPressedCallback;
     touchgfx::Callback<TemplateView, const touchgfx::AbstractButton&> systemPressedCallback;
     touchgfx::Callback<TemplateView, uint16_t, uint16_t> bandChangedCallback;
+    touchgfx::Callback<TemplateView, const touchgfx::AbstractButton&> beamPressedCallback;
+    touchgfx::Callback<TemplateView, int16_t, int16_t> beamAimCallback;
 
     uint8_t activeScreen;
     uint8_t activeProfile;
@@ -260,6 +284,8 @@ private:
     bool recActive;
     bool menuOpen;
     bool viewerOpen;
+    bool beamUiActive;      /* beam widgets shown (mirrors snapshot.beamActive) */
+    bool beamUiRecording;
     uint8_t selectedSlot;
     /* nonzero = power-off confirm window is open (ticks remaining) */
     uint8_t powerConfirmTicks;

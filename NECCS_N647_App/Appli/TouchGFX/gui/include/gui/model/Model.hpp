@@ -258,6 +258,15 @@ struct AppUiSnapshot
     int8_t pcmdRawPeakDbfs;
     int8_t pcmdRawAvgDbfs;
     uint8_t perfLoad[5];
+    /* Directional recording (delay-and-sum beam over the array). */
+    uint8_t beamActive;       /* beam mode engaged (aiming or recording) */
+    uint8_t beamManual;       /* 1 = manual (tap/drag) steering, 0 = auto-track */
+    uint8_t beamRecording;    /* WAV file being written */
+    int16_t beamTheta;        /* applied steering, degrees */
+    int16_t beamPhi;
+    int8_t beamRmsDbfs;       /* beam output level */
+    uint16_t beamSeconds;     /* recording duration */
+    uint32_t beamClips;       /* AUDnnnnn.WAV count on card */
     char mediaLastFile[32];
     char mediaSelectedFile[32];
 };
@@ -308,6 +317,12 @@ public:
     void toggleTrail();
     void requestScreenshot();
     void toggleRecording();
+    /* Directional recording: mode toggle, record toggle, steering. */
+    void toggleBeamMode();
+    void toggleBeamRecording();
+    void beamAutoTrack();
+    /* Manual steering from the aim surface (camera-frame pixels 0..639/0..479). */
+    void setBeamManualTargetPx(int16_t px, int16_t py);
     void refreshMedia();
     void selectNextMedia();
     void readSelectedMedia();

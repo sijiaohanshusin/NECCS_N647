@@ -21,6 +21,7 @@ extern "C" {
 #endif
 
 #include "app_acoustic_service.h"
+#include "app_beam_record.h"
 #include "app_bringup_thread.h"
 #include "app_camera.h"
 #include "app_camera_display.h"

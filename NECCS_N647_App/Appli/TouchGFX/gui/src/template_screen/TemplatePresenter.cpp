@@ -132,6 +132,26 @@ void TemplatePresenter::toggleTrail()
     model->toggleTrail();
 }
 
+void TemplatePresenter::toggleBeamMode()
+{
+    model->toggleBeamMode();
+}
+
+void TemplatePresenter::toggleBeamRecording()
+{
+    model->toggleBeamRecording();
+}
+
+void TemplatePresenter::beamAutoTrack()
+{
+    model->beamAutoTrack();
+}
+
+void TemplatePresenter::setBeamManualTargetPx(int16_t px, int16_t py)
+{
+    model->setBeamManualTargetPx(px, py);
+}
+
 void TemplatePresenter::uiSnapshotUpdated(const AppUiSnapshot& snapshot)
 {
     view.updateSnapshot(snapshot);

@@ -1004,6 +1004,9 @@ void pollMedia(AppUiSnapshot& snapshot)
         snapshot.mediaFreeMb = snapshot.mediaTotalMb;
     }
     snapshot.mediaSelectedType = static_cast<uint8_t>(media.selected_type);
+    snapshot.beamRecording = ((media.flags & APP_MEDIA_FLAG_BEAM_RECORDING) != 0U) ? 1U : 0U;
+    snapshot.beamSeconds = static_cast<uint16_t>((media.beam_seconds <= 0xFFFFU) ? media.beam_seconds : 0xFFFFU);
+    snapshot.beamClips = media.audio_clips;
     copyFileName(snapshot.mediaLastFile, media.last_file, sizeof(snapshot.mediaLastFile));
     copyFileName(snapshot.mediaSelectedFile, media.selected_file, sizeof(snapshot.mediaSelectedFile));
 
@@ -1040,6 +1043,73 @@ void pollMedia(AppUiSnapshot& snapshot)
         snapshot.mediaThumbValid[slot] = thumbs.slot_valid[slot];
         snapshot.mediaThumbType[slot] = thumbs.slot_type[slot];
         snapshot.mediaThumbIndex[slot] = thumbs.slot_index[slot];
+    }
+}
+
+/* Directional-recording glue: auto-track steers the beam onto the displayed
+ * source, the beam snapshot feeds the control bar, and the camera reticle
+ * mirrors the applied steering. Runs after pollAcoustic (source angles) and
+ * pollMedia (recording state). */
+void pollBeam(AppUiSnapshot& snapshot)
+{
+    if (snapshot.beamActive == 0U)
+    {
+        return;
+    }
+
+    /* The beamformer is 48k-only: an array-mode switch mid-session shuts
+     * the feature down cleanly instead of steering a dead pipeline. */
+    if (snapshot.arrayMode != 0U)
+    {
+        if (snapshot.beamRecording != 0U)
+        {
+            (void)AppMedia_RequestBeamStop();
+            snapshot.beamRecording = 0U;
+        }
+        snapshot.beamActive = 0U;
+        snapshot.beamManual = 0U;
+        AppBeamRecord_SetActive(0U);
+        AppCameraDisplay_SetBeamReticle(0U, 0U, APP_CAMERA_DISPLAY_BEAM_HIDDEN);
+        return;
+    }
+
+    if ((snapshot.beamManual == 0U) && (snapshot.sourceDisplayValid != 0U))
+    {
+        AppBeamRecord_SetSteering(snapshot.thetaDeg, snapshot.phiDeg);
+    }
+
+    AppBeamRecordSnapshot_t beam;
+    AppBeamRecord_GetSnapshot(&beam);
+    snapshot.beamTheta = beam.theta_deg;
+    snapshot.beamPhi = beam.phi_deg;
+    snapshot.beamRmsDbfs = beam.rms_dbfs;
+
+    /* Reticle position: the markers' angle->pixel mapping, kept a reticle
+     * radius inside the frame so the ring stays fully visible. */
+    {
+        const float halfH = APP_ACOUSTIC_SERVICE_CAMERA_HFOV_DEG * 0.5f;
+        const float halfV = APP_ACOUSTIC_SERVICE_CAMERA_VFOV_DEG * 0.5f;
+        float px = ((static_cast<float>(beam.theta_deg) + halfH) * 640.0f) /
+                   APP_ACOUSTIC_SERVICE_CAMERA_HFOV_DEG;
+        float py = ((halfV - static_cast<float>(beam.phi_deg)) * 480.0f) /
+                   APP_ACOUSTIC_SERVICE_CAMERA_VFOV_DEG;
+        uint8_t style = APP_CAMERA_DISPLAY_BEAM_AIM;
+
+        px = (px < 32.0f) ? 32.0f : ((px > 607.0f) ? 607.0f : px);
+        py = (py < 32.0f) ? 32.0f : ((py > 447.0f) ? 447.0f : py);
+
+        if (snapshot.beamRecording != 0U)
+        {
+            style = APP_CAMERA_DISPLAY_BEAM_RECORDING;
+        }
+        else if ((snapshot.beamManual == 0U) && (snapshot.sourceDisplayValid != 0U))
+        {
+            style = APP_CAMERA_DISPLAY_BEAM_LOCKED;
+        }
+
+        AppCameraDisplay_SetBeamReticle(static_cast<uint16_t>(px),
+                                        static_cast<uint16_t>(py),
+                                        style);
     }
 }
 }
@@ -1106,6 +1176,7 @@ void Model::tick()
     pollTouch(snapshot);
     pollPower(snapshot);
     pollMedia(snapshot);
+    pollBeam(snapshot);
 
     if (snapshot.activeScreen == APP_UI_SCREEN_BOOT)
     {
@@ -1352,6 +1423,102 @@ void Model::toggleTrail()
     if (modelListener != 0)
     {
         modelListener->uiSnapshotUpdated(snapshot);
+    }
+}
+
+void Model::toggleBeamMode()
+{
+    if (snapshot.beamActive != 0U)
+    {
+        if (snapshot.beamRecording != 0U)
+        {
+            (void)AppMedia_RequestBeamStop();
+            snapshot.beamRecording = 0U;
+        }
+        snapshot.beamActive = 0U;
+        snapshot.beamManual = 0U;
+        AppBeamRecord_SetActive(0U);
+        AppCameraDisplay_SetBeamReticle(0U, 0U, APP_CAMERA_DISPLAY_BEAM_HIDDEN);
+    }
+    else
+    {
+        if (snapshot.arrayMode != 0U)
+        {
+            return; /* 48k-only feature; entry blocked in the 192k mode */
+        }
+        snapshot.beamActive = 1U;
+        snapshot.beamManual = 0U;
+        AppBeamRecord_SetSteering(
+            (snapshot.sourceDisplayValid != 0U) ? snapshot.thetaDeg : 0,
+            (snapshot.sourceDisplayValid != 0U) ? snapshot.phiDeg : 0);
+        AppBeamRecord_SetActive(1U);
+    }
+    if (modelListener != 0)
+    {
+        modelListener->uiSnapshotUpdated(snapshot);
+    }
+}
+
+void Model::toggleBeamRecording()
+{
+    if (snapshot.beamActive == 0U)
+    {
+        return;
+    }
+    if (snapshot.beamRecording != 0U)
+    {
+        (void)AppMedia_RequestBeamStop();
+        snapshot.beamRecording = 0U;
+    }
+    else
+    {
+        (void)AppMedia_RequestBeamStart();
+        /* Optimistic flip for instant button feedback; pollMedia confirms
+         * from the media status on the next tick. */
+        snapshot.beamRecording = 1U;
+    }
+    if (modelListener != 0)
+    {
+        modelListener->uiSnapshotUpdated(snapshot);
+    }
+}
+
+void Model::beamAutoTrack()
+{
+    snapshot.beamManual = 0U;
+    if (modelListener != 0)
+    {
+        modelListener->uiSnapshotUpdated(snapshot);
+    }
+}
+
+void Model::setBeamManualTargetPx(int16_t px, int16_t py)
+{
+    if (snapshot.beamActive == 0U)
+    {
+        return;
+    }
+
+    if (px < 0) { px = 0; }
+    if (px > 639) { px = 639; }
+    if (py < 0) { py = 0; }
+    if (py > 479) { py = 479; }
+
+    {
+        const float halfH = APP_ACOUSTIC_SERVICE_CAMERA_HFOV_DEG * 0.5f;
+        const float halfV = APP_ACOUSTIC_SERVICE_CAMERA_VFOV_DEG * 0.5f;
+        float theta = ((static_cast<float>(px) * APP_ACOUSTIC_SERVICE_CAMERA_HFOV_DEG) / 640.0f) - halfH;
+        float phi = halfV - ((static_cast<float>(py) * APP_ACOUSTIC_SERVICE_CAMERA_VFOV_DEG) / 480.0f);
+
+        if (theta < -60.0f) { theta = -60.0f; }
+        if (theta > 60.0f) { theta = 60.0f; }
+        if (phi < -50.0f) { phi = -50.0f; }
+        if (phi > 50.0f) { phi = 50.0f; }
+
+        snapshot.beamManual = 1U;
+        AppBeamRecord_SetSteering(
+            static_cast<int16_t>((theta >= 0.0f) ? (theta + 0.5f) : (theta - 0.5f)),
+            static_cast<int16_t>((phi >= 0.0f) ? (phi + 0.5f) : (phi - 0.5f)));
     }
 }
 

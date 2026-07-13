@@ -4,6 +4,7 @@
 #include <string.h>
 
 #include "main.h"
+#include "app_beam_record.h"
 #include "app_bringup_thread.h"
 #include "app_camera.h"
 #include "app_i2c2_bus.h"
@@ -52,10 +53,14 @@ _Static_assert((APP_MIC_ARRAY_CORE16_MIC_COUNT *
 #define APP_PCMD_CAPTURE_EVENT_HALF0         0x00000001UL
 #define APP_PCMD_CAPTURE_EVENT_HALF1         0x00000002UL
 #define APP_PCMD_CAPTURE_EVENT_MASK          (APP_PCMD_CAPTURE_EVENT_HALF0 | APP_PCMD_CAPTURE_EVENT_HALF1)
-/* Config-window priority (above TouchGFX) vs steady-state priority (the
- * audio rung of the ladder in app_threadx.c). See ThreadEntry. */
+/* Config-window priority (above TouchGFX) vs steady-state priority. Run
+ * priority sits ABOVE the media thread (12): at the old shared rung a
+ * single long FileX write burst blocked frame processing outright - beam
+ * recording measured 187 -> 50 fps with ~400 dropped halves/s until the
+ * capture thread outranked media (board 2026-07-13). Still below TouchGFX
+ * (5); the ~1 ms/frame capture work never visibly stalls the UI. */
 #define APP_PCMD_CAPTURE_THREAD_BOOST_PRIORITY 4U
-#define APP_PCMD_CAPTURE_THREAD_RUN_PRIORITY   12U
+#define APP_PCMD_CAPTURE_THREAD_RUN_PRIORITY   10U
 #define APP_PCMD_CAPTURE_RAIL_ABS_LEVEL      32760
 #define APP_PCMD_CAPTURE_RAIL_FAULT_X10      1U
 #define APP_PCMD_CAPTURE_HIGH_FLOOR_DBFS     (-30)
@@ -914,6 +919,11 @@ static void AppPcmdCapture_ProcessHalf(uint8_t half)
   App_BringUpStatus_Ready(APP_BRINGUP_MODULE_AUDIO_FRAME, 0);
   App_BringUpStatus_Heartbeat(APP_BRINGUP_MODULE_PCMD_RAW, 0);
   AppPcmdCapture_UpdateFrameRate(HAL_GetTick());
+
+  /* Directional recording: gapless per-frame beamforming (unlike the SRP
+   * service, which deliberately drops frames). No-op unless beam mode is
+   * engaged from the UI. */
+  AppBeamRecord_FeedFrame(frame);
 }
 
 static void AppPcmdCapture_ReadDeviceStatus(void)

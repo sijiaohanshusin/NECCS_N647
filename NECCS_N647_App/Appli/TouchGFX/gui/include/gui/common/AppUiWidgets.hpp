@@ -146,6 +146,23 @@ private:
     float binHz;
 };
 
+/** Transparent aim surface for directional recording: reports press and
+ * drag positions (local pixel coordinates) through one callback so the view
+ * can steer the beam by tapping/dragging on the camera window. */
+class AppBeamAimSurface : public touchgfx::Container
+{
+public:
+    AppBeamAimSurface();
+
+    void setAimCallback(touchgfx::GenericCallback<int16_t, int16_t>& callback);
+
+    virtual void handleClickEvent(const touchgfx::ClickEvent& event);
+    virtual void handleDragEvent(const touchgfx::DragEvent& event);
+
+private:
+    touchgfx::GenericCallback<int16_t, int16_t>* aimCallback;
+};
+
 /** Flat panel with software-drawn rounded corners and optional 1px border. */
 class AppRoundedPanel : public touchgfx::Widget
 {

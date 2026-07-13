@@ -34,6 +34,8 @@ extern "C" {
 #define APP_MEDIA_FLAG_BUSY            0x00000020UL
 #define APP_MEDIA_FLAG_PREVIEW_VALID   0x00000040UL
 #define APP_MEDIA_FLAG_PLAYING         0x00000080UL
+#define APP_MEDIA_FLAG_BEAM_RECORDING  0x00000100UL
+#define APP_MEDIA_FLAG_BEAM_RECORDING  0x00000100UL
 
 typedef enum
 {
@@ -106,6 +108,8 @@ typedef struct
   uint32_t record_frames;
   uint32_t dropped_frames;
   uint32_t record_seconds;
+  uint32_t beam_seconds;
+  uint32_t audio_clips;
   uint32_t last_read_bytes;
   uint32_t preview_generation;
   uint32_t preview_type;
@@ -130,6 +134,9 @@ UINT AppMedia_Init(VOID *memory_ptr);
 uint32_t AppMedia_RequestScreenshot(void);
 uint32_t AppMedia_RequestRecordStart(void);
 uint32_t AppMedia_RequestRecordStop(void);
+/* Beamformed mono WAV recording (NECCS/AUDIO/AUDnnnnn.WAV). */
+uint32_t AppMedia_RequestBeamStart(void);
+uint32_t AppMedia_RequestBeamStop(void);
 uint32_t AppMedia_RequestRefresh(void);
 uint32_t AppMedia_RequestSelectNext(void);
 uint32_t AppMedia_RequestReadSelected(void);
