@@ -47,9 +47,10 @@ MEMORY
   RAM    (xrw)    : ORIGIN = 0x34000400,   LENGTH = 2047K
   /*
    * 0x90000000..0x905FFFFF is reserved for fixed HyperRAM users:
-   * - 0x90072000 UI/TouchGFX RGB565 framebuffer
-   * - 0x90200000 short Debug HyperRAM self-test window
-   * - 0x90400000/0x90500000 camera display ping-pong buffers
+   * - 0x90072000 UI/TouchGFX RGB565 framebuffer (ends 0x9019E000)
+   * - 0x90200000/0x90300000/0x90400000/0x90500000 camera quad buffers
+   *   (first 4 KB of 0x90200000 double as the boot HyperRAM self-test
+   *   window, which completes before camera bring-up)
    * Keep linker-managed buffers above these fixed display ranges.
    */
   EXTRAM (rw)     : ORIGIN = 0x90600000,   LENGTH = 0x01A00000

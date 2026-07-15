@@ -157,6 +157,14 @@ static void App_MPU_ConfigNonCacheable(void)
   region.IsShareable = MPU_ACCESS_INNER_SHAREABLE | MPU_ACCESS_OUTER_SHAREABLE;
   HAL_MPU_ConfigRegion(&region);
 
+  /* NOTE on the camera frame buffers (kept default write-back cacheable):
+   * uncacheable and write-through variants were both measured here while
+   * chasing the 1-px streak carpet - uncached reads cost 105 ms/draw,
+   * write-through writes cost 92 ms/draw (vs 15 ms cached). The streaks'
+   * root cause was the capture scheduler writing into buffers being
+   * composed/scanned (see HAL_DCMIPP_PIPE_FrameEventCallback), not CPU
+   * caching; with that fixed the default policy is correct and fast. */
+
   HAL_MPU_Enable(MPU_PRIVILEGED_DEFAULT);
   __set_PRIMASK(primask);
 }

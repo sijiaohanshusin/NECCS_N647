@@ -391,6 +391,7 @@ static void AppCamera_CacheCleanInvalidatePreviewRows(void)
   AppCamera_CacheCleanInvalidate(APP_CAMERA_FRAME0_ADDR, APP_CAMERA_FRAME_BUFFER_BYTES);
   AppCamera_CacheCleanInvalidate(APP_CAMERA_FRAME1_ADDR, APP_CAMERA_FRAME_BUFFER_BYTES);
   AppCamera_CacheCleanInvalidate(APP_CAMERA_FRAME2_ADDR, APP_CAMERA_FRAME_BUFFER_BYTES);
+  AppCamera_CacheCleanInvalidate(APP_CAMERA_FRAME3_ADDR, APP_CAMERA_FRAME_BUFFER_BYTES);
 }
 
 static void AppCamera_PrepareBuffers(uint8_t preview)
@@ -404,9 +405,11 @@ static void AppCamera_PrepareBuffers(uint8_t preview)
     (void)memset((void *)APP_CAMERA_FRAME0_ADDR, 0, APP_CAMERA_FRAME_BUFFER_BYTES);
     (void)memset((void *)APP_CAMERA_FRAME1_ADDR, 0, APP_CAMERA_FRAME_BUFFER_BYTES);
     (void)memset((void *)APP_CAMERA_FRAME2_ADDR, 0, APP_CAMERA_FRAME_BUFFER_BYTES);
+    (void)memset((void *)APP_CAMERA_FRAME3_ADDR, 0, APP_CAMERA_FRAME_BUFFER_BYTES);
     AppCamera_CacheCleanInvalidate(APP_CAMERA_FRAME0_ADDR, APP_CAMERA_FRAME_BUFFER_BYTES);
     AppCamera_CacheCleanInvalidate(APP_CAMERA_FRAME1_ADDR, APP_CAMERA_FRAME_BUFFER_BYTES);
     AppCamera_CacheCleanInvalidate(APP_CAMERA_FRAME2_ADDR, APP_CAMERA_FRAME_BUFFER_BYTES);
+    AppCamera_CacheCleanInvalidate(APP_CAMERA_FRAME3_ADDR, APP_CAMERA_FRAME_BUFFER_BYTES);
   }
 }
 
@@ -1247,39 +1250,61 @@ void HAL_DCMIPP_PIPE_FrameEventCallback(DCMIPP_HandleTypeDef *hdcmipp_cb, uint32
      * shown frame (heat overlay included) was overwritten top-down live on
      * screen: the reported heatmap flicker/erasure (board 2026-07-15).
      *
-     * Triple-buffer rotation on top of the hardware ping-pong: the bank
-     * whose frame JUST COMPLETED (register still holds the completed
-     * address) is retargeted at the spare buffer. That bank is not latched
-     * again until frame N+2, so the shadow write is race-free; the other
-     * bank - already capturing frame N+1 - is never touched. Invariant
-     * after every ISR: neither bank targets the buffer being displayed.
-     * (First attempt retargeted the OTHER bank: its just-completed bank
-     * kept pointing at the displayed buffer and frame N+2 landed on the
-     * live screen - board-dumped 2026-07-15, AR2 == displayed.) */
+     * Four-buffer schedule with EXPLICIT exclusion: the next capture must
+     * avoid (a) the frame that just completed (queued for compose+flip),
+     * (b) the worker's current display frame (compose target; the flip to
+     * it may still be pending in the LTDC shadow), and (c) whatever CFBAR
+     * says the LTDC is scanning right now ((b) and (c) differ for up to
+     * one LTDC refresh after each flip request - that once-per-flip window
+     * is exactly where a 3-buffer scheme kept spraying 1-px streak
+     * remnants across the panel, the artifact that survived every cache
+     * scheme since the overlay existed; A/B: uncached buffers made it
+     * vanish, proving capture-vs-scan overlap, board 2026-07-16). With
+     * four buffers a conflict-free target always exists. The retarget
+     * lands on the bank that captures NEXT during vertical blanking, well
+     * before its shadow latch. */
+    static const uint32_t frame_buffers[4] = {
+      APP_CAMERA_FRAME0_ADDR,
+      APP_CAMERA_FRAME1_ADDR,
+      APP_CAMERA_FRAME2_ADDR,
+      APP_CAMERA_FRAME3_ADDR
+    };
     const uint32_t bank0_addr = hdcmipp.Instance->P1PPM0AR1;
     const uint32_t bank1_addr = hdcmipp.Instance->P1PPM0AR2;
-    /* Sum is modular; subtracting both bank targets isolates the spare. */
-    const uint32_t spare_addr = (APP_CAMERA_FRAME0_ADDR +
-                                 APP_CAMERA_FRAME1_ADDR +
-                                 APP_CAMERA_FRAME2_ADDR) -
-                                bank0_addr - bank1_addr;
+    const uint32_t on_screen_addr = LTDC_Layer1->CFBAR;
+    const uint32_t composed_addr = g_app_camera_display_addr;
     uint32_t completed_addr = HAL_DCMIPP_PIPE_GetMemoryAddress(&hdcmipp,
                                                                APP_CAMERA_DCMIPP_PIPE,
                                                                DCMIPP_MEMORY_ADDRESS_0);
+    uint32_t next_target = 0U;
+
+    for (uint32_t i = 0U; i < 4U; i++)
+    {
+      const uint32_t candidate = frame_buffers[i];
+
+      if ((candidate != completed_addr) &&
+          (candidate != on_screen_addr) &&
+          (candidate != composed_addr))
+      {
+        next_target = candidate;
+        break;
+      }
+    }
 
     if (completed_addr == bank0_addr)
     {
+      /* Bank1 captures the NEXT frame: point it away from the screen. */
       (void)HAL_DCMIPP_PIPE_SetMemoryAddress(&hdcmipp,
                                              APP_CAMERA_DCMIPP_PIPE,
-                                             DCMIPP_MEMORY_ADDRESS_0,
-                                             spare_addr);
+                                             DCMIPP_MEMORY_ADDRESS_1,
+                                             next_target);
     }
     else if (completed_addr == bank1_addr)
     {
       (void)HAL_DCMIPP_PIPE_SetMemoryAddress(&hdcmipp,
                                              APP_CAMERA_DCMIPP_PIPE,
-                                             DCMIPP_MEMORY_ADDRESS_1,
-                                             spare_addr);
+                                             DCMIPP_MEMORY_ADDRESS_0,
+                                             next_target);
     }
     else
     {

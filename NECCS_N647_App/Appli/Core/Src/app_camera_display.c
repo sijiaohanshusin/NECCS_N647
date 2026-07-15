@@ -1031,18 +1031,15 @@ static void AppCameraDisplay_DrawAcousticOverlay(uint32_t frame_addr)
     AppCameraDisplay_DrawBeamReticle(framebuffer, frame_addr, &overlay);
   }
 
-  /* Write the composed frame back for the LTDC scan-out. Clean+INVALIDATE,
-   * not clean: any camera-buffer line left in D-cache is dirty overlay
-   * pixels of THIS frame, and its lazy eviction hours of frames later
-   * writes stale crosshair/heat fragments over a freshly DMA-written frame
-   * (board 2026-07-12: dashed 32-byte ghost streaks across the panel).
-   * Dropping the lines after write-back leaves nothing to evict.
-   *
-   * FULL frame, not just the touched band: with the band-only clean the
-   * panel still accumulated scattered 32-byte heat dashes (board
-   * 2026-07-15) - some blended lines dodge the band bookkeeping (markers/
-   * trail/reticle interplay). ~19k line ops ≈ 0.3 ms at 15 fps: cheap
-   * insurance for a provably coherent scan-out. */
+  /* Write the composed frame back for the LTDC scan-out. Clean+INVALIDATE
+   * over the full frame: cleaning pushes this draw's blend/marker lines to
+   * HyperRAM, invalidating leaves nothing dirty to lazily evict over later
+   * DMA frames (the historic 32-byte ghost-streak source). Full frame
+   * because band-only bookkeeping misses interacting draws; measured cost
+   * ~0.3 ms. (Global set/way clean and uncached/write-through buffer
+   * policies were all A/B-tested against the streaks 2026-07-16: they cost
+   * 22-58 M cycles per draw vs 9-12 M for this scheme, and the actual leak
+   * was the capture scheduler - see HAL_DCMIPP_PIPE_FrameEventCallback.) */
   if (s_overlay_dirty_y1 > s_overlay_dirty_y0)
   {
     AppCameraDisplay_CleanInvalidateDCache(frame_addr,
