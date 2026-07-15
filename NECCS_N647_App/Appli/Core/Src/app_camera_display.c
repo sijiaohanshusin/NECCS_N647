@@ -122,6 +122,16 @@ static uint8_t s_heat_luts_ready = 0U;
 static int32_t s_overlay_dirty_y0 = 0;
 static int32_t s_overlay_dirty_y1 = 0;
 
+#ifdef DEBUG
+/* Blend-loop probes for the missing-heat investigation (2026-07-15):
+ * per-draw maxima and counts, readable over SWD while running. */
+volatile uint32_t g_dbg_draw_row_pairs;
+volatile uint32_t g_dbg_draw_max_value;
+volatile uint32_t g_dbg_draw_max_alpha;
+volatile uint32_t g_dbg_draw_blend_px;
+volatile uint32_t g_dbg_draw_field_max;
+#endif
+
 static int32_t AppCameraDisplay_MaxI32(int32_t a, int32_t b)
 {
   return (a > b) ? a : b;
@@ -732,6 +742,24 @@ static void AppCameraDisplay_DrawAcousticOverlay(uint32_t frame_addr)
   s_overlay_dirty_y0 = (int32_t)APP_CAMERA_DISPLAY_HEIGHT;
   s_overlay_dirty_y1 = 0;
 
+#ifdef DEBUG
+  g_dbg_draw_row_pairs = 0U;
+  g_dbg_draw_max_value = 0U;
+  g_dbg_draw_max_alpha = 0U;
+  g_dbg_draw_blend_px = 0U;
+  {
+    uint32_t fmax = 0U;
+    for (uint32_t i = 0U; i < APP_CAMERA_DISPLAY_FIELD_COUNT; i++)
+    {
+      if (overlay.field[i] > fmax)
+      {
+        fmax = overlay.field[i];
+      }
+    }
+    g_dbg_draw_field_max = fmax;
+  }
+#endif
+
   for (uint32_t by = 0U; (overlay.enabled != 0U) && (by < (APP_CAMERA_DISPLAY_HEIGHT / 2U)); by++)
   {
     const uint32_t y0 = by * 2U;
@@ -864,6 +892,16 @@ static void AppCameraDisplay_DrawAcousticOverlay(uint32_t frame_addr)
         bottom = ((uint32_t)rowA1[u0] * inv_wu) + ((uint32_t)rowA1[u0 + 1U] * wu);
         value = ((top * inv_wva) + (bottom * wva)) >> 16;
         alpha = s_heat_alpha_lut[value & 0xFFU];
+#ifdef DEBUG
+        if (value > g_dbg_draw_max_value)
+        {
+          g_dbg_draw_max_value = value;
+        }
+        if (alpha > g_dbg_draw_max_alpha)
+        {
+          g_dbg_draw_max_alpha = alpha;
+        }
+#endif
         if (alpha != 0U)
         {
           const uint16_t color = palette[value & 0xFFU];
@@ -871,6 +909,9 @@ static void AppCameraDisplay_DrawAcousticOverlay(uint32_t frame_addr)
 
           if (a != 0U)
           {
+#ifdef DEBUG
+            g_dbg_draw_blend_px += 2U;
+#endif
             line0[0] = AppCameraDisplay_BlendRgb565(line0[0], color, a);
             line0[1] = AppCameraDisplay_BlendRgb565(line0[1], color, a);
           }
@@ -900,6 +941,9 @@ static void AppCameraDisplay_DrawAcousticOverlay(uint32_t frame_addr)
 
     (void)memcpy(dst0 + px0, &s_overlay_linebuf[0][px0], span_bytes);
     (void)memcpy(dst1 + px0, &s_overlay_linebuf[1][px0], span_bytes);
+#ifdef DEBUG
+    g_dbg_draw_row_pairs++;
+#endif
   }
 
   /* Fading dot trail of the primary source path. */
@@ -987,18 +1031,22 @@ static void AppCameraDisplay_DrawAcousticOverlay(uint32_t frame_addr)
     AppCameraDisplay_DrawBeamReticle(framebuffer, frame_addr, &overlay);
   }
 
-  /* Write the touched band back for the LTDC scan-out. Clean+INVALIDATE,
+  /* Write the composed frame back for the LTDC scan-out. Clean+INVALIDATE,
    * not clean: any camera-buffer line left in D-cache is dirty overlay
    * pixels of THIS frame, and its lazy eviction hours of frames later
    * writes stale crosshair/heat fragments over a freshly DMA-written frame
    * (board 2026-07-12: dashed 32-byte ghost streaks across the panel).
-   * Dropping the lines after write-back leaves nothing to evict. */
+   * Dropping the lines after write-back leaves nothing to evict.
+   *
+   * FULL frame, not just the touched band: with the band-only clean the
+   * panel still accumulated scattered 32-byte heat dashes (board
+   * 2026-07-15) - some blended lines dodge the band bookkeeping (markers/
+   * trail/reticle interplay). ~19k line ops ≈ 0.3 ms at 15 fps: cheap
+   * insurance for a provably coherent scan-out. */
   if (s_overlay_dirty_y1 > s_overlay_dirty_y0)
   {
-    AppCameraDisplay_CleanInvalidateDCache(frame_addr +
-                                             ((uint32_t)s_overlay_dirty_y0 * APP_CAMERA_DISPLAY_CAMERA_LINE_BYTES),
-                                           (uint32_t)(s_overlay_dirty_y1 - s_overlay_dirty_y0) *
-                                             APP_CAMERA_DISPLAY_CAMERA_LINE_BYTES);
+    AppCameraDisplay_CleanInvalidateDCache(frame_addr,
+                                           APP_CAMERA_DISPLAY_CAMERA_FRAME_BYTES);
   }
 
   g_app_camera_overlay_draw_cycles = DWT->CYCCNT - cycles_start;

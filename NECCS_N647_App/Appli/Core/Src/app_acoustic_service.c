@@ -955,12 +955,24 @@ static void AppAcousticService_UpdatePerf(AppAcousticServiceSnapshot_t *snapshot
   total_load = AppAcousticService_LoadFromElapsedMs(elapsed_ms);
 
   snapshot->perf = *perf;
+  /* Belt-and-braces: a torn/stale total (board-observed "stages 68M,
+   * total 0" on the system page) can never be smaller than the stage sum;
+   * rebuild it from the stages in that case. */
+  {
+    const uint32_t stage_sum = perf->preprocess_cycles + perf->fft_cycles +
+                               perf->gcc_cycles + srp_cycles;
+
+    if (snapshot->perf.total_cycles < stage_sum)
+    {
+      snapshot->perf.total_cycles = stage_sum;
+    }
+  }
   /* Displayed SRP time comes from DWT cycles (true wall time at
    * SystemCoreClock). HAL_GetTick units are NOT milliseconds on this build:
    * SysTick runs at TX_TIMER_TICKS_PER_SECOND=100 Hz, so one HAL "ms" is
    * 10 real ms and the old elapsed-based path under-reported 10x
    * (board-measured: 71M cycles @600MHz = 118 ms vs "12 ms" shown). */
-  snapshot->srp_ms_x100 = AppAcousticService_CyclesToMsX100(perf->total_cycles);
+  snapshot->srp_ms_x100 = AppAcousticService_CyclesToMsX100(snapshot->perf.total_cycles);
   snapshot->perf_load[0] = AppAcousticService_RelativeCycleLoad(perf->preprocess_cycles,
                                                                 perf->total_cycles,
                                                                 total_load);

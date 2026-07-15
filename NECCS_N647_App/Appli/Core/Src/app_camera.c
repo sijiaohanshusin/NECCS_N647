@@ -390,6 +390,7 @@ static void AppCamera_CacheCleanInvalidatePreviewRows(void)
 {
   AppCamera_CacheCleanInvalidate(APP_CAMERA_FRAME0_ADDR, APP_CAMERA_FRAME_BUFFER_BYTES);
   AppCamera_CacheCleanInvalidate(APP_CAMERA_FRAME1_ADDR, APP_CAMERA_FRAME_BUFFER_BYTES);
+  AppCamera_CacheCleanInvalidate(APP_CAMERA_FRAME2_ADDR, APP_CAMERA_FRAME_BUFFER_BYTES);
 }
 
 static void AppCamera_PrepareBuffers(uint8_t preview)
@@ -402,8 +403,10 @@ static void AppCamera_PrepareBuffers(uint8_t preview)
   {
     (void)memset((void *)APP_CAMERA_FRAME0_ADDR, 0, APP_CAMERA_FRAME_BUFFER_BYTES);
     (void)memset((void *)APP_CAMERA_FRAME1_ADDR, 0, APP_CAMERA_FRAME_BUFFER_BYTES);
+    (void)memset((void *)APP_CAMERA_FRAME2_ADDR, 0, APP_CAMERA_FRAME_BUFFER_BYTES);
     AppCamera_CacheCleanInvalidate(APP_CAMERA_FRAME0_ADDR, APP_CAMERA_FRAME_BUFFER_BYTES);
     AppCamera_CacheCleanInvalidate(APP_CAMERA_FRAME1_ADDR, APP_CAMERA_FRAME_BUFFER_BYTES);
+    AppCamera_CacheCleanInvalidate(APP_CAMERA_FRAME2_ADDR, APP_CAMERA_FRAME_BUFFER_BYTES);
   }
 }
 
@@ -1238,21 +1241,49 @@ void HAL_DCMIPP_PIPE_FrameEventCallback(DCMIPP_HandleTypeDef *hdcmipp_cb, uint32
 {
   if ((hdcmipp_cb == &hdcmipp) && (Pipe == APP_CAMERA_DCMIPP_PIPE))
   {
-    uint32_t active_addr = HAL_DCMIPP_PIPE_GetMemoryAddress(&hdcmipp,
-                                                            APP_CAMERA_DCMIPP_PIPE,
-                                                            DCMIPP_MEMORY_ADDRESS_0);
-    uint32_t completed_addr;
+    /* P1STM0AR holds the address of the LAST CAPTURED frame (RM/AN6211).
+     * The old handler read it as "currently capturing" and displayed the
+     * OTHER buffer - i.e. exactly the one DCMIPP was writing next, so every
+     * shown frame (heat overlay included) was overwritten top-down live on
+     * screen: the reported heatmap flicker/erasure (board 2026-07-15).
+     *
+     * Triple-buffer rotation on top of the hardware ping-pong: the bank
+     * whose frame JUST COMPLETED (register still holds the completed
+     * address) is retargeted at the spare buffer. That bank is not latched
+     * again until frame N+2, so the shadow write is race-free; the other
+     * bank - already capturing frame N+1 - is never touched. Invariant
+     * after every ISR: neither bank targets the buffer being displayed.
+     * (First attempt retargeted the OTHER bank: its just-completed bank
+     * kept pointing at the displayed buffer and frame N+2 landed on the
+     * live screen - board-dumped 2026-07-15, AR2 == displayed.) */
+    const uint32_t bank0_addr = hdcmipp.Instance->P1PPM0AR1;
+    const uint32_t bank1_addr = hdcmipp.Instance->P1PPM0AR2;
+    /* Sum is modular; subtracting both bank targets isolates the spare. */
+    const uint32_t spare_addr = (APP_CAMERA_FRAME0_ADDR +
+                                 APP_CAMERA_FRAME1_ADDR +
+                                 APP_CAMERA_FRAME2_ADDR) -
+                                bank0_addr - bank1_addr;
+    uint32_t completed_addr = HAL_DCMIPP_PIPE_GetMemoryAddress(&hdcmipp,
+                                                               APP_CAMERA_DCMIPP_PIPE,
+                                                               DCMIPP_MEMORY_ADDRESS_0);
 
-    if (active_addr == APP_CAMERA_FRAME0_ADDR)
+    if (completed_addr == bank0_addr)
     {
-      completed_addr = APP_CAMERA_FRAME1_ADDR;
+      (void)HAL_DCMIPP_PIPE_SetMemoryAddress(&hdcmipp,
+                                             APP_CAMERA_DCMIPP_PIPE,
+                                             DCMIPP_MEMORY_ADDRESS_0,
+                                             spare_addr);
     }
-    else if (active_addr == APP_CAMERA_FRAME1_ADDR)
+    else if (completed_addr == bank1_addr)
     {
-      completed_addr = APP_CAMERA_FRAME0_ADDR;
+      (void)HAL_DCMIPP_PIPE_SetMemoryAddress(&hdcmipp,
+                                             APP_CAMERA_DCMIPP_PIPE,
+                                             DCMIPP_MEMORY_ADDRESS_1,
+                                             spare_addr);
     }
     else
     {
+      /* Status register mid-update: fall back to parity, skip rotation. */
       completed_addr = ((g_app_camera_status.frame_count & 1U) == 0U) ?
                        APP_CAMERA_FRAME0_ADDR :
                        APP_CAMERA_FRAME1_ADDR;

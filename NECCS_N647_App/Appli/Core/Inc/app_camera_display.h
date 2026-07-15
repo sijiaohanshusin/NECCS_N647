@@ -22,8 +22,14 @@ extern "C" {
 #define APP_CAMERA_DISPLAY_TOP_OVERLAY_HEIGHT 64U
 #define APP_CAMERA_DISPLAY_BYTES_PER_PIXEL    2U
 #define APP_CAMERA_DISPLAY_UI_FB_ADDR         0x90072000UL
-#define APP_CAMERA_DISPLAY_CAMERA_FB0_ADDR    0x90400000UL
-#define APP_CAMERA_DISPLAY_CAMERA_FB1_ADDR    0x90500000UL
+/* Camera capture is TRIPLE buffered: the DCMIPP ping-pong register pair
+ * rotates over three buffers so the buffer the LTDC is scanning is never a
+ * capture target. With only two buffers the sensor started overwriting the
+ * displayed frame (overlay included) while it was still on screen - visible
+ * as heat-blob flicker/erasure from the top of the frame (board 2026-07-15). */
+#define APP_CAMERA_DISPLAY_CAMERA_FB0_ADDR    0x90300000UL
+#define APP_CAMERA_DISPLAY_CAMERA_FB1_ADDR    0x90400000UL
+#define APP_CAMERA_DISPLAY_CAMERA_FB2_ADDR    0x90500000UL
 #define APP_CAMERA_DISPLAY_UI_LINE_BYTES \
   (APP_CAMERA_DISPLAY_SCREEN_WIDTH * APP_CAMERA_DISPLAY_BYTES_PER_PIXEL)
 #define APP_CAMERA_DISPLAY_CAMERA_LINE_BYTES \

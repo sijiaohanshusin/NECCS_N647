@@ -792,12 +792,35 @@ void pollAcoustic(AppUiSnapshot& snapshot)
     const bool acousticOverlayPreview =
         APP_UI_ACOUSTIC_OVERLAY_PREVIEW_ENABLE &&
         (acoustic.processed_frames == 0U);
-    /* Gate on the 2 s display hold rather than the per-frame valid flag:
-     * marginal sources sit right at the quality threshold and a strict gate
-     * makes the whole overlay strobe on/off at SRP rate. */
+    /* Heat blob gate, SEPARATE from the marker lock: it opens on the FIRST
+     * valid frame (no two-frame agreement) and holds ~1.5 s past the last
+     * one. The old design keyed the blob to sourceDisplayValid and froze the
+     * field on valid frames only; with a marginal source (quality hovering
+     * right at the gate, board-measured q=2 vs gate 2) valid frames are
+     * sparse, so the blob appeared ~0.5 s late, refreshed only every 1-2 s,
+     * and strobed on/off at the 2 s hold boundary - the reported "flicker"
+     * and "slow heatmap". */
+    static uint8_t heatHoldTicks = 0U;
+    /* Hysteresis: q>=2 to OPEN (keeps lone ambient q=1 blips from lighting
+     * the screen; measured tone/demo sources run q=2..5), any valid frame
+     * REFRESHES an open gate. The refresh matters because overlay drawing
+     * costs CPU+HyperRAM bandwidth and slows SRP from ~7 to ~3-4 fps; with
+     * a strict q>=2 refresh the gate dropped out mid-tone (board-observed)
+     * and the blob strobed - the exact symptom this gate is meant to fix. */
+    const bool heatRefresh = arrayAudible && (acoustic.valid != 0U) &&
+                             ((heatHoldTicks != 0U) || (acoustic.quality_pct >= 2U));
+    if (heatRefresh)
+    {
+        heatHoldTicks = 90U; /* 1.5 s at the 60 Hz model tick */
+    }
+    else if (heatHoldTicks != 0U)
+    {
+        --heatHoldTicks;
+    }
+    const bool heatDisplayValid = (heatHoldTicks != 0U);
     const bool acousticOverlayEnabled =
         (snapshot.activeScreen == APP_UI_SCREEN_IMAGE) &&
-        ((snapshot.sourceDisplayValid != 0U) || acousticOverlayPreview);
+        (heatDisplayValid || acousticOverlayPreview);
 
     /* Candidate markers mapped from angles into camera-frame pixels.
      * Uses the gated snapshot copies (not the live acoustic values) so the
@@ -832,15 +855,23 @@ void pollAcoustic(AppUiSnapshot& snapshot)
         ++markerCount;
     }
 
-    /* Freeze the heat field alongside the markers: during the hold window
-     * the live field is the noise surface of invalid frames and the blob
-     * would wander away from the held crosshair. ~6.9 KB static. */
+    /* While the heat gate is open the blob follows the LIVE field on every
+     * new SRP frame (~7 Hz), valid or not: the service already temporally
+     * smooths the field (asymmetric EMA), so borderline frames refine the
+     * blob instead of freezing it. Outside the gate the last field is kept
+     * for the fade-out. ~6.9 KB static. */
     static uint8_t heldField[APP_ACOUSTIC_SERVICE_FIELD_COUNT];
     static uint8_t heldQuality = 0U;
-    if ((acoustic.valid != 0U) || acousticOverlayPreview)
+    static uint32_t heldFieldSeq = 0U;
+    if ((heatDisplayValid && (acoustic.output_seq != heldFieldSeq)) ||
+        (acoustic.valid != 0U) || acousticOverlayPreview)
     {
+        heldFieldSeq = acoustic.output_seq;
         memcpy(heldField, acoustic.field, sizeof(heldField));
-        heldQuality = acoustic.quality_pct;
+        if (acoustic.valid != 0U)
+        {
+            heldQuality = acoustic.quality_pct;
+        }
     }
 
     AppCameraDisplay_SetAcousticField(heldField,
