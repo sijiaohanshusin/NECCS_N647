@@ -142,6 +142,11 @@ void TemplatePresenter::beamAutoTrack()
     model->beamAutoTrack();
 }
 
+void TemplatePresenter::toggleLaser()
+{
+    model->toggleLaser();
+}
+
 void TemplatePresenter::setBeamManualTargetPx(int16_t px, int16_t py)
 {
     model->setBeamManualTargetPx(px, py);

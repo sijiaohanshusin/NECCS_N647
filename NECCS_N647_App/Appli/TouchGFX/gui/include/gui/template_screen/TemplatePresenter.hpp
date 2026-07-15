@@ -59,6 +59,8 @@ public:
     void toggleBeamRecording();
     void beamAutoTrack();
     void setBeamManualTargetPx(int16_t px, int16_t py);
+    /* Laser pointer (gimbal skeleton). */
+    void toggleLaser();
     void refreshMedia();
     void selectNextMedia();
     void readSelectedMedia();

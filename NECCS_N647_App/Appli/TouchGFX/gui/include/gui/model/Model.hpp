@@ -269,6 +269,8 @@ struct AppUiSnapshot
     int8_t beamRmsDbfs;       /* beam output level */
     uint16_t beamSeconds;     /* recording duration */
     uint32_t beamClips;       /* AUDnnnnn.WAV count on card */
+    /* Laser pointer / gimbal (hardware pending; laser relay pin is live). */
+    uint8_t laserOn;
     char mediaLastFile[32];
     char mediaSelectedFile[32];
 };
@@ -325,6 +327,8 @@ public:
     void beamAutoTrack();
     /* Manual steering from the aim surface (camera-frame pixels 0..639/0..479). */
     void setBeamManualTargetPx(int16_t px, int16_t py);
+    /* Laser pointer relay (gimbal skeleton; servos gated on new hardware). */
+    void toggleLaser();
     void refreshMedia();
     void selectNextMedia();
     void readSelectedMedia();

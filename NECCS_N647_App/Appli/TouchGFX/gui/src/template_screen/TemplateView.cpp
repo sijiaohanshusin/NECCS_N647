@@ -1118,7 +1118,9 @@ void TemplateView::invalidateRingBand(int16_t x, int16_t y, int16_t diameter)
 /* GDB remote UI actions (blind-debug hook): write a code, the View performs
  * the same handler a touch would. 1=menu 2=shot 3=rec 4=trigger 5=palette
  * 6=profile-cycle 7=viewer-open(slot0) 8=viewer-close 9=reboot 10=poweroff. */
-extern "C" volatile uint32_t g_app_ui_test_action = 0U;
+extern "C" {
+volatile uint32_t g_app_ui_test_action = 0U;
+}
 
 void TemplateView::handleTickEvent()
 {
@@ -2003,22 +2005,33 @@ void TemplateView::refreshBeamPage(const AppUiSnapshot& snapshot)
         beamDialDot.setColor(recording ? ColorRed : (manual ? ColorAmber : ColorBlue));
     }
 
-    /* Level: big value, bar, rolling history strip. */
+    /* Level: big value, bar, rolling history strip. While the beam compute
+     * is not running (192k mode / page just entered) the snapshot level is
+     * meaningless - show a quiet placeholder instead of "0 dBFS" with a
+     * full red bar. */
     {
+        const bool live = (snapshot.beamActive != 0U);
         int32_t level = snapshot.beamRmsDbfs;
-        int16_t fillW;
+        int16_t fillW = 2;
 
         if (level < -90) { level = -90; }
         if (level > 0) { level = 0; }
 
-        (void)snprintf(text, sizeof(text), "%ld", static_cast<long>(level));
-        beamLevelValue.setText(text);
-
-        fillW = static_cast<int16_t>(((level + 90) * 144) / 90);
-        if (fillW < 2)
+        if (live)
         {
-            fillW = 2;
+            (void)snprintf(text, sizeof(text), "%ld", static_cast<long>(level));
+            beamLevelValue.setText(text);
+            fillW = static_cast<int16_t>(((level + 90) * 144) / 90);
+            if (fillW < 2)
+            {
+                fillW = 2;
+            }
         }
+        else
+        {
+            beamLevelValue.setText("--");
+        }
+
         if (beamLevelFill.getWidth() != fillW)
         {
             beamLevelFill.setPosition(RailX + 14, 360, fillW, 10);
@@ -2029,7 +2042,7 @@ void TemplateView::refreshBeamPage(const AppUiSnapshot& snapshot)
         }
 
         beamHistory.setHot(recording);
-        beamHistory.push(static_cast<uint8_t>(level + 90)); /* 0..90 */
+        beamHistory.push(live ? static_cast<uint8_t>(level + 90) : 0U);
     }
 
     /* Clip counter + interaction hint. */

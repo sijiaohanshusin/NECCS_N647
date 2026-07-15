@@ -3026,6 +3026,54 @@ static void process_command(AppMediaCommand_t command, uint32_t arg)
 /* GDB test hook: writing a command id here (via debugger memory write) runs
  * it on the media thread. Safer than GDB function calls on a live RTOS. */
 volatile uint32_t g_app_media_test_request = 0U;
+
+/* GDB file-pull channel: the board has no removable card, so files are
+ * hauled off over SWD. Write pull_offset, then pull_request = audio clip
+ * index; the media thread reads one chunk into g_app_media_pull_buffer and
+ * reports the byte count (0xFFFFFFFF = open/read error, 0 = EOF). The host
+ * loops chunks and stitches the file (tools flow, not product code). */
+#define APP_MEDIA_PULL_CHUNK_BYTES (64U * 1024U)
+volatile uint32_t g_app_media_pull_request = 0U;
+volatile uint32_t g_app_media_pull_offset = 0U;
+volatile uint32_t g_app_media_pull_result = 0U;
+volatile uint32_t g_app_media_pull_busy = 0U;
+uint8_t g_app_media_pull_buffer[APP_MEDIA_PULL_CHUNK_BYTES]
+    __attribute__((section(".EXTRAM"), aligned(32)));
+
+static void process_pull_request(void)
+{
+  const uint32_t index = g_app_media_pull_request;
+  char path[APP_MEDIA_FILE_NAME_LEN];
+  ULONG actual = 0U;
+  UINT status;
+
+  if (index == 0U)
+  {
+    return;
+  }
+  g_app_media_pull_request = 0U;
+  g_app_media_pull_busy = 1U;
+  g_app_media_pull_result = 0xFFFFFFFFUL;
+
+  make_audio_path(index, path, sizeof(path));
+  if (fx_file_open(&s_media, &s_work_file, (CHAR *)path, FX_OPEN_FOR_READ) == FX_SUCCESS)
+  {
+    if (fx_file_seek(&s_work_file, g_app_media_pull_offset) == FX_SUCCESS)
+    {
+      status = fx_file_read(&s_work_file,
+                            g_app_media_pull_buffer,
+                            APP_MEDIA_PULL_CHUNK_BYTES,
+                            &actual);
+      if ((status == FX_SUCCESS) || (status == FX_END_OF_FILE))
+      {
+        g_app_media_pull_result = (uint32_t)actual;
+      }
+    }
+    (void)fx_file_close(&s_work_file);
+  }
+
+  g_app_media_pull_busy = 0U;
+}
 #endif
 
 static void AppMedia_ThreadEntry(ULONG thread_input)
@@ -3054,6 +3102,7 @@ static void AppMedia_ThreadEntry(ULONG thread_input)
       process_command((AppMediaCommand_t)(test_message & 0xFFU),
                       test_message >> APP_MEDIA_CMD_ARG_SHIFT);
     }
+    process_pull_request();
 #endif
 
     process_record_tick();

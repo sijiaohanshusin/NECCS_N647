@@ -1155,9 +1155,10 @@ volatile uint32_t g_app_ui_request_screen = 0xFFU;
 volatile uint32_t g_app_ui_request_trigger = 0xFFU;
 
 /* Trigger "hot" gate, GDB-tunable: raw array peak (dBFS) the detection must
- * reach. -32 suits a real demo source; raise toward -55 for remote tests
- * where the tone reaches the array at lower level. */
-volatile int32_t g_app_ui_trigger_min_dbfs = -32;
+ * reach on top of the source lock. -72 admits headphone-level sources
+ * (board-measured -66..-72 dBFS); tighten toward -35 in loud venues where
+ * ambient chatter must not fire the trigger. */
+volatile int32_t g_app_ui_trigger_min_dbfs = -72;
 
 Model::Model()
     : modelListener(0),
@@ -1191,6 +1192,25 @@ void Model::tick()
     pollMedia(snapshot);
     pollBeam(snapshot);
 
+    /* Gimbal/laser pre-integration (hardware in transit): steer at the beam
+     * page target when engaged, otherwise follow the acoustic lock. Poll
+     * applies the slew limit and refreshes the servo PWM; everything idles
+     * as a no-op until the outputs are enabled (UI later, GDB hooks now). */
+    if (snapshot.beamActive != 0U)
+    {
+        AppGimbal_PointAt(snapshot.beamTheta, snapshot.beamPhi);
+    }
+    else if (snapshot.sourceDisplayValid != 0U)
+    {
+        AppGimbal_PointAt(snapshot.thetaDeg, snapshot.phiDeg);
+    }
+    AppGimbal_Poll();
+    {
+        AppGimbalSnapshot_t gimbal;
+        AppGimbal_GetSnapshot(&gimbal);
+        snapshot.laserOn = gimbal.laser_on;
+    }
+
     if (snapshot.activeScreen == APP_UI_SCREEN_BOOT)
     {
         ++bootTicks;
@@ -1208,8 +1228,13 @@ void Model::tick()
         }
     }
 
-    /* Acoustic trigger: on a rising "hot" edge (valid detection above the
-     * level threshold) capture a screenshot, then hold off for ~6 s. */
+    /* Acoustic trigger: on a rising source-lock edge capture a screenshot,
+     * then hold off for ~6 s. The lock (sourceDisplayValid) is already
+     * noise-filtered by the SRP quality gate + two-frame angle agreement;
+     * the old raw gates (quality>=12%, peak>=-32 dBFS) were calibrated for
+     * loud close sources and never fired on real headphone-level ones
+     * (board-measured -66..-72 dBFS, quality 2..5%). The dBFS floor stays
+     * available as a GDB-tunable for noisy venues. */
     snapshot.trailEnabled = AppCameraDisplay_GetTrailEnabled();
     if (triggerCooldown > 0U)
     {
@@ -1218,9 +1243,8 @@ void Model::tick()
     if (triggerArmed && (snapshot.activeScreen != APP_UI_SCREEN_BOOT))
     {
         const bool hot =
-            ((snapshot.acousticFlags & APP_UI_ACOUSTIC_FLAG_VALID) != 0U) &&
-            (snapshot.qualityPct >= 12U) &&
-            (snapshot.pcmdRawPeakDbfs >= -32);
+            (snapshot.sourceDisplayValid != 0U) &&
+            (snapshot.pcmdRawPeakDbfs >= g_app_ui_trigger_min_dbfs);
         if (hot && !triggerPrevHot && (triggerCooldown == 0U))
         {
             requestScreenshot();
@@ -1473,6 +1497,18 @@ void Model::toggleBeamRecording()
 void Model::beamAutoTrack()
 {
     snapshot.beamManual = 0U;
+    if (modelListener != 0)
+    {
+        modelListener->uiSnapshotUpdated(snapshot);
+    }
+}
+
+void Model::toggleLaser()
+{
+    const uint8_t next = (snapshot.laserOn != 0U) ? 0U : 1U;
+
+    AppGimbal_SetLaser(next);
+    snapshot.laserOn = next;
     if (modelListener != 0)
     {
         modelListener->uiSnapshotUpdated(snapshot);

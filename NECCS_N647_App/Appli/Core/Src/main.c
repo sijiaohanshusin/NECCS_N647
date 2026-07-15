@@ -1076,12 +1076,21 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : EXP_GPIO_PE13_Pin EXP_GPIO_PE15_Pin EXP_GPIO_PE14_Pin EXP_GPIO_PE12_Pin
-                           EXP_GPIO_PE7_Pin USER2_Pin USER1_Pin */
-  GPIO_InitStruct.Pin = EXP_GPIO_PE13_Pin|EXP_GPIO_PE15_Pin|EXP_GPIO_PE14_Pin|EXP_GPIO_PE12_Pin
+  /*Configure GPIO pins : EXP_GPIO_PE15_Pin EXP_GPIO_PE12_Pin EXP_GPIO_PE7_Pin
+                           USER2_Pin USER1_Pin */
+  GPIO_InitStruct.Pin = EXP_GPIO_PE15_Pin|EXP_GPIO_PE12_Pin
                           |EXP_GPIO_PE7_Pin|USER2_Pin|USER1_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : GIMBAL_PAN_PWM_Pin GIMBAL_TILT_PWM_Pin
+    (gimbal servo PWM; app_gimbal.c re-muxes to TIM1_CH3/CH4 AF1 on init) */
+  HAL_GPIO_WritePin(GPIOE, GIMBAL_PAN_PWM_Pin|GIMBAL_TILT_PWM_Pin, GPIO_PIN_RESET);
+  GPIO_InitStruct.Pin = GIMBAL_PAN_PWM_Pin|GIMBAL_TILT_PWM_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
 
   /*Configure GPIO pins : EXP_GPIO_PD0_Pin UCPD1_INT_Pin EXP_ALT_ETH_PD1_Pin EXP_ALT_ETH_PD12_Pin BQ25730_PROCHOT_Pin
@@ -1153,11 +1162,13 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(BQ25730_PG_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : EXP_GPIO_PB1_Pin */
-  GPIO_InitStruct.Pin = EXP_GPIO_PB1_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  /*Configure GPIO pin : GIMBAL_RELAY_EN_Pin (active high, off at boot) */
+  HAL_GPIO_WritePin(GIMBAL_RELAY_EN_GPIO_Port, GIMBAL_RELAY_EN_Pin, GPIO_PIN_RESET);
+  GPIO_InitStruct.Pin = GIMBAL_RELAY_EN_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(EXP_GPIO_PB1_GPIO_Port, &GPIO_InitStruct);
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GIMBAL_RELAY_EN_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : PWR_SD_EN_Pin */
   GPIO_InitStruct.Pin = PWR_SD_EN_Pin;
@@ -1191,11 +1202,19 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOF, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : BOOT1_Pin EXP_GPIO_PA12_Pin */
-  GPIO_InitStruct.Pin = BOOT1_Pin|EXP_GPIO_PA12_Pin;
+  /*Configure GPIO pin : BOOT1_Pin */
+  GPIO_InitStruct.Pin = BOOT1_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : LASER_EN_Pin (drives laser MOSFET, off at boot) */
+  HAL_GPIO_WritePin(LASER_EN_GPIO_Port, LASER_EN_Pin, GPIO_PIN_RESET);
+  GPIO_InitStruct.Pin = LASER_EN_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(LASER_EN_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : SD_DET_Pin UCPD1_VSENSE_Pin */
   GPIO_InitStruct.Pin = SD_DET_Pin|UCPD1_VSENSE_Pin;

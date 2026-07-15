@@ -282,6 +282,11 @@
 			<locationURI>PARENT-2-PROJECT_LOC/Appli/Core/Src/app_beam_record.c</locationURI>
 		</link>
 		<link>
+			<name>Application/User/Core/app_gimbal.c</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/Appli/Core/Src/app_gimbal.c</locationURI>
+		</link>
+		<link>
 			<name>Application/User/Core/app_pcmd_capture.c</name>
 			<type>1</type>
 			<locationURI>PARENT-2-PROJECT_LOC/Appli/Core/Src/app_pcmd_capture.c</locationURI>

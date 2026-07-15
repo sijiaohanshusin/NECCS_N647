@@ -25,6 +25,7 @@ extern "C" {
 #include "app_bringup_thread.h"
 #include "app_camera.h"
 #include "app_camera_display.h"
+#include "app_gimbal.h"
 #include "app_media.h"
 #include "app_npu.h"
 #include "app_pcmd_capture.h"

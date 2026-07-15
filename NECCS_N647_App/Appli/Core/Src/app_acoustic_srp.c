@@ -1131,6 +1131,7 @@ AppAcousticImagingStatus_t App_AcousticSrp_ProcessFrame(AppAcousticSrpContext_t 
 {
   AppAcousticImagingStatus_t status;
   uint32_t top_idx[APP_ACOUSTIC_IMAGING_FINE_TOP_K] = { 0U };
+  AppAcousticSrpPerf_t perf;
   uint32_t t0;
   uint32_t t1;
   uint32_t total_start;
@@ -1157,13 +1158,17 @@ AppAcousticImagingStatus_t App_AcousticSrp_ProcessFrame(AppAcousticSrpContext_t 
     return APP_ACOUSTIC_IMAGING_PROCESSING_FAILED;
   }
 
-  memset(&ctx->perf, 0, sizeof(ctx->perf));
+  /* Stage timings accumulate in a local; ctx->perf is published once at the
+   * end so concurrent snapshot readers never see a half-filled struct
+   * (the old memset-then-fill pattern showed "total=0, coarse=32M" tears
+   * on the system page). */
+  memset(&perf, 0, sizeof(perf));
   total_start = App_AcousticSrp_CycleNow();
 
   t0 = total_start;
   status = App_AcousticSrp_Preprocess(ctx, frame);
   t1 = App_AcousticSrp_CycleNow();
-  ctx->perf.preprocess_cycles = App_AcousticSrp_CycleDelta(t0, t1);
+  perf.preprocess_cycles = App_AcousticSrp_CycleDelta(t0, t1);
   if (status != APP_ACOUSTIC_IMAGING_OK)
   {
     return status;
@@ -1172,12 +1177,12 @@ AppAcousticImagingStatus_t App_AcousticSrp_ProcessFrame(AppAcousticSrpContext_t 
   t0 = t1;
   App_AcousticSrp_RunFft(ctx);
   t1 = App_AcousticSrp_CycleNow();
-  ctx->perf.fft_cycles = App_AcousticSrp_CycleDelta(t0, t1);
+  perf.fft_cycles = App_AcousticSrp_CycleDelta(t0, t1);
 
   t0 = t1;
   App_AcousticSrp_ComputeGccPhat(ctx);
   t1 = App_AcousticSrp_CycleNow();
-  ctx->perf.gcc_cycles = App_AcousticSrp_CycleDelta(t0, t1);
+  perf.gcc_cycles = App_AcousticSrp_CycleDelta(t0, t1);
 
   t0 = t1;
   if (ctx->backend == APP_ACOUSTIC_BACKEND_NPU_HEATMAP)
@@ -1192,11 +1197,11 @@ AppAcousticImagingStatus_t App_AcousticSrp_ProcessFrame(AppAcousticSrpContext_t 
                                               APP_ACOUSTIC_IMAGING_COARSE_TOTAL,
                                               &npu_perf);
     t1 = App_AcousticSrp_CycleNow();
-    ctx->perf.coarse_cycles = App_AcousticSrp_CycleDelta(t0, t1);
-    ctx->perf.npu_quantize_cycles = npu_perf.quantize_cycles;
-    ctx->perf.npu_cache_cycles = npu_perf.cache_cycles;
-    ctx->perf.npu_inference_cycles = npu_perf.inference_cycles;
-    ctx->perf.npu_output_cycles = npu_perf.output_cycles;
+    perf.coarse_cycles = App_AcousticSrp_CycleDelta(t0, t1);
+    perf.npu_quantize_cycles = npu_perf.quantize_cycles;
+    perf.npu_cache_cycles = npu_perf.cache_cycles;
+    perf.npu_inference_cycles = npu_perf.inference_cycles;
+    perf.npu_output_cycles = npu_perf.output_cycles;
     if (status != APP_ACOUSTIC_IMAGING_OK)
     {
       return status;
@@ -1206,7 +1211,7 @@ AppAcousticImagingStatus_t App_AcousticSrp_ProcessFrame(AppAcousticSrpContext_t 
   {
     App_AcousticSrp_RunCoarseSearch(ctx);
     t1 = App_AcousticSrp_CycleNow();
-    ctx->perf.coarse_cycles = App_AcousticSrp_CycleDelta(t0, t1);
+    perf.coarse_cycles = App_AcousticSrp_CycleDelta(t0, t1);
   }
 
   App_AcousticSrp_FindTopCoarseNms(s_srp_workspace.srp_power, top_idx, ctx->config.fine_top_k);
@@ -1214,7 +1219,7 @@ AppAcousticImagingStatus_t App_AcousticSrp_ProcessFrame(AppAcousticSrpContext_t 
   t0 = App_AcousticSrp_CycleNow();
   App_AcousticSrp_RunFineSearch(ctx, top_idx);
   t1 = App_AcousticSrp_CycleNow();
-  ctx->perf.fine_cycles = App_AcousticSrp_CycleDelta(t0, t1);
+  perf.fine_cycles = App_AcousticSrp_CycleDelta(t0, t1);
 
   t0 = t1;
   App_AcousticSrp_SmoothPower(ctx);
@@ -1222,8 +1227,9 @@ AppAcousticImagingStatus_t App_AcousticSrp_ProcessFrame(AppAcousticSrpContext_t 
   App_AcousticSrp_FillVisFrame(ctx, vis_frame);
   vis_frame->frame_seq = frame->seq;
   t1 = App_AcousticSrp_CycleNow();
-  ctx->perf.output_cycles = App_AcousticSrp_CycleDelta(t0, t1);
-  ctx->perf.total_cycles = App_AcousticSrp_CycleDelta(total_start, t1);
+  perf.output_cycles = App_AcousticSrp_CycleDelta(t0, t1);
+  perf.total_cycles = App_AcousticSrp_CycleDelta(total_start, t1);
+  ctx->perf = perf;
 
   return APP_ACOUSTIC_IMAGING_OK;
 }
