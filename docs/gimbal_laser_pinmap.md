@@ -1,63 +1,103 @@
-# 云台 + 激光引脚定稿与驱动契约
+# 云台 + 激光 + 电源管理引脚定稿(按实际硬件网表审定)
 
-日期: 2026-07-15 · 状态: 引脚已定稿并同步进 .ioc, 驱动骨架已上板验证(无外设空跑)
+日期: 2026-07-18 · 依据: `Shared_References/Common_Modules/拓展板（新）.net`(与旧
+`N6拓展板.net` 网表逐网对比**完全一致**) +
+`自研电源管理板子/Netlist_电源管理.net`(两板经 20P FPC 相连)
+· 状态: 固件已按硬件对齐; **不动布线优先改元件**, 重画板子仅作末选
 
-## 一、定稿引脚(新板走线依据, .ioc 中已用标签固定)
+## 一、20P 电源 FPC 跨板映射(审定结果)
 
-经新板 HC-USB3.0-C34-P 连接器引出(USB2 D+/D- 走真 USB, SuperSpeed 4 根
-差分线复用为 GPIO 拉到云台舱):
+| FPC | 电源板信号 | 去向 | N6 引脚 | .ioc 标签 | 固件用途 |
+|---|---|---|---|---|---|
+| 1 | PROCHOT | BQ25730 | PD3 | BQ25730_PROCHOT | 输入(拓展板蜂鸣器共线, 见风险③) |
+| 2 | SDA | BQ25730+UCPD | PD4 | I2C2_SDA | I2C2(与麦阵/触摸共享) |
+| 3 | SCL | 同上 | PD14 | I2C2_SCL | I2C2 |
+| 4 | CHRG_OK | BQ25730 | PH5 | BQ25730_CHRG_OK | 输入 |
+| 5 | OTG/VAP | BQ25730 | PD13 | BQ25730_OTG_VAP | 输出 |
+| 6 | CMPOUT | BQ25730 | PH8 | BQ25730_CMPOUT | 输入 |
+| 7 | PG | UCPD 电源好 | PB3 | BQ25730_PG | 输入 |
+| 8 | ENA1 | U3(TPS5430) ENA → **5V 主轨** | (拓展板未接 MCU) | - | **悬空即可**(见 §五); 禁止接电池 |
+| 9 | ENA2 | U4(SPX29302) EN → 3.3V | (两板都未接!) | - | U4 不贴, 此脚废弃(见 §四) |
+| 10 | **ENB1** | U5(TPS5450) ENA → **7.4V 舵机轨** | **PC7** | **GIMBAL_PWR_EN** | 输出, 默认低=轨断电; `AppGimbal_SetEnabled` 先抬轨、稳压再开 PWM |
+| 11 | **ENB2** | U6 LDO EN → **激光 3.3V 轨** | **PC10**(拆 R14 后) | **LASER_EN** | 输出, 默认低=激光灭; SetLaser 自动连带抬 7.4V 轨(见 §三) |
+| 12 | GPIO1 → USB3-A 5 / U8-3 | 云台线束 | PE13 | GIMBAL_PAN_PWM | TIM1_CH3 AF1, 50Hz 水平舵机 |
+| 13 | GPIO2 → USB3-A 6 / U8-4 | 云台线束 | PE14 | GIMBAL_TILT_PWM | TIM1_CH4 AF1, 俯仰舵机 |
+| 14 | GPIO3 → USB3-A 8 / U8-5 | 云台线束 | PA12 | EXP_GPIO_PA12 | 已释放(激光改走 ENB2 轨门控), 保持输入 |
+| 15 | GPIO4 → **仅 U8-6** | GH-8 线束 | **PD0** | GIMBAL_RELAY_EN | 继电器/备用(不在 USB3-A 上) |
+| 16/17 | 5V | 系统 | - | - | 核心板供电 |
+| 18/19 | 3.3V | 系统 | - | - | 拓展板 3.3V 域 |
+| 20-22 | GND | - | - | - | - |
 
-| 连接器线 | MCU 引脚 | .ioc 标签 | 功能 | 说明 |
-|---|---|---|---|---|
-| GPIO1 (SSRX-) | **PE13** | `GIMBAL_PAN_PWM` | 水平舵机 PWM | TIM1_CH3, AF1, 50 Hz / 500-2500 µs |
-| GPIO2 (SSRX+) | **PE14** | `GIMBAL_TILT_PWM` | 俯仰舵机 PWM | TIM1_CH4, AF1, 同上 |
-| GPIO3 (SSTX-) | **PA12** | `LASER_EN` | 激光使能 | 推挽, 高有效, 驱 MOSFET 栅极, 上电默认低 |
-| GPIO4 (SSTX+) | **PB1** | `GIMBAL_RELAY_EN` | 继电器 | 推挽, 高有效, 上电默认低 |
-| VBUS | - | - | 7.4 V 舵机/激光电源 | 电池直供, 与主板共地, 不过 MCU 板 |
+电源板拓扑: VSYS(BQ25730)→H3→U3 buck→**5V**(ENA1); 5V→U4 LDO→**3.3V**(ENA2);
+VSYS→H4→U5 buck→**7.4V**(ENB1)→USB3-A.1 / U8.1 / CN7; 7.4V→U6 LDO→3.3V 第二路(ENB2)。
 
-依据: PE13/PE14 的 TIM1_CH3/CH4 AF1 映射对照 ST 官方
-`NUCLEO-N657X0-Q/Examples/TIM/TIM_PWMOutput`(N657 与 N647 同 die)。
-四个引脚都在现有底板 EXP 排针上, 新板到货前可飞线实测。
+云台线束: **USB3-A**(7.4V/GND/PAN/TILT/LASER_EN/3.3V, 无 GPIO4) 或
+**U8 GH-8**(全信号含 GPIO4)。
 
-- 上电安全态: 四脚均在 `MX_GPIO_Init` 配成推挽输出并写低
-  (激光/继电器绝不上电闪亮; PWM 脚无脉冲 = 舵机不锁轴)。
-- RIF: 四脚原本就在 Appli CID1 SEC 白名单里, 无需改动。
+## 二、固件现状(已按 §三 定稿方案落地)
 
-## 二、驱动契约(`app_gimbal.c/h`, 已编译上板)
+1. 云台 PWM = PE13/PE14; **激光 = PC10(ENB2 轨门控)**; 继电器 = PD0;
+   7.4V 轨 EN = PC7; PA12 已释放为输入。
+2. `AppGimbal_SetEnabled`: 抬 PC7 → 稳压 → 开 PWM; `AppGimbal_SetLaser(1)`:
+   抬 PC7 → 稳压 → 拉高 PC10; 舵机与激光共用轨引用计数, 全空闲才断轨。
+3. PD3 = PROCHOT **输入无上拉**(蜂鸣器共线), PROCHOT 状态走 I2C 读。
+4. CHRG_OK(PH5)/CMPOUT(PH8) 内部上拉(替代被拆的 R19/R20)。
+5. `.ioc` 标签已同步。
 
-- `AppGimbal_Init()`: TIM1 1 MHz 计数(CCR 即微秒), 20 ms 帧;
-  时钟用 `HAL_RCCEx_GetTIMGFreq()` 实时读(N6 无经典 2xAPB 规则)。
-  惰性调用 -- 任何 Set* 入口都会自动 init, 开机不占启动时序。
-- `AppGimbal_SetEnabled(on)`: 启/停两路 PWM(停 = 舵机松轴)。
-- `AppGimbal_PointAt(theta, phi)`: 声学角(度) -> 脉宽, 每轴
-  `center_us + deg * us_per_deg`(带符号可反装), 双重夹紧
-  (标定限位 + 绝对 500-2500)。标定表 `s_cal_pan/s_cal_tilt`
-  到货后按实测填(指向已知角度调 center/scale/limit + 视差补偿)。
-- `AppGimbal_Poll()`: 挂在 UI tick(60 Hz), 800 µs/s 转速限幅后写 CCR,
-  扫摆平滑且限制舵机浪涌电流。
-- `AppGimbal_SetLaser/SetRelay(on)`: 电平控制。
-- 联动(Model::tick 已接): 声源录音页在哪儿指哪儿(beam 目标),
-  其余页面跟随声学锁定(sourceDisplayValid)。UI 的激光开关走
-  `toggleLaser()`(快捷键位后续到货再放)。
+GDB 钩子: `g_app_gimbal_test_request` 1=使能+指向, 2=激光, 3=继电器, 4=使能翻转。
 
-## 三、GDB 试指向钩子(DEBUG 构建)
+## 三、定稿方案(2026-07-18 晚): 激光走 ENB2 轨门控
 
-```
-set 'app_gimbal.c'::g_app_gimbal_test_theta = 30
-set 'app_gimbal.c'::g_app_gimbal_test_phi = -10
-set 'app_gimbal.c'::g_app_gimbal_test_request = 1   # 使能+指向
-set 'app_gimbal.c'::g_app_gimbal_test_request = 2   # 激光翻转
-set 'app_gimbal.c'::g_app_gimbal_test_request = 3   # 继电器翻转
-set 'app_gimbal.c'::g_app_gimbal_test_request = 4   # PWM 使能翻转
-```
+用户决策: **激光电源 = U6(ENB2 门控)那路 3.3V; 其余 3.3V 全部用拓展板
+AMS1117(U1)**; 电源板 U4 不贴。固件已把 `LASER_EN` 从 PA12 换到 **PC10
+(FPC-11/ENB2)**, PA12 还原为普通输入。
 
-验证读数: `s_live_pan_us/s_live_tilt_us`(慢速逼近目标即转速限幅在工作)、
-TIM1 寄存器(ARR=19999, CCR3/CCR4=脉宽)、GPIOA ODR bit12(激光)。
+激光供电链: `VSYS →(H4)→ U5 buck 7.4V(EN=ENB1/PC7) → U6 LDO 3.3V
+(EN=ENB2/PC10) → LASER/CN1/MIC/BQ 四个 XH 座 + USB3-A.9 / U8.8`。
+**U6 的输入是 7.4V 舵机轨**, 所以开激光必须先抬 PC7 —— 固件
+`AppGimbal_SetLaser(1)` 已自动处理(轨引用计数: 舵机/激光任一在用即保持)。
 
-## 四、到货后待办
+## 四、硬件动作清单(定稿, 不动 PCB 走线)
 
-1. 飞线接舵机, 示波器/舵机实测 50 Hz 帧与 500-2500 µs 行程。
-2. 标定 `s_cal_*`(center/scale/invert/limit)+ 云台在阵列上方 ~6 cm
-   的视差补偿。
-3. UI 放"激光指向"开关(建议声源录音页控制列或系统页)。
-4. 演示形态: 定位锁定 -> 云台转向 -> 激光点打在声源 -> 同步定向录音。
+### 4.1 激光=ENB2 方案的前置改动(缺一不可)
+
+| # | 板 | 动作 | 原因 |
+|---|---|---|---|
+| 1 | 20P FPC **排线** | **剪断第 18/19 两芯**(或连接器两端抬脚) | 两板 3.3V 在 FPC18/19 上硬并联: 不剪, 拓展板 AMS1117 会反灌激光座(激光关不掉), U6 开时两 LDO 互灌 |
+| 2 | 拓展板 | **拆 R14**(ENB2→3.3V 上拉) | 不拆, MCU 复位期间 ENB2 被拉高 = 一上电激光就亮 |
+| 3 | 电源板 | U6 EN 脚(ENB2)对 GND 贴 **100k** | 复位/未初始化窗口激光默认灭(SPX29302 EN 无内部偏置, 悬空不定) |
+| 4 | 电源板 | **U6 分压改 3.3V: R37 10k→16.5k**(R38 保持 10k) | 现网表 10k/10k → 输出只有 1.24×2=2.48V, 激光亮不透 |
+| 5 | 电源板 | **U4 不贴**(ENA2 随之不用处理) | 3.3V 全权拓展板 AMS1117; 避免并联互灌 |
+| 6 | 电源板 | **拆 R17/R18**(SDA/SCL 4.7k 上拉) | 它们上拉到激光轨; 轨断电时经激光负载把 I2C2 拖到半电平 → 麦阵/触摸/相机全故障。拓展板 R22/R24 已有 4.7k 上拉 |
+| 7 | 电源板 | **拆 R16/R19/R20/R29**(PROCHOT/CHRG_OK/CMPOUT/PG 上拉) | 同理挂在激光轨上; 固件已改用 MCU 内部上拉(PROCHOT 例外, 见 #8) |
+| 8 | 拓展板 | 建议拆 R12 或蜂鸣器 | PROCHOT 与蜂鸣器基极共线; 固件对 PD3 保持无上拉输入, PROCHOT 状态走 I2C 读 |
+| 9 | 使用约定 | LASER/CN1/MIC/BQ 四个 XH 座与 U8.8/USB3.9 = **激光轨** | 只准接激光; 麦阵等其他 3.3V 负载**不得**从电源板取电 |
+
+### 4.2 电源板与激光无关但不改就起不来的项
+
+| # | 位置 | 动作 | 原因 |
+|---|---|---|---|
+| A | U3 5V 反馈 | **R30=30.9k, R31=0Ω, R33=10k**(→5.0V) | 网表现值 10k 上/20k 下 → 只输出 **1.83V**, 整机(核心板 5V)起不来。若已实测 5V 正常=BOM 已改, 忽略 |
+| B | U5 7.4V 反馈 | **R40=51k, R41=0Ω, R43=10k**(→7.45V) | 同构问题, 现值算出 1.83V, 舵机/激光 LDO 没输入 |
+| C | CELL R26/R27 | 4S 包(16.8V): **R26 4.7k→1.5k**(或 R27→14k), 目标 75%·VDDA | 现 4.7k/4.7k=50%, 落在 2S(≤48.5%)/3S(≥51.7%) 死区, BQ25730 判串数不定 |
+| D | ENA1 | **悬空, 什么都不接** | TPS5430 ENA 悬空=自启(片内上拉); **绝对禁止接电池/VSYS**: ENA 绝对最大 7V, 4S 满充 16.8V 直接损坏。要外控只能开漏拉低 |
+| E | ENB1(U5 EN) | 可选 100k→GND | MCU 复位前 7.4V 轨默认断; PC7 推挽 3.3V 仍可开(阈值 1.3V) |
+| F | OTG/VAP | 47k~100k→GND(老问题) | 复位窗防误进 OTG |
+| G | 首上电实测 | 万用表量 5V / 7.4V / 3.3V(PC10 拉高时) / CELL 脚电压(应≈4.5V=75%×6V) | 分压问题全部一次验证 |
+
+### 4.3 固件已完成(本次提交)
+
+1. `.ioc`/`main.h`/`main.c`: **PC10 = LASER_EN**(输出, 上电拉低), PA12 =
+   EXP_GPIO_PA12 输入; CHRG_OK(PH5)/CMPOUT(PH8) 启用内部上拉(PG 原有;
+   PROCHOT 保持无上拉, 蜂鸣器共线)。
+2. `app_gimbal.c`: SetLaser(1) = 先抬 7.4V 轨(稳压 50ms)再拉高 ENB2;
+   SetLaser(0)/SetEnabled(0) 用轨引用计数, 舵机与激光都空闲才断轨。
+3. `app_power`: 4S 参数(16.8V 满充 / 12.0V 低压兜底 / 4S 电量曲线 /
+   充电电流上限 2048mA), CELL 判定=VSYS_MIN 12.3V 读回校验。
+4. GDB 钩子不变: `g_app_gimbal_test_request` 2=激光开关(现在会连带抬轨)。
+
+### 4.4 什么时候才值得重画板?
+
+仅当仍挡演示时(时间紧优先上面的元件级修): 需要 MCU 控 ENA2/序控 5V、
+需要拆 PA12↔TFTLCD1.D0 / PD0↔相机座共铜、需要 USB3-A 带出 GPIO4、
+或不愿剪 FPC 排线时把两板 3.3V 断开做成 0Ω 选装。

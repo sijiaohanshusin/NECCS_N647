@@ -8,10 +8,29 @@ extern "C" {
 #include <stdint.h>
 
 #define APP_POWER_PACK_CAPACITY_MAH          2600U
-#define APP_POWER_3S_CHARGE_VOLTAGE_MV       12600U
-#define APP_POWER_3S_UNDERVOLTAGE_MV         9000U
+/* 4S1P Li-ion pack (integrated balance + protection board):
+ * 16.8 V full, 12.0 V system cutoff (protection板 trips lower, ~10-11 V). */
+#define APP_POWER_CHARGE_VOLTAGE_MV          16800U
+#define APP_POWER_UNDERVOLTAGE_MV            12000U
 #define APP_POWER_DEFAULT_CHARGE_CURRENT_MA  0U
+/* 0.8C-ish ceiling for the 2600 mAh pack; BQ25730 LSB is 128 mA. */
+#define APP_POWER_CHARGE_CURRENT_MAX_MA      2048U
+/* BQ25730 charge watchdog is 175 s by default: rewrite ChargeCurrent well
+ * inside that window while a nonzero charge request is active. */
+#define APP_POWER_CHARGE_REFRESH_MS          60000U
 #define APP_POWER_UNDERVOLTAGE_DEBOUNCE_MS   500U
+/* BQ25730 loads VSYS_MIN from the CELL_BATPRESZ strap at adapter plug-in:
+ * 12.3 V readback = strap decoded as 4S. Anything else means the R26/R27
+ * divider is wrong (50% sits in the dead band between 2S and 3S) and
+ * charging must stay blocked or SYSOVP will trip. */
+#define APP_POWER_VSYS_MIN_4S_MV             12300U
+/* CH224A PD sink shares I2C2 (7-bit 0x22/0x23), voltage register 0x0A:
+ * 0=5V 1=9V 2=12V 3=15V 4=20V. Keep 12 V while VBUS TVS D2 is SMCJ15A
+ * (15 V standoff) - only move to 4 (20 V) after D2 -> SMCJ22A. */
+#define APP_POWER_PD_REQUEST_CODE            2U
+/* Board sense resistors (power-board R2 = RAC, R5 = RSR). The corrected BOM
+ * fits 10 mOhm shunts; set to 1 only if 5 mOhm parts are fitted instead. */
+#define APP_POWER_SENSE_RES_5MOHM            0U
 
 typedef enum
 {

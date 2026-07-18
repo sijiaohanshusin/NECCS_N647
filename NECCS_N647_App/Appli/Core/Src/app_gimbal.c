@@ -6,17 +6,30 @@
 
 /* ------------------------------------------------------------------ */
 /* Pin map: defined once in the .ioc (GIMBAL_x / LASER_EN labels) and  */
-/* consumed here via the generated main.h macros. PE13/PE14 double as  */
-/* TIM1_CH3/CH4 on AF1 (per ST N657 datasheet + NUCLEO PWM example).   */
+/* consumed here via the generated main.h macros; audited against the  */
+/* power-board + expansion-board netlists (see header). PE13/PE14      */
+/* double as TIM1_CH3/CH4 on AF1 (ST N657 datasheet + NUCLEO example). */
 /* ------------------------------------------------------------------ */
 #define APP_GIMBAL_PAN_PORT        GIMBAL_PAN_PWM_GPIO_Port
-#define APP_GIMBAL_PAN_PIN         GIMBAL_PAN_PWM_Pin    /* PE13 TIM1_CH3 */
+#define APP_GIMBAL_PAN_PIN         GIMBAL_PAN_PWM_Pin    /* PE13 TIM1_CH3, FPC12/GPIO1 */
 #define APP_GIMBAL_TILT_PORT       GIMBAL_TILT_PWM_GPIO_Port
-#define APP_GIMBAL_TILT_PIN        GIMBAL_TILT_PWM_Pin   /* PE14 TIM1_CH4 */
+#define APP_GIMBAL_TILT_PIN        GIMBAL_TILT_PWM_Pin   /* PE14 TIM1_CH4, FPC13/GPIO2 */
 #define APP_GIMBAL_LASER_PORT      LASER_EN_GPIO_Port
-#define APP_GIMBAL_LASER_PIN       LASER_EN_Pin          /* PA12 */
+#define APP_GIMBAL_LASER_PIN       LASER_EN_Pin          /* PC10, FPC11/ENB2 = U6 3.3 V LDO EN */
 #define APP_GIMBAL_RELAY_PORT      GIMBAL_RELAY_EN_GPIO_Port
-#define APP_GIMBAL_RELAY_PIN       GIMBAL_RELAY_EN_Pin   /* PB1 */
+#define APP_GIMBAL_RELAY_PIN       GIMBAL_RELAY_EN_Pin   /* PD0, FPC15/GPIO4 (U8 only) */
+#define APP_GIMBAL_PWR_PORT        GIMBAL_PWR_EN_GPIO_Port
+#define APP_GIMBAL_PWR_PIN         GIMBAL_PWR_EN_Pin     /* PC7, FPC10/ENB1 (7.4 V buck) */
+/* Level that turns the 7.4 V servo buck ON. Verify on hardware: assumes the
+ * U5 buck runs when EN is driven high and stops when driven low. */
+#define APP_GIMBAL_PWR_ON_LEVEL    GPIO_PIN_SET
+#define APP_GIMBAL_PWR_OFF_LEVEL   GPIO_PIN_RESET
+/* HAL tick runs at TX_TIMER_TICKS_PER_SECOND (100 Hz): one HAL "ms" is
+ * 10 real milliseconds on this build. */
+#define APP_GIMBAL_HAL_TICK_HZ     100U
+/* Servo boot settle after raising the rail, before PWM starts: 5 HAL ticks
+ * = 50 ms real. */
+#define APP_GIMBAL_PWR_SETTLE_TICKS 5U
 
 /* Servo timing: 50 Hz frame, 500..2500 us pulse (LD-1501MG/LD-3015MG). */
 #define APP_GIMBAL_FRAME_US        20000U
@@ -45,6 +58,7 @@ static AppGimbalAxisCal_t s_cal_tilt = { 1500, -111, 900, 2100 };
 static TIM_HandleTypeDef s_tim1;
 static uint8_t s_initialized;
 static uint8_t s_enabled;
+static uint8_t s_power_on;
 static uint8_t s_laser_on;
 static uint8_t s_relay_on;
 static volatile int16_t s_target_theta;
@@ -96,13 +110,15 @@ int32_t AppGimbal_Init(void)
   }
 
   __HAL_RCC_GPIOA_CLK_ENABLE();
-  __HAL_RCC_GPIOB_CLK_ENABLE();
+  __HAL_RCC_GPIOC_CLK_ENABLE();
+  __HAL_RCC_GPIOD_CLK_ENABLE();
   __HAL_RCC_GPIOE_CLK_ENABLE();
   __HAL_RCC_TIM1_CLK_ENABLE();
 
-  /* Laser + relay: plain outputs, off. */
+  /* Laser + relay + servo rail enable: plain outputs, all off. */
   HAL_GPIO_WritePin(APP_GIMBAL_LASER_PORT, APP_GIMBAL_LASER_PIN, GPIO_PIN_RESET);
   HAL_GPIO_WritePin(APP_GIMBAL_RELAY_PORT, APP_GIMBAL_RELAY_PIN, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(APP_GIMBAL_PWR_PORT, APP_GIMBAL_PWR_PIN, APP_GIMBAL_PWR_OFF_LEVEL);
   gpio.Mode = GPIO_MODE_OUTPUT_PP;
   gpio.Pull = GPIO_NOPULL;
   gpio.Speed = GPIO_SPEED_FREQ_LOW;
@@ -110,6 +126,8 @@ int32_t AppGimbal_Init(void)
   HAL_GPIO_Init(APP_GIMBAL_LASER_PORT, &gpio);
   gpio.Pin = APP_GIMBAL_RELAY_PIN;
   HAL_GPIO_Init(APP_GIMBAL_RELAY_PORT, &gpio);
+  gpio.Pin = APP_GIMBAL_PWR_PIN;
+  HAL_GPIO_Init(APP_GIMBAL_PWR_PORT, &gpio);
 
   /* Servo PWM pins. */
   gpio.Mode = GPIO_MODE_AF_PP;
@@ -159,6 +177,28 @@ int32_t AppGimbal_Init(void)
   return 0;
 }
 
+/* The 7.4 V rail feeds BOTH the servos and (through the power-board U6 LDO,
+ * whose input hangs on that rail) the laser 3.3 V. Keep it up while either
+ * user is active; settle only on an off->on edge. */
+static void AppGimbal_RailAcquire(void)
+{
+  if (s_power_on == 0U)
+  {
+    HAL_GPIO_WritePin(APP_GIMBAL_PWR_PORT, APP_GIMBAL_PWR_PIN, APP_GIMBAL_PWR_ON_LEVEL);
+    s_power_on = 1U;
+    HAL_Delay(APP_GIMBAL_PWR_SETTLE_TICKS);
+  }
+}
+
+static void AppGimbal_RailReleaseIfIdle(void)
+{
+  if ((s_enabled == 0U) && (s_laser_on == 0U) && (s_power_on != 0U))
+  {
+    HAL_GPIO_WritePin(APP_GIMBAL_PWR_PORT, APP_GIMBAL_PWR_PIN, APP_GIMBAL_PWR_OFF_LEVEL);
+    s_power_on = 0U;
+  }
+}
+
 void AppGimbal_SetEnabled(uint8_t enabled)
 {
   if (s_initialized == 0U)
@@ -171,6 +211,9 @@ void AppGimbal_SetEnabled(uint8_t enabled)
 
   if ((enabled != 0U) && (s_enabled == 0U))
   {
+    /* Rail first (power-board ENB1 -> 7.4 V buck), settle, then PWM so the
+     * servos never see pulses while their supply is still ramping. */
+    AppGimbal_RailAcquire();
     (void)HAL_TIM_PWM_Start(&s_tim1, TIM_CHANNEL_3);
     (void)HAL_TIM_PWM_Start(&s_tim1, TIM_CHANNEL_4);
     s_enabled = 1U;
@@ -180,6 +223,8 @@ void AppGimbal_SetEnabled(uint8_t enabled)
     (void)HAL_TIM_PWM_Stop(&s_tim1, TIM_CHANNEL_3);
     (void)HAL_TIM_PWM_Stop(&s_tim1, TIM_CHANNEL_4);
     s_enabled = 0U;
+    /* Rail off only when the laser is not riding on it (U6 LDO input). */
+    AppGimbal_RailReleaseIfIdle();
   }
 }
 
@@ -209,9 +254,20 @@ void AppGimbal_SetLaser(uint8_t on)
       return;
     }
   }
-  s_laser_on = (on != 0U) ? 1U : 0U;
-  HAL_GPIO_WritePin(APP_GIMBAL_LASER_PORT, APP_GIMBAL_LASER_PIN,
-                    (s_laser_on != 0U) ? GPIO_PIN_SET : GPIO_PIN_RESET);
+  if (on != 0U)
+  {
+    /* Laser = PC10/ENB2 gating the U6 3.3 V LDO, whose INPUT is the 7.4 V
+     * rail: raise the rail first or the LDO has nothing to regulate. */
+    AppGimbal_RailAcquire();
+    s_laser_on = 1U;
+    HAL_GPIO_WritePin(APP_GIMBAL_LASER_PORT, APP_GIMBAL_LASER_PIN, GPIO_PIN_SET);
+  }
+  else
+  {
+    HAL_GPIO_WritePin(APP_GIMBAL_LASER_PORT, APP_GIMBAL_LASER_PIN, GPIO_PIN_RESET);
+    s_laser_on = 0U;
+    AppGimbal_RailReleaseIfIdle();
+  }
 }
 
 void AppGimbal_SetRelay(uint8_t on)
@@ -293,7 +349,10 @@ void AppGimbal_Poll(void)
   }
   s_last_poll_ms = now;
 
-  max_step = (APP_GIMBAL_SLEW_US_PER_S * elapsed_ms) / 1000U;
+  /* HAL_GetTick counts 100 Hz ticks, not milliseconds: divide by the tick
+   * rate (board-measured: the old /1000 made the slew 10x slower than the
+   * configured 800 us/s). */
+  max_step = (APP_GIMBAL_SLEW_US_PER_S * elapsed_ms) / APP_GIMBAL_HAL_TICK_HZ;
   if (max_step == 0U)
   {
     max_step = 1U;
@@ -322,6 +381,7 @@ void AppGimbal_GetSnapshot(AppGimbalSnapshot_t *snapshot)
   __disable_irq();
   snapshot->initialized = s_initialized;
   snapshot->enabled = s_enabled;
+  snapshot->power_on = s_power_on;
   snapshot->laser_on = s_laser_on;
   snapshot->relay_on = s_relay_on;
   snapshot->target_theta = s_target_theta;

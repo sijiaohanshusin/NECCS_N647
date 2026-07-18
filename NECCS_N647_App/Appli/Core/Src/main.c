@@ -1076,9 +1076,8 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOQ, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : EXP_GPIO_PC10_Pin EXP_GPIO_PC11_Pin EXP_GPIO_PC12_Pin EXP_GPIO_PC7_Pin
-                           TAMP_Pin */
-  GPIO_InitStruct.Pin = EXP_GPIO_PC10_Pin|EXP_GPIO_PC11_Pin|EXP_GPIO_PC12_Pin|EXP_GPIO_PC7_Pin
+  /*Configure GPIO pins : EXP_GPIO_PC11_Pin EXP_GPIO_PC12_Pin TAMP_Pin */
+  GPIO_InitStruct.Pin = EXP_GPIO_PC11_Pin|EXP_GPIO_PC12_Pin
                           |TAMP_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
@@ -1101,13 +1100,31 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : EXP_GPIO_PD0_Pin UCPD1_INT_Pin EXP_ALT_ETH_PD1_Pin EXP_ALT_ETH_PD12_Pin BQ25730_PROCHOT_Pin
+  /*Configure GPIO pins : UCPD1_INT_Pin EXP_ALT_ETH_PD1_Pin EXP_ALT_ETH_PD12_Pin BQ25730_PROCHOT_Pin
                            EXP_GPIO_PD11_Pin */
-  GPIO_InitStruct.Pin = EXP_GPIO_PD0_Pin|UCPD1_INT_Pin|EXP_ALT_ETH_PD1_Pin|EXP_ALT_ETH_PD12_Pin|BQ25730_PROCHOT_Pin
+  GPIO_InitStruct.Pin = UCPD1_INT_Pin|EXP_ALT_ETH_PD1_Pin|EXP_ALT_ETH_PD12_Pin|BQ25730_PROCHOT_Pin
                           |EXP_GPIO_PD11_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : GIMBAL_RELAY_EN_Pin (FPC GPIO4, active high, off at
+    boot; only routed on the power board's U8 GH-8 harness connector) */
+  HAL_GPIO_WritePin(GIMBAL_RELAY_EN_GPIO_Port, GIMBAL_RELAY_EN_Pin, GPIO_PIN_RESET);
+  GPIO_InitStruct.Pin = GIMBAL_RELAY_EN_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GIMBAL_RELAY_EN_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : GIMBAL_PWR_EN_Pin (power-board ENB1 = 7.4 V servo
+    rail buck enable; low keeps the gimbal/laser supply off at boot) */
+  HAL_GPIO_WritePin(GIMBAL_PWR_EN_GPIO_Port, GIMBAL_PWR_EN_Pin, GPIO_PIN_RESET);
+  GPIO_InitStruct.Pin = GIMBAL_PWR_EN_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GIMBAL_PWR_EN_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : BQ25730_OTG_VAP_Pin */
   GPIO_InitStruct.Pin = BQ25730_OTG_VAP_Pin;
@@ -1137,10 +1154,20 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOE, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : BQ25730_CMPOUT_Pin EXP_GPIO_PH2_Pin BQ25730_CHRG_OK_Pin */
-  GPIO_InitStruct.Pin = BQ25730_CMPOUT_Pin|EXP_GPIO_PH2_Pin|BQ25730_CHRG_OK_Pin;
+  /*Configure GPIO pin : EXP_GPIO_PH2_Pin */
+  GPIO_InitStruct.Pin = EXP_GPIO_PH2_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOH, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : BQ25730_CMPOUT_Pin BQ25730_CHRG_OK_Pin
+    (BQ open-drain status lines; their board pull-ups R19/R20 hang on the
+    laser-gated 3.3 V rail and get removed, so pull up inside the MCU.
+    PROCHOT/PD3 stays NOPULL: a pull-up there would trickle the expansion
+    beeper transistor on - read PROCHOT status over I2C instead.) */
+  GPIO_InitStruct.Pin = BQ25730_CMPOUT_Pin|BQ25730_CHRG_OK_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(GPIOH, &GPIO_InitStruct);
 
   /*Configure GPIO pin : EXT_SMPS_MODE_Pin */
@@ -1170,13 +1197,11 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(BQ25730_PG_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : GIMBAL_RELAY_EN_Pin (active high, off at boot) */
-  HAL_GPIO_WritePin(GIMBAL_RELAY_EN_GPIO_Port, GIMBAL_RELAY_EN_Pin, GPIO_PIN_RESET);
-  GPIO_InitStruct.Pin = GIMBAL_RELAY_EN_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  /*Configure GPIO pin : EXP_GPIO_PB1_Pin */
+  GPIO_InitStruct.Pin = EXP_GPIO_PB1_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(GIMBAL_RELAY_EN_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(EXP_GPIO_PB1_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : PWR_SD_EN_Pin */
   GPIO_InitStruct.Pin = PWR_SD_EN_Pin;
@@ -1216,13 +1241,25 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : LASER_EN_Pin (drives laser MOSFET, off at boot) */
+  /*Configure GPIO pin : LASER_EN_Pin (PC10 = FPC ENB2 -> power-board U6 LDO
+    EN, gating the laser 3.3 V rail; drive low = laser off from app start on,
+    even if the exp R14 pull-up is still fitted. During reset the hardware
+    default rules, so the §5 mods (R14 removed, 100k pulldown at U6) are what
+    keep the laser dark before the firmware runs. Exp-3.3V is NOT affected:
+    it comes from the exp AMS1117, not from U6.) */
   HAL_GPIO_WritePin(LASER_EN_GPIO_Port, LASER_EN_Pin, GPIO_PIN_RESET);
   GPIO_InitStruct.Pin = LASER_EN_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(LASER_EN_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : EXP_GPIO_PA12_Pin (freed from laser duty; shares
+    copper with TFTLCD1.D0 / FPC GPIO3, keep inert as input) */
+  GPIO_InitStruct.Pin = EXP_GPIO_PA12_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(EXP_GPIO_PA12_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : SD_DET_Pin UCPD1_VSENSE_Pin */
   GPIO_InitStruct.Pin = SD_DET_Pin|UCPD1_VSENSE_Pin;

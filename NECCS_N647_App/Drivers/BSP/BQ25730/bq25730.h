@@ -78,6 +78,13 @@ extern "C" {
 #define BQ25730_ADC_CHANNEL_CMPIN             0x0080U
 #define BQ25730_ADC_CHANNEL_ALL               0x00FFU
 
+/* ChargeOption0 (0x01/00h) */
+#define BQ25730_CHARGE_OPTION0_EN_LWPWR       0x8000U
+
+/* ChargeOption1 (0x31/30h): sense resistor selection, 0b = 10 mOhm. */
+#define BQ25730_CHARGE_OPTION1_RSNS_RAC       0x0800U
+#define BQ25730_CHARGE_OPTION1_RSNS_RSR       0x0400U
+
 typedef enum
 {
     BQ25730_OK = 0,
@@ -114,6 +121,10 @@ typedef struct
 typedef struct
 {
     uint8_t address7;
+    /* 1 = 10 mOhm sense resistor fitted (halves the current LSBs).
+     * POR default of the chip is 5 mOhm (bits set), so default 0 here. */
+    uint8_t rac_10mohm;
+    uint8_t rsr_10mohm;
     BQ25730_BusTypeDef bus;
 } BQ25730_HandleTypeDef;
 

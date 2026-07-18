@@ -91,8 +91,8 @@ extern DMA_HandleTypeDef handle_GPDMA1_Channel0;
 /* Private defines -----------------------------------------------------------*/
 #define EXP_GPIO_PQ6_Pin GPIO_PIN_6
 #define EXP_GPIO_PQ6_GPIO_Port GPIOQ
-#define EXP_GPIO_PC10_Pin GPIO_PIN_10
-#define EXP_GPIO_PC10_GPIO_Port GPIOC
+#define LASER_EN_Pin GPIO_PIN_10
+#define LASER_EN_GPIO_Port GPIOC
 #define GIMBAL_PAN_PWM_Pin GPIO_PIN_13
 #define GIMBAL_PAN_PWM_GPIO_Port GPIOE
 #define EXP_GPIO_PE15_Pin GPIO_PIN_15
@@ -119,8 +119,8 @@ extern DMA_HandleTypeDef handle_GPDMA1_Channel0;
 #define BQ25730_CMPOUT_GPIO_Port GPIOH
 #define EXP_GPIO_PC12_Pin GPIO_PIN_12
 #define EXP_GPIO_PC12_GPIO_Port GPIOC
-#define EXP_GPIO_PC7_Pin GPIO_PIN_7
-#define EXP_GPIO_PC7_GPIO_Port GPIOC
+#define GIMBAL_PWR_EN_Pin GPIO_PIN_7
+#define GIMBAL_PWR_EN_GPIO_Port GPIOC
 #define EXP_ALT_ETH_PD12_Pin GPIO_PIN_12
 #define EXP_ALT_ETH_PD12_GPIO_Port GPIOD
 #define BQ25730_OTG_VAP_Pin GPIO_PIN_13
@@ -133,8 +133,8 @@ extern DMA_HandleTypeDef handle_GPDMA1_Channel0;
 #define CTP_INT_GPIO_Port GPIOQ
 #define EXP_GPIO_PQ5_Pin GPIO_PIN_5
 #define EXP_GPIO_PQ5_GPIO_Port GPIOQ
-#define EXP_GPIO_PD0_Pin GPIO_PIN_0
-#define EXP_GPIO_PD0_GPIO_Port GPIOD
+#define GIMBAL_RELAY_EN_Pin GPIO_PIN_0
+#define GIMBAL_RELAY_EN_GPIO_Port GPIOD
 #define EXP_GPIO_PQ2_Pin GPIO_PIN_2
 #define EXP_GPIO_PQ2_GPIO_Port GPIOQ
 #define EXP_GPIO_PQ1_Pin GPIO_PIN_1
@@ -197,8 +197,8 @@ extern DMA_HandleTypeDef handle_GPDMA1_Channel0;
 #define EXP_GPIO_PG15_GPIO_Port GPIOG
 #define EXP_GPIO_PG1_Pin GPIO_PIN_1
 #define EXP_GPIO_PG1_GPIO_Port GPIOG
-#define GIMBAL_RELAY_EN_Pin GPIO_PIN_1
-#define GIMBAL_RELAY_EN_GPIO_Port GPIOB
+#define EXP_GPIO_PB1_Pin GPIO_PIN_1
+#define EXP_GPIO_PB1_GPIO_Port GPIOB
 #define EXP_ALT_ETH_PF12_Pin GPIO_PIN_12
 #define EXP_ALT_ETH_PF12_GPIO_Port GPIOF
 #define EXP_ALT_ETH_PG12_Pin GPIO_PIN_12
@@ -209,8 +209,8 @@ extern DMA_HandleTypeDef handle_GPDMA1_Channel0;
 #define EXP_GPIO_PG2_GPIO_Port GPIOG
 #define UCPD1_VSENSE_Pin GPIO_PIN_7
 #define UCPD1_VSENSE_GPIO_Port GPION
-#define LASER_EN_Pin GPIO_PIN_12
-#define LASER_EN_GPIO_Port GPIOA
+#define EXP_GPIO_PA12_Pin GPIO_PIN_12
+#define EXP_GPIO_PA12_GPIO_Port GPIOA
 #define EXP_ALT_ETH_PG11_Pin GPIO_PIN_11
 #define EXP_ALT_ETH_PG11_GPIO_Port GPIOG
 #define USB1_EN_Pin GPIO_PIN_4

@@ -77,19 +77,20 @@ static AppPowerSnapshot_t g_app_power_snapshot;
 static uint32_t g_app_power_undervoltage_ms;
 static uint8_t g_app_power_remaining_initialized;
 
+/* 4S Li-ion resting-voltage curve (per-cell values x4). */
 static const AppPowerSocPoint_t g_app_power_soc_table[] =
 {
-  {9000U, 0U},
-  {9600U, 5U},
-  {9900U, 10U},
-  {10500U, 20U},
-  {10800U, 30U},
-  {11100U, 40U},
-  {11400U, 55U},
-  {11700U, 70U},
-  {12000U, 85U},
-  {12300U, 95U},
-  {12600U, 100U},
+  {12000U, 0U},
+  {12800U, 5U},
+  {13200U, 10U},
+  {14000U, 20U},
+  {14400U, 30U},
+  {14800U, 40U},
+  {15200U, 55U},
+  {15600U, 70U},
+  {16000U, 85U},
+  {16400U, 95U},
+  {16800U, 100U},
 };
 
 static void AppPower_UpdateDebugGlobals(void)
@@ -253,7 +254,7 @@ static void AppPower_ProcessUndervoltage(uint32_t elapsed_ms)
   }
 
   if (((g_app_power_snapshot.flags & APP_POWER_FLAG_ADC_VALID) != 0U) &&
-      (g_app_power_snapshot.battery_mv <= APP_POWER_3S_UNDERVOLTAGE_MV))
+      (g_app_power_snapshot.battery_mv <= APP_POWER_UNDERVOLTAGE_MV))
   {
     undervoltage_raw = 1U;
   }
@@ -404,7 +405,7 @@ void AppPower_Init(void)
 
   if (status == BQ25730_OK)
   {
-    status = BQ25730_SetChargeVoltageMv(&g_app_bq25730, APP_POWER_3S_CHARGE_VOLTAGE_MV);
+    status = BQ25730_SetChargeVoltageMv(&g_app_bq25730, APP_POWER_CHARGE_VOLTAGE_MV);
     g_app_power_snapshot.last_i2c_status = (int32_t)status;
   }
   if (status == BQ25730_OK)
