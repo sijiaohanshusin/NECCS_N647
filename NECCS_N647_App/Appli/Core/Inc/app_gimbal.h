@@ -20,7 +20,7 @@
  *   So laser-on implies rail-on; SetLaser handles that ordering. 2-wire
  *   laser modules plug into the U6-gated 3.3 V, no TTL line needed.
  *   PA12 (old TTL laser plan, FPC14/GPIO3) is released back to plain input.
- *   Hardware prerequisites for the U6 gating (doc §5): FPC wires 18/19 cut
+ *   Hardware prerequisites for the U6 gating (doc §4): FPC wires 18/19 cut
  *   (split the two boards' 3.3 V), exp R14 pull-up removed, 100k pulldown
  *   on U6 EN, U4 not fitted, U6 ADJ divider set for 3.3 V out.
  *

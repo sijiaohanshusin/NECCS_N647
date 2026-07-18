@@ -1244,9 +1244,9 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin : LASER_EN_Pin (PC10 = FPC ENB2 -> power-board U6 LDO
     EN, gating the laser 3.3 V rail; drive low = laser off from app start on,
     even if the exp R14 pull-up is still fitted. During reset the hardware
-    default rules, so the §5 mods (R14 removed, 100k pulldown at U6) are what
-    keep the laser dark before the firmware runs. Exp-3.3V is NOT affected:
-    it comes from the exp AMS1117, not from U6.) */
+    default rules, so the doc §4 mods (R14 removed, 100k pulldown at U6) are
+    what keep the laser dark before the firmware runs. Exp-3.3V is NOT
+    affected: it comes from the exp AMS1117, not from U6.) */
   HAL_GPIO_WritePin(LASER_EN_GPIO_Port, LASER_EN_Pin, GPIO_PIN_RESET);
   GPIO_InitStruct.Pin = LASER_EN_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
