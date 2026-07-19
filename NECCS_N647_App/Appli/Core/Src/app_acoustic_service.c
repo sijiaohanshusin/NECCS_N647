@@ -474,20 +474,32 @@ static void AppAcousticService_ClearHeat(AppAcousticServiceSnapshot_t *snapshot)
   }
 }
 
-/* Map a field column/row centre to the SRP coarse-grid coordinate (u along
- * theta, v along phi, both in grid units of 15 deg). */
+/* Map a field column/row centre to the source ANGLE seen at that camera
+ * pixel. Pinhole projection (2026-07-19): pixel offset is proportional to
+ * tan(angle), not to the angle itself - the old linear mapping registered
+ * the blob up to ~2.5 deg (~20 px) off against the camera image at
+ * mid-field, part of the reported "crosshair/blob not on the source". */
+#define APP_ACOUSTIC_SERVICE_DEG_TO_RAD 0.01745329252f
+#define APP_ACOUSTIC_SERVICE_RAD_TO_DEG 57.2957795131f
+
 static float AppAcousticService_FieldColToTheta(uint32_t fx)
 {
-  return -APP_ACOUSTIC_SERVICE_CAMERA_HFOV_HALF_DEG +
-         (((float)fx + 0.5f) * APP_ACOUSTIC_SERVICE_CAMERA_HFOV_DEG /
-          (float)APP_ACOUSTIC_SERVICE_FIELD_W);
+  const float tan_half_h =
+      tanf(APP_ACOUSTIC_SERVICE_CAMERA_HFOV_HALF_DEG * APP_ACOUSTIC_SERVICE_DEG_TO_RAD);
+  const float x_norm = (((float)fx + 0.5f) * 2.0f /
+                        (float)APP_ACOUSTIC_SERVICE_FIELD_W) - 1.0f;
+
+  return atanf(x_norm * tan_half_h) * APP_ACOUSTIC_SERVICE_RAD_TO_DEG;
 }
 
 static float AppAcousticService_FieldRowToPhi(uint32_t fy)
 {
-  return APP_ACOUSTIC_SERVICE_CAMERA_VFOV_HALF_DEG -
-         (((float)fy + 0.5f) * APP_ACOUSTIC_SERVICE_CAMERA_VFOV_DEG /
-          (float)APP_ACOUSTIC_SERVICE_FIELD_H);
+  const float tan_half_v =
+      tanf(APP_ACOUSTIC_SERVICE_CAMERA_VFOV_HALF_DEG * APP_ACOUSTIC_SERVICE_DEG_TO_RAD);
+  const float y_norm = 1.0f - (((float)fy + 0.5f) * 2.0f /
+                               (float)APP_ACOUSTIC_SERVICE_FIELD_H);
+
+  return atanf(y_norm * tan_half_v) * APP_ACOUSTIC_SERVICE_RAD_TO_DEG;
 }
 
 /* Catmull-Rom weight evaluation for the four taps around fractional t. */

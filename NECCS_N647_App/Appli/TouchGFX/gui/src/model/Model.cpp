@@ -13,6 +13,7 @@
 #include <gui/model/Model.hpp>
 #include <gui/model/ModelListener.hpp>
 
+#include <math.h>
 #include <string.h>
 
 #include "stm32n6xx.h" /* NVIC_SystemReset / LTDC for the power controls */
@@ -452,6 +453,25 @@ constexpr bool APP_UI_ACOUSTIC_OVERLAY_PREVIEW_ENABLE = false;
 #endif
 constexpr uint8_t APP_UI_ACOUSTIC_OVERLAY_MIN_QUALITY = 1U;
 
+/* Pinhole angle<->pixel helpers shared by markers/reticle/tap mapping:
+ * pixel offset ~ tan(angle), NOT ~ angle. The old linear mapping put a
+ * 25 deg source ~34 px off on the 640-wide frame - a visible chunk of the
+ * "crosshair isn't on the source" complaint (2026-07-19). */
+inline float angleToPxOffset(float angleDeg, float halfFovDeg, float halfSpanPx)
+{
+    const float degToRad = 0.01745329252f;
+
+    return halfSpanPx * (tanf(angleDeg * degToRad) / tanf(halfFovDeg * degToRad));
+}
+
+inline float pxOffsetToAngle(float offsetPx, float halfFovDeg, float halfSpanPx)
+{
+    const float radToDeg = 57.2957795131f;
+    const float degToRad = 0.01745329252f;
+
+    return atanf((offsetPx / halfSpanPx) * tanf(halfFovDeg * degToRad)) * radToDeg;
+}
+
 uint8_t clampPercent(uint32_t value)
 {
     return (value > 100U) ? 100U : static_cast<uint8_t>(value);
@@ -776,8 +796,8 @@ void pollAcoustic(AppUiSnapshot& snapshot)
          * phi +30 for a source at the top edge of the frame). Clamp to the
          * frame border instead: an edge-pinned crosshair with the dB tag
          * still tells the operator where to swing the camera. */
-        const float px = ((theta + halfH) * 640.0f) / APP_ACOUSTIC_SERVICE_CAMERA_HFOV_DEG;
-        const float py = ((halfV - phi) * 480.0f) / APP_ACOUSTIC_SERVICE_CAMERA_VFOV_DEG;
+        const float px = 320.0f + angleToPxOffset(theta, halfH, 320.0f);
+        const float py = 240.0f - angleToPxOffset(phi, halfV, 240.0f);
         markers[markerCount].x = static_cast<uint16_t>((px < 10.0f) ? 10.0f : ((px > 629.0f) ? 629.0f : px));
         markers[markerCount].y = static_cast<uint16_t>((py < 10.0f) ? 10.0f : ((py > 469.0f) ? 469.0f : py));
         markers[markerCount].strength = snapshot.candStrength[i];
@@ -1070,10 +1090,8 @@ void pollBeam(AppUiSnapshot& snapshot)
     {
         const float halfH = APP_ACOUSTIC_SERVICE_CAMERA_HFOV_DEG * 0.5f;
         const float halfV = APP_ACOUSTIC_SERVICE_CAMERA_VFOV_DEG * 0.5f;
-        float px = ((static_cast<float>(beam.theta_deg) + halfH) * 640.0f) /
-                   APP_ACOUSTIC_SERVICE_CAMERA_HFOV_DEG;
-        float py = ((halfV - static_cast<float>(beam.phi_deg)) * 480.0f) /
-                   APP_ACOUSTIC_SERVICE_CAMERA_VFOV_DEG;
+        float px = 320.0f + angleToPxOffset(static_cast<float>(beam.theta_deg), halfH, 320.0f);
+        float py = 240.0f - angleToPxOffset(static_cast<float>(beam.phi_deg), halfV, 240.0f);
         uint8_t style = APP_CAMERA_DISPLAY_BEAM_AIM;
 
         px = (px < 32.0f) ? 32.0f : ((px > 607.0f) ? 607.0f : px);
@@ -1498,8 +1516,8 @@ void Model::setBeamManualTargetPx(int16_t px, int16_t py)
     {
         const float halfH = APP_ACOUSTIC_SERVICE_CAMERA_HFOV_DEG * 0.5f;
         const float halfV = APP_ACOUSTIC_SERVICE_CAMERA_VFOV_DEG * 0.5f;
-        float theta = ((static_cast<float>(px) * APP_ACOUSTIC_SERVICE_CAMERA_HFOV_DEG) / 640.0f) - halfH;
-        float phi = halfV - ((static_cast<float>(py) * APP_ACOUSTIC_SERVICE_CAMERA_VFOV_DEG) / 480.0f);
+        float theta = pxOffsetToAngle(static_cast<float>(px) - 320.0f, halfH, 320.0f);
+        float phi = pxOffsetToAngle(240.0f - static_cast<float>(py), halfV, 240.0f);
 
         if (theta < -60.0f) { theta = -60.0f; }
         if (theta > 60.0f) { theta = 60.0f; }

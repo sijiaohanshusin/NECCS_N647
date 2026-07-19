@@ -21,10 +21,20 @@
 #define TRK_ACCEL_SIGMA_DPS2         150.0f
 /* Velocity damping while coasting (no measurement), per second. */
 #define TRK_COAST_VEL_DECAY_PER_S    2.0f
-/* Confidence integrator: attack per valid estimate is quality-scaled up to
- * this cap; decay is per second so it is rate-independent. */
+/* Confidence integrator: attack per ASSOCIATED estimate is quality-scaled
+ * up to a cap; decay is per second so it is rate-independent. Board-tuned
+ * 2026-07-19 evening: 0.12/point with margin quality starved Wide32 (a
+ * gate-hugging real source has margin 1 -> +0.12/frame vs ~0.07 decay ->
+ * the display NEVER opened = "completely fails to localize"). 0.24/point
+ * restores the pre-margin sensitivity: margin-1 source opens on the 2nd
+ * associated frame (~130 ms at 15 fps). */
 #define TRK_CONF_ATTACK_MAX          0.45f
-#define TRK_CONF_ATTACK_PER_Q        0.12f  /* per quality_pct point        */
+#define TRK_CONF_ATTACK_PER_Q        0.24f  /* per margin point             */
+/* Fresh seeds (track born from nothing) credit a small FIXED amount below
+ * the ON threshold: a lone Core16 noise-floor frame (margin ~2 in a quiet
+ * room) must not light the display by itself, while a real source's second
+ * frame associates and opens. Strong transients bypass via the fast path. */
+#define TRK_CONF_SEED_GAIN           0.15f
 #define TRK_CONF_DECAY_PER_S         1.1f   /* full->off in ~0.9 s of silence */
 #define TRK_CONF_ON_THRESHOLD        0.30f
 #define TRK_CONF_OFF_THRESHOLD      0.12f
@@ -172,6 +182,7 @@ void AppAcousticTracker_Update(uint8_t valid,
     const float r = sigma * sigma;
     const uint8_t fast = (quality_pct >= TRK_FAST_QUALITY_PCT) ? 1U : 0U;
     uint8_t associated = 0U;
+    uint8_t fresh_seed = 0U;
 
     if (s_trk.seeded == 0U)
     {
@@ -182,6 +193,7 @@ void AppAcousticTracker_Update(uint8_t valid,
       s_trk.seeded = 1U;
       s_trk.jump_pending = 0U;
       associated = 1U;
+      fresh_seed = 1U;
     }
     else
     {
@@ -232,9 +244,20 @@ void AppAcousticTracker_Update(uint8_t valid,
      * source associates every frame and still charges quickly. */
     if (associated != 0U)
     {
-      float conf_gain = TRK_CONF_ATTACK_PER_Q * (float)quality_pct;
+      float conf_gain;
 
-      conf_gain = Trk_Clamp(conf_gain, 0.0f, TRK_CONF_ATTACK_MAX);
+      if (fresh_seed != 0U)
+      {
+        /* A track born from nothing earns a fixed sub-threshold stake: one
+         * lone noise frame can't reach the ON threshold no matter its
+         * margin, a real source's SECOND frame associates and opens. */
+        conf_gain = TRK_CONF_SEED_GAIN;
+      }
+      else
+      {
+        conf_gain = Trk_Clamp(TRK_CONF_ATTACK_PER_Q * (float)quality_pct,
+                              0.0f, TRK_CONF_ATTACK_MAX);
+      }
       s_trk.confidence = Trk_Clamp(s_trk.confidence + conf_gain, 0.0f, 1.0f);
       if (fast != 0U)
       {

@@ -97,6 +97,96 @@ typedef struct
 static AppAcousticSrpWorkspace_t s_srp_workspace __attribute__((section(".SRP_FAST"), aligned(32)));
 static AppAcousticSrpSlowWorkspace_t s_srp_slow_workspace __attribute__((section(".EXTRAM"), aligned(32)));
 
+#ifdef DEBUG
+/* GDB A/B probe: set request=1, next processed frame computes the coarse
+ * surface a second time by DIRECT phasor evaluation (the pre-2026-07-19
+ * engine's math) from the same weighted whitened spectra, then reports
+ * both argmax angles and the Pearson correlation of the two surfaces.
+ * Verdict: corr ~1 + same peak = lag-table engine faithful, look elsewhere;
+ * disagreement = engine defect. */
+volatile uint32_t g_app_srp_ab_request;
+volatile uint32_t g_app_srp_ab_done;
+volatile float g_app_srp_ab_corr = 0.0f;
+volatile int16_t g_app_srp_ab_new_th;
+volatile int16_t g_app_srp_ab_new_ph;
+volatile int16_t g_app_srp_ab_old_th;
+volatile int16_t g_app_srp_ab_old_ph;
+volatile float g_app_srp_ab_ref[APP_ACOUSTIC_IMAGING_COARSE_TOTAL]
+    __attribute__((section(".EXTRAM")));
+
+static void App_AcousticSrp_DebugReferenceAb(const AppAcousticSrpContext_t *ctx)
+{
+  const AppAcousticSrpWorkspace_t *workspace = &s_srp_workspace;
+  const float two_pi = 6.28318530718f;
+  const float delta_f_hz = (float)ctx->config.sample_rate_hz / (float)ctx->config.nfft;
+  float mean_new = 0.0f;
+  float mean_ref = 0.0f;
+  float num = 0.0f;
+  float den_new = 0.0f;
+  float den_ref = 0.0f;
+  uint32_t max_new = 0U;
+  uint32_t max_ref = 0U;
+
+  for (uint32_t grid = 0U; grid < APP_ACOUSTIC_IMAGING_COARSE_TOTAL; grid++)
+  {
+    const float *tau = &workspace->coarse_tdoa[grid * ctx->pair_count];
+    float acc = 0.0f;
+
+    for (uint32_t pair = 0U; pair < ctx->pair_count; pair++)
+    {
+      const float *gcc = &workspace->gcc[pair * ctx->active_bin_count * 2U];
+
+      if (workspace->pair_active[pair] == 0U)
+      {
+        continue;
+      }
+      for (uint32_t bin = 0U; bin < ctx->active_bin_count; bin++)
+      {
+        const float w = two_pi * delta_f_hz * (float)ctx->config.active_bins[bin] * tau[pair];
+
+        acc += (gcc[2U * bin] * cosf(w)) + (gcc[(2U * bin) + 1U] * sinf(w));
+      }
+    }
+    g_app_srp_ab_ref[grid] = acc;
+  }
+
+  for (uint32_t grid = 0U; grid < APP_ACOUSTIC_IMAGING_COARSE_TOTAL; grid++)
+  {
+    mean_new += workspace->srp_power[grid];
+    mean_ref += g_app_srp_ab_ref[grid];
+    if (workspace->srp_power[grid] > workspace->srp_power[max_new])
+    {
+      max_new = grid;
+    }
+    if (g_app_srp_ab_ref[grid] > g_app_srp_ab_ref[max_ref])
+    {
+      max_ref = grid;
+    }
+  }
+  mean_new /= (float)APP_ACOUSTIC_IMAGING_COARSE_TOTAL;
+  mean_ref /= (float)APP_ACOUSTIC_IMAGING_COARSE_TOTAL;
+  for (uint32_t grid = 0U; grid < APP_ACOUSTIC_IMAGING_COARSE_TOTAL; grid++)
+  {
+    const float a = workspace->srp_power[grid] - mean_new;
+    const float b = g_app_srp_ab_ref[grid] - mean_ref;
+
+    num += a * b;
+    den_new += a * a;
+    den_ref += b * b;
+  }
+  {
+    float den = sqrtf(den_new * den_ref);
+
+    g_app_srp_ab_corr = num / ((den > 1.0e-12f) ? den : 1.0e-12f);
+  }
+  g_app_srp_ab_new_th = (int16_t)workspace->coarse_theta[max_new];
+  g_app_srp_ab_new_ph = (int16_t)workspace->coarse_phi[max_new];
+  g_app_srp_ab_old_th = (int16_t)workspace->coarse_theta[max_ref];
+  g_app_srp_ab_old_ph = (int16_t)workspace->coarse_phi[max_ref];
+  g_app_srp_ab_done = 1U;
+}
+#endif
+
 static float App_AcousticSrp_AbsF32(float value)
 {
   return (value < 0.0f) ? -value : value;
@@ -968,6 +1058,66 @@ static uint8_t App_AcousticSrp_IsCandidateTooClose(const AppAcousticImagingVisFr
   return 0U;
 }
 
+/* Sub-grid peak refinement: 1-D parabolic fit through the peak and its two
+ * axis neighbours inside a fine 5x5 patch (4 deg pitch). Interior peaks get
+ * sub-degree resolution instead of snapping to the 4 deg lattice - with the
+ * 15 deg coarse grid this was up to ~2 deg of pure quantization error on a
+ * stationary source (2026-07-19 accuracy pass). */
+static void App_AcousticSrp_RefineFinePeak(const AppAcousticSrpWorkspace_t *workspace,
+                                           uint32_t grid_idx,
+                                           float *theta_deg,
+                                           float *phi_deg)
+{
+  uint32_t fine_idx;
+  uint32_t local;
+  uint32_t fi;
+  uint32_t fj;
+  const float *p;
+
+  if (grid_idx < APP_ACOUSTIC_IMAGING_COARSE_TOTAL)
+  {
+    return; /* coarse point: fine patch already looked and lost */
+  }
+
+  fine_idx = grid_idx - APP_ACOUSTIC_IMAGING_COARSE_TOTAL;
+  local = fine_idx % APP_ACOUSTIC_SRP_FINE_TOTAL_PER_TOP;
+  fi = local / APP_ACOUSTIC_IMAGING_FINE_GRID_SIZE;
+  fj = local % APP_ACOUSTIC_IMAGING_FINE_GRID_SIZE;
+  p = &workspace->srp_power[grid_idx];
+
+  /* theta axis: neighbours are +/- one fine ROW (5 points apart). */
+  if ((fi >= 1U) && (fi <= (APP_ACOUSTIC_IMAGING_FINE_GRID_SIZE - 2U)))
+  {
+    const float pm = p[-(int32_t)APP_ACOUSTIC_IMAGING_FINE_GRID_SIZE];
+    const float pp = p[APP_ACOUSTIC_IMAGING_FINE_GRID_SIZE];
+    const float denom = (pm - (2.0f * p[0])) + pp;
+
+    if (denom < -1.0e-12f)
+    {
+      float offs = 0.5f * (pm - pp) / denom;
+
+      offs = (offs < -0.5f) ? -0.5f : ((offs > 0.5f) ? 0.5f : offs);
+      *theta_deg += offs * 4.0f; /* fine pitch: 2*span/grid = 20/5 */
+    }
+  }
+
+  /* phi axis: neighbours are adjacent points. */
+  if ((fj >= 1U) && (fj <= (APP_ACOUSTIC_IMAGING_FINE_GRID_SIZE - 2U)))
+  {
+    const float pm = p[-1];
+    const float pp = p[1];
+    const float denom = (pm - (2.0f * p[0])) + pp;
+
+    if (denom < -1.0e-12f)
+    {
+      float offs = 0.5f * (pm - pp) / denom;
+
+      offs = (offs < -0.5f) ? -0.5f : ((offs > 0.5f) ? 0.5f : offs);
+      *phi_deg += offs * 4.0f;
+    }
+  }
+}
+
 static void App_AcousticSrp_FillCandidates(const AppAcousticSrpContext_t *ctx,
                                            AppAcousticImagingVisFrame_t *vis_frame)
 {
@@ -1012,6 +1162,7 @@ static void App_AcousticSrp_FillCandidates(const AppAcousticSrpContext_t *ctx,
     }
 
     used[best_idx] = 1U;
+    App_AcousticSrp_RefineFinePeak(workspace, best_idx, &best_theta, &best_phi);
     vis_frame->candidate[count].theta_deg = best_theta;
     vis_frame->candidate[count].phi_deg = best_phi;
     vis_frame->candidate[count].power = best_value;
@@ -1264,6 +1415,14 @@ AppAcousticImagingStatus_t App_AcousticSrp_ProcessFrame(AppAcousticSrpContext_t 
     App_AcousticSrp_RunCoarseSearch(ctx);
     t1 = App_AcousticSrp_CycleNow();
     perf.coarse_cycles = App_AcousticSrp_CycleDelta(t0, t1);
+#ifdef DEBUG
+    if (g_app_srp_ab_request != 0U)
+    {
+      /* Raw coarse surface is still in srp_power (smoothing runs later). */
+      g_app_srp_ab_request = 0U;
+      App_AcousticSrp_DebugReferenceAb(ctx);
+    }
+#endif
   }
 
   App_AcousticSrp_FindTopCoarseNms(s_srp_workspace.srp_power, top_idx, ctx->config.fine_top_k);
