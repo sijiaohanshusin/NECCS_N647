@@ -1204,11 +1204,27 @@ static void AppAcousticService_FillVisSnapshot(AppAcousticServiceSnapshot_t *sna
     s_track_last_cyc = now_cyc;
     s_track_cyc_valid = 1U;
 
-    AppAcousticTracker_Update(((vis_frame->valid != 0U) && (candidate != NULL)) ? 1U : 0U,
-                              (candidate != NULL) ? candidate->theta_deg : 0.0f,
-                              (candidate != NULL) ? candidate->phi_deg : 0.0f,
-                              snapshot->quality_pct,
-                              dt_ms);
+    /* The tracker consumes the quality MARGIN above the mode's gate, not
+     * the raw quality: Core16's demodulation noise floor sits right at its
+     * 0.12 gate (quiet room measures q~13), and raw-q confidence turned
+     * that floor into a permanent phantom source (board 2026-07-19,
+     * conf=85 in silence). Margin semantics are mode-portable: Wide32
+     * gate 2 + q 4 == Core16 gate 12 + q 14. */
+    {
+      const uint8_t gate_pct =
+          (uint8_t)((AppAcousticService_Clamp01(ctx->config.quality_min) * 100.0f) + 0.5f);
+      const uint8_t q = snapshot->quality_pct;
+      /* +1: a frame that passed the validity gate always counts at least
+       * one point, so gate-hugging real sources (Wide32 q==2) still build
+       * confidence - just slower than clearly-above-gate ones. */
+      const uint8_t q_margin = (q > gate_pct) ? (uint8_t)(q - gate_pct + 1U) : 1U;
+
+      AppAcousticTracker_Update(((vis_frame->valid != 0U) && (candidate != NULL)) ? 1U : 0U,
+                                (candidate != NULL) ? candidate->theta_deg : 0.0f,
+                                (candidate != NULL) ? candidate->phi_deg : 0.0f,
+                                q_margin,
+                                dt_ms);
+    }
     AppAcousticTracker_GetState(&track);
     snapshot->track_theta_deg = AppAcousticService_RoundDeg(track.theta_deg);
     snapshot->track_phi_deg = AppAcousticService_RoundDeg(track.phi_deg);

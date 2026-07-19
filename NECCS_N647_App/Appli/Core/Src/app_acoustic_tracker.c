@@ -171,7 +171,7 @@ void AppAcousticTracker_Update(uint8_t valid,
                         (TRK_MEAS_SIGMA_SCALE / (float)((quality_pct != 0U) ? quality_pct : 1U));
     const float r = sigma * sigma;
     const uint8_t fast = (quality_pct >= TRK_FAST_QUALITY_PCT) ? 1U : 0U;
-    float conf_gain;
+    uint8_t associated = 0U;
 
     if (s_trk.seeded == 0U)
     {
@@ -181,6 +181,7 @@ void AppAcousticTracker_Update(uint8_t valid,
       Trk_AxisSeed(&s_trk.phi, phi_deg);
       s_trk.seeded = 1U;
       s_trk.jump_pending = 0U;
+      associated = 1U;
     }
     else
     {
@@ -192,6 +193,7 @@ void AppAcousticTracker_Update(uint8_t valid,
         Trk_AxisUpdate(&s_trk.theta, theta_deg, r);
         Trk_AxisUpdate(&s_trk.phi, phi_deg, r);
         s_trk.jump_pending = 0U;
+        associated = 1U;
       }
       else if (fast != 0U)
       {
@@ -199,6 +201,7 @@ void AppAcousticTracker_Update(uint8_t valid,
         Trk_AxisSeed(&s_trk.theta, theta_deg);
         Trk_AxisSeed(&s_trk.phi, phi_deg);
         s_trk.jump_pending = 0U;
+        associated = 1U;
       }
       else if ((s_trk.jump_pending != 0U) &&
                (Trk_AbsF32(theta_deg - s_trk.jump_theta) <= TRK_JUMP_AGREE_DEG) &&
@@ -210,6 +213,7 @@ void AppAcousticTracker_Update(uint8_t valid,
         Trk_AxisSeed(&s_trk.theta, 0.5f * (theta_deg + s_trk.jump_theta));
         Trk_AxisSeed(&s_trk.phi, 0.5f * (phi_deg + s_trk.jump_phi));
         s_trk.jump_pending = 0U;
+        associated = 1U;
       }
       else
       {
@@ -220,12 +224,26 @@ void AppAcousticTracker_Update(uint8_t valid,
       }
     }
 
-    conf_gain = TRK_CONF_ATTACK_PER_Q * (float)quality_pct;
-    conf_gain = Trk_Clamp(conf_gain, 0.0f, TRK_CONF_ATTACK_MAX);
-    s_trk.confidence = Trk_Clamp(s_trk.confidence + conf_gain, 0.0f, 1.0f);
-    if (fast != 0U)
+    /* Confidence credit ONLY for estimates that moved the track (associated
+     * / seeded / agreed reseed). Un-associated outliers must not charge the
+     * integrator: near-gate noise (Core16's demod floor measures valid
+     * q~gate in a QUIET room) lands at random angles, so it rarely
+     * associates and the phantom-source loophole closes, while a real
+     * source associates every frame and still charges quickly. */
+    if (associated != 0U)
     {
-      s_trk.confidence = Trk_Clamp(s_trk.confidence, TRK_FAST_CONFIDENCE, 1.0f);
+      float conf_gain = TRK_CONF_ATTACK_PER_Q * (float)quality_pct;
+
+      conf_gain = Trk_Clamp(conf_gain, 0.0f, TRK_CONF_ATTACK_MAX);
+      s_trk.confidence = Trk_Clamp(s_trk.confidence + conf_gain, 0.0f, 1.0f);
+      if (fast != 0U)
+      {
+        s_trk.confidence = Trk_Clamp(s_trk.confidence, TRK_FAST_CONFIDENCE, 1.0f);
+      }
+    }
+    else
+    {
+      s_trk.confidence = Trk_Clamp(s_trk.confidence - (0.5f * TRK_CONF_DECAY_PER_S * dt), 0.0f, 1.0f);
     }
   }
   else
