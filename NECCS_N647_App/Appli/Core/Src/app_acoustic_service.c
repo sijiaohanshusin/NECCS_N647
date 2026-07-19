@@ -9,7 +9,12 @@
 #include "app_npu.h"
 #include "main.h"
 
-#define APP_ACOUSTIC_SERVICE_TARGET_FPS          20U
+/* 33 Hz scheduling ceiling (was 20): the lag-domain GCC engine cut a full
+ * SRP frame to ~20-30 ms wall (time-sliced with the camera worker), so the
+ * ceiling - not the math - now sets the rate. 100 Hz tick -> 3 ticks. The
+ * tracker layer consumes every estimate; board-measured ~15 fps with the
+ * overlay active, ~18-20 without (2026-07-19). */
+#define APP_ACOUSTIC_SERVICE_TARGET_FPS          33U
 #define APP_ACOUSTIC_SERVICE_MIN_FPS             10U
 #define APP_ACOUSTIC_SERVICE_DEGRADE_LIMIT       3U
 #define APP_ACOUSTIC_SERVICE_PROCESS_PERIOD_TICKS \
@@ -52,14 +57,16 @@ static AppAcousticServiceSnapshot_t s_snapshot
 static float s_service_samples[APP_ACOUSTIC_SERVICE_SAMPLE_COUNT]
     __attribute__((section(".SRP_FAST"), aligned(32)));
 
-/* Heat-field working state (service thread only; CPU-only access, so the
- * cached external RAM is fine and keeps internal SRAM for code). */
+/* Heat-field working state (service thread only). Internal SRAM since
+ * 2026-07-19: several full passes over 3 x 27 KB every processed frame sat
+ * on the contended HyperRAM port; the lag-table SRP workspace freed ~230 KB
+ * of internal RAM, so the render hot path fits there now. */
 static float s_field_work[APP_ACOUSTIC_SERVICE_FIELD_COUNT]
-    __attribute__((section(".EXTRAM"), aligned(32)));
+    __attribute__((section(".SRP_FAST"), aligned(32)));
 static float s_field_smooth[APP_ACOUSTIC_SERVICE_FIELD_COUNT]
-    __attribute__((section(".EXTRAM"), aligned(32)));
+    __attribute__((section(".SRP_FAST"), aligned(32)));
 static float s_field_accum[APP_ACOUSTIC_SERVICE_FIELD_COUNT]
-    __attribute__((section(".EXTRAM"), aligned(32)));
+    __attribute__((section(".SRP_FAST"), aligned(32)));
 static float s_field_peak_ema;
 
 /* Auto-degrade (silently dropping to FAST after 3 over-budget/error frames)
@@ -67,6 +74,22 @@ static float s_field_peak_ema;
  * the user's explicit quality selection on transient hiccups - disabled by
  * default; clear via GDB to re-enable for experiments. */
 volatile uint32_t g_app_acoustic_service_disable_auto_degrade = 1U;
+
+#ifdef DEBUG
+/* GDB hook: set request=1 to run the synthetic SRP self-test (plane wave at
+ * theta 15 / phi -15 through FAST/BALANCED/QUALITY) on the service thread.
+ * result: 0x7FFFFFFF = running/never ran, 0 = pass, else the failing
+ * AppAcousticImagingStatus_t. The live runtime config is re-initialised
+ * automatically afterwards. */
+volatile uint32_t g_app_acoustic_selftest_request;
+volatile int32_t g_app_acoustic_selftest_result = 0x7FFFFFFF;
+/* Frozen copy of the self-test's vis frame (the failing profile's synthetic
+ * result, or QUALITY's when all pass) - s_vis_frame itself is overwritten
+ * by live frames right after. External linkage: a static with no in-image
+ * reader gets elided at -Os and GDB reads "optimized out". */
+AppAcousticImagingVisFrame_t g_app_acoustic_selftest_vis
+    __attribute__((section(".EXTRAM"), aligned(32)));
+#endif
 
 static volatile AppAcousticImagingRunMode_t s_requested_mode = APP_ACOUSTIC_IMAGING_MODE_STANDARD;
 static volatile AppAcousticImagingProfile_t s_requested_profile = APP_ACOUSTIC_IMAGING_PROFILE_BALANCED;
@@ -1421,6 +1444,17 @@ void AppAcousticService_ThreadEntry(ULONG thread_input)
     /* Phase 1: pick up mode/profile/bin-policy changes. */
     AppAcousticService_LoadSnapshot(&snapshot);
     snapshot.running = 1U;
+#ifdef DEBUG
+    if (g_app_acoustic_selftest_request != 0U)
+    {
+      g_app_acoustic_selftest_request = 0U;
+      g_app_acoustic_selftest_result = 0x7FFFFFFF;
+      g_app_acoustic_selftest_result =
+          (int32_t)App_AcousticSrp_RunSelfTest(&s_srp_ctx, &s_vis_frame);
+      g_app_acoustic_selftest_vis = s_vis_frame;
+      s_profile_change_pending = 1U; /* self-test re-inits ctx: restore */
+    }
+#endif
     if (AppAcousticService_SyncRuntimeConfig(&snapshot) == 0U)
     {
       tx_thread_sleep(1U);

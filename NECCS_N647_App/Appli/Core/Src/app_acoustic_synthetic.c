@@ -80,7 +80,13 @@ AppAcousticImagingStatus_t App_AcousticSynthetic_FillPlaneWave(const AppAcoustic
   (void)cos_theta_unused;
   arm_sin_cos_f32(phi_deg, &sin_phi, &cos_phi);
   dir_x = sin_theta * cos_phi;
-  dir_y = sin_phi;
+  /* dy sign matches the steering convention in App_AcousticImaging_MakePair
+   * (mic-table +y is opposite the camera "up", board-verified 2026-07-12,
+   * commit 9d68b8e6). The generator was never updated with that flip, so
+   * the synthetic self-test localized phi mirrored (-15 -> +15) and failed
+   * on any correct engine (caught when the 2026-07-19 lag-domain rewrite
+   * wired the self-test to a GDB hook). */
+  dir_y = -sin_phi;
   amplitude = App_AcousticSynthetic_Clamp(amplitude, 0.0f, 1.0f);
   noise_amplitude = App_AcousticSynthetic_Clamp(noise_amplitude, 0.0f, 1.0f);
 

@@ -6,6 +6,11 @@
 #include "arm_math.h"
 #include "stm32n6xx.h"
 
+#if defined(__ARM_FEATURE_MVE) && (__ARM_FEATURE_MVE & 2U)
+#include "arm_mve.h"
+#endif
+
+#include <math.h>
 #include <stddef.h>
 #include <string.h>
 
@@ -16,14 +21,29 @@
 #define APP_ACOUSTIC_SRP_PHAT_EPSILON       1.0e-6f
 #define APP_ACOUSTIC_SRP_NEIGHBOR_RADIUS    1U
 #define APP_ACOUSTIC_SRP_CANDIDATE_MIN_DIST_DEG 15.0f
-
-typedef struct
-{
-  float sin_start;
-  float cos_start;
-  float sin_delta;
-  float cos_delta;
-} AppAcousticSrpPhaseStep_t;
+/* Lag-domain GCC engine (2026-07-19 rewrite): per-pair correlations are
+ * evaluated only over the physically possible lag range (aperture/c) at 2x
+ * the sample rate, via precomputed per-bin cos/sin rows. Grid steering then
+ * reduces to one interpolated table lookup per pair.
+ *   Wide32: |tau| <= 110.7mm/343 = 323 us -> +/-31 taps @96 kHz -> 36+margin
+ *   Core16: |tau| <=  61.5mm/343 = 179 us -> +/-69 taps @384 kHz
+ * Rows are power-of-two free; sized by APP_ACOUSTIC_SRP_MAX_LAGS. */
+#define APP_ACOUSTIC_SRP_UPSAMPLE           2U
+/* Worst case is Core16: coarse-corner TDOA (dx+dy can beat the baseline by
+ * sqrt(2)) ~0.87*87mm/343 = 220us * 384 ktaps/s * 1.15 margin -> +/-101
+ * taps -> 203 rows. */
+#define APP_ACOUSTIC_SRP_MAX_LAGS           224U
+/* Per-pair correlation rows: worst mode is QUALITY Wide32 240 pairs x 80
+ * lags or Core16 120 x 148; bounded by pairs*MAX_LAGS. */
+#define APP_ACOUSTIC_SRP_MAX_CORR_FLOATS    (APP_ACOUSTIC_SRP_MAX_PAIRS * APP_ACOUSTIC_SRP_MAX_LAGS)
+/* Per-bin steering rows: cos+sin per (active bin x lag). Worst = Core16
+ * 97 bins x 148 lags x 2. */
+#define APP_ACOUSTIC_SRP_MAX_TABLE_FLOATS   (APP_ACOUSTIC_SRP_MAX_ACTIVE_BINS * APP_ACOUSTIC_SRP_MAX_LAGS * 2U)
+/* Cross-spectrum EMA across processed frames (Welch-style, pre-PHAT):
+ * accum = beta*accum + cross. Coherent averaging lifts weak-source SNR and
+ * dilutes single-frame sidelobe flicker; at ~15-25 SRP fps beta=0.5 spans
+ * roughly 2-3 frames (~100 ms) which keeps claps detectable. */
+#define APP_ACOUSTIC_SRP_CROSS_EMA_BETA     0.5f
 
 /* Mode invariants the union sizing relies on. */
 _Static_assert((APP_MIC_ARRAY_CORE16_MIC_COUNT * 512U) <=
@@ -35,19 +55,17 @@ _Static_assert((APP_ACOUSTIC_IMAGING_WIDE32_QUALITY_PAIRS * 40U) <=
 _Static_assert((APP_ACOUSTIC_IMAGING_CORE16_QUALITY_PAIRS * 97U) <=
                APP_ACOUSTIC_SRP_MAX_PAIR_BINS,
                "Core16 pair*bin staging exceeds workspace");
-
 typedef struct
 {
   AppAcousticImagingPair_t pairs[APP_ACOUSTIC_SRP_MAX_PAIRS];
   float coarse_theta[APP_ACOUSTIC_IMAGING_COARSE_TOTAL];
   float coarse_phi[APP_ACOUSTIC_IMAGING_COARSE_TOTAL];
   float coarse_tdoa[APP_ACOUSTIC_IMAGING_COARSE_TOTAL * APP_ACOUSTIC_SRP_MAX_PAIRS];
-  AppAcousticSrpPhaseStep_t coarse_phase[APP_ACOUSTIC_IMAGING_COARSE_TOTAL * APP_ACOUSTIC_SRP_MAX_PAIRS];
-  AppAcousticSrpPhaseStep_t fine_phase[APP_ACOUSTIC_IMAGING_FINE_TOTAL * APP_ACOUSTIC_SRP_MAX_PAIRS];
   float window[APP_ACOUSTIC_SRP_MAX_NFFT];
   float time[APP_ACOUSTIC_SRP_MAX_TIME_SAMPLES];
   float freq[APP_ACOUSTIC_SRP_MAX_TIME_SAMPLES];
   float gcc[APP_ACOUSTIC_SRP_MAX_PAIR_BINS * 2U];
+  float cross_accum[APP_ACOUSTIC_SRP_MAX_PAIR_BINS * 2U];
   float srp_weight[APP_ACOUSTIC_SRP_MAX_PAIR_BINS];
   float srp_power[APP_ACOUSTIC_SRP_RUNTIME_GRID_TOTAL];
   float smoothed_power[APP_ACOUSTIC_SRP_RUNTIME_GRID_TOTAL];
@@ -57,6 +75,17 @@ typedef struct
   float scratch_conj[APP_ACOUSTIC_SRP_MAX_ACTIVE_BINS * 2U];
   float scratch_cross[APP_ACOUSTIC_SRP_MAX_ACTIVE_BINS * 2U];
   float scratch_mag[APP_ACOUSTIC_SRP_MAX_ACTIVE_BINS];
+  /* Lag-domain GCC engine state: per-pair correlation rows over the
+   * physical lag range, plus the per-(bin x lag) steering tables used to
+   * synthesize them from the whitened cross-spectra. */
+  float corr[APP_ACOUSTIC_SRP_MAX_CORR_FLOATS];
+  float lag_cos[APP_ACOUSTIC_SRP_MAX_TABLE_FLOATS / 2U];
+  float lag_sin[APP_ACOUSTIC_SRP_MAX_TABLE_FLOATS / 2U];
+  uint8_t pair_active[APP_ACOUSTIC_SRP_MAX_PAIRS];
+  uint32_t lag_count;  /* taps per correlation row (odd, centered)         */
+  float lag_center;    /* row index of lag 0                               */
+  float lag_scale;     /* seconds -> taps (= fs * UPSAMPLE)                */
+  uint8_t cross_valid;
   arm_rfft_fast_instance_f32 rfft;
 } AppAcousticSrpWorkspace_t;
 
@@ -272,6 +301,8 @@ static void App_AcousticSrp_RebuildWeights(AppAcousticSrpContext_t *ctx)
         ((App_AcousticSrp_ChannelIsActive(ctx, workspace->pairs[pair].mic_a) != 0U) &&
          (App_AcousticSrp_ChannelIsActive(ctx, workspace->pairs[pair].mic_b) != 0U)) ? 1U : 0U;
 
+    workspace->pair_active[pair] = pair_active;
+
     for (uint32_t bin = 0U; bin < ctx->active_bin_count; bin++)
     {
       float weight = 0.0f;
@@ -289,58 +320,158 @@ static void App_AcousticSrp_RebuildWeights(AppAcousticSrpContext_t *ctx)
       ctx->weight_sum += weight;
     }
   }
+
+  /* Active-set change invalidates the cross-spectrum history (stale phase
+   * relations from a different mic set would leak into the average). */
+  workspace->cross_valid = 0U;
 }
 
-static void App_AcousticSrp_StartPhaseFromDelta(uint32_t start_bin,
-                                                float sin_delta,
-                                                float cos_delta,
-                                                float *sin_start,
-                                                float *cos_start)
+/* --------------------------------------------------------------------- */
+/* Lag-domain GCC engine: instead of rotating a phasor per grid x pair x
+ * bin (~600k serially-dependent complex MACs, 88M cycles measured) or one
+ * IRFFT per pair (35M cycles, IFFT variant tried 2026-07-19), synthesize
+ * each pair's correlation ONLY over the physically possible lag window
+ * (aperture/c, +/-31 taps at 2x rate for Wide32) from per-(bin x lag)
+ * cos/sin tables. Grid steering is then one interpolated lookup per pair.
+ * Per frame: pairs x bins x lags independent MACs (~0.6M flops, vector-
+ * izable) + grid x pair lookups.                                          */
+/* --------------------------------------------------------------------- */
+
+/* Correlation value at a fractional lag (in taps, relative to lag 0 at
+ * row center). Range is guaranteed by construction; clamp for safety. */
+static inline float App_AcousticSrp_CorrLookup(const AppAcousticSrpWorkspace_t *workspace,
+                                               const float *row,
+                                               float lag_taps)
 {
-  float sin_acc = 0.0f;
-  float cos_acc = 1.0f;
+  float pos = workspace->lag_center + lag_taps;
+  float floor_pos;
+  float frac;
+  uint32_t idx0;
 
-  for (uint32_t bin = 0U; bin < start_bin; bin++)
+  if (pos < 0.0f)
   {
-    float next_sin = (sin_acc * cos_delta) + (cos_acc * sin_delta);
-    float next_cos = (cos_acc * cos_delta) - (sin_acc * sin_delta);
-
-    sin_acc = next_sin;
-    cos_acc = next_cos;
+    pos = 0.0f;
+  }
+  if (pos > ((float)workspace->lag_count - 1.001f))
+  {
+    pos = (float)workspace->lag_count - 1.001f;
   }
 
-  *sin_start = sin_acc;
-  *cos_start = cos_acc;
+  floor_pos = floorf(pos);
+  frac = pos - floor_pos;
+  idx0 = (uint32_t)floor_pos;
+
+  return row[idx0] + (frac * (row[idx0 + 1U] - row[idx0]));
 }
 
-static void App_AcousticSrp_BuildPhaseSteps(const AppAcousticSrpContext_t *ctx,
-                                            const float *tau_seconds,
-                                            AppAcousticSrpPhaseStep_t *phase)
+/* Per-pair correlation rows r_p(l) = sum_bins Gre*cos(w_b*t_l) +
+ * Gim*sin(w_b*t_l) from the weighted whitened spectrum (workspace->gcc). */
+static void App_AcousticSrp_BuildCorrelations(const AppAcousticSrpContext_t *ctx)
 {
-  const float delta_f_hz = (float)ctx->config.sample_rate_hz / (float)ctx->config.nfft;
+  AppAcousticSrpWorkspace_t *workspace = &s_srp_workspace;
+  const uint32_t lag_count = workspace->lag_count;
 
   for (uint32_t pair = 0U; pair < ctx->pair_count; pair++)
   {
-    float d_phi_deg = 360.0f * delta_f_hz * tau_seconds[pair];
+    const float *gcc = &workspace->gcc[pair * ctx->active_bin_count * 2U];
+    float *row = &workspace->corr[pair * lag_count];
 
-    arm_sin_cos_f32(d_phi_deg, &phase[pair].sin_delta, &phase[pair].cos_delta);
-    App_AcousticSrp_StartPhaseFromDelta(ctx->config.active_bins[0],
-                                        phase[pair].sin_delta,
-                                        phase[pair].cos_delta,
-                                        &phase[pair].sin_start,
-                                        &phase[pair].cos_start);
+    if (workspace->pair_active[pair] == 0U)
+    {
+      continue; /* row is never read: lookups skip inactive pairs */
+    }
+
+    memset(row, 0, lag_count * sizeof(float));
+    for (uint32_t bin = 0U; bin < ctx->active_bin_count; bin++)
+    {
+      const float g_re = gcc[2U * bin];
+      const float g_im = gcc[(2U * bin) + 1U];
+      const float *crow = &workspace->lag_cos[bin * lag_count];
+      const float *srow = &workspace->lag_sin[bin * lag_count];
+
+#if defined(__ARM_FEATURE_MVE) && (__ARM_FEATURE_MVE & 2U)
+      uint32_t lag = 0U;
+
+      for (; (lag + 4U) <= lag_count; lag += 4U)
+      {
+        float32x4_t acc = vld1q_f32(&row[lag]);
+
+        acc = vfmaq_n_f32(acc, vld1q_f32(&crow[lag]), g_re);
+        acc = vfmaq_n_f32(acc, vld1q_f32(&srow[lag]), g_im);
+        vst1q_f32(&row[lag], acc);
+      }
+      for (; lag < lag_count; lag++)
+      {
+        row[lag] += (g_re * crow[lag]) + (g_im * srow[lag]);
+      }
+#else
+      for (uint32_t lag = 0U; lag < lag_count; lag++)
+      {
+        row[lag] += (g_re * crow[lag]) + (g_im * srow[lag]);
+      }
+#endif
+    }
   }
 }
 
-static void App_AcousticSrp_RebuildCoarsePhase(AppAcousticSrpContext_t *ctx)
+/* Steering tables: angle(bin, lag) = 2*pi*f_bin*t_lag with t_lag spanning
+ * the physical +/- max-baseline TDOA at UPSAMPLE x sample rate. */
+static void App_AcousticSrp_BuildLagTables(AppAcousticSrpContext_t *ctx)
 {
   AppAcousticSrpWorkspace_t *workspace = &s_srp_workspace;
+  float max_abs_tau = 0.0f;
+  uint32_t lag_half;
 
-  for (uint32_t grid = 0U; grid < APP_ACOUSTIC_IMAGING_COARSE_TOTAL; grid++)
+  /* Window from the ACTUAL steering LUT, not the baseline: at the +/-60 deg
+   * grid corners tau = (dx*stcp + dy*sp)/c can exceed baseline/c by up to
+   * sqrt(2) (both projections add). Undersizing clamps corner grid points
+   * to the row edge and corrupts the coarse surface (self-test caught it:
+   * synthetic peak landed 30 deg off). 1.15 margin covers the fine search
+   * pushing 10 deg past the corners. */
+  for (uint32_t i = 0U; i < (APP_ACOUSTIC_IMAGING_COARSE_TOTAL * ctx->pair_count); i++)
   {
-    App_AcousticSrp_BuildPhaseSteps(ctx,
-                                    &workspace->coarse_tdoa[grid * ctx->pair_count],
-                                    &workspace->coarse_phase[grid * APP_ACOUSTIC_SRP_MAX_PAIRS]);
+    float abs_tau = App_AcousticSrp_AbsF32(workspace->coarse_tdoa[i]);
+
+    if (abs_tau > max_abs_tau)
+    {
+      max_abs_tau = abs_tau;
+    }
+  }
+
+  workspace->lag_scale = (float)ctx->config.sample_rate_hz * (float)APP_ACOUSTIC_SRP_UPSAMPLE;
+  lag_half = (uint32_t)(max_abs_tau * 1.15f * workspace->lag_scale) + 4U;
+  workspace->lag_count = (2U * lag_half) + 1U;
+  if (workspace->lag_count > APP_ACOUSTIC_SRP_MAX_LAGS)
+  {
+    workspace->lag_count = APP_ACOUSTIC_SRP_MAX_LAGS;
+    lag_half = (workspace->lag_count - 1U) / 2U;
+  }
+  workspace->lag_center = (float)lag_half;
+
+  for (uint32_t bin = 0U; bin < ctx->active_bin_count; bin++)
+  {
+    /* 360 deg * f_bin * one-tap step: f_bin = abs_bin * fs / nfft and a
+     * tap is 1 / (fs * UPSAMPLE) -> step_deg = 360 * abs_bin / (nfft * U). */
+    const float step_deg = 360.0f * (float)ctx->config.active_bins[bin] /
+                           ((float)ctx->config.nfft * (float)APP_ACOUSTIC_SRP_UPSAMPLE);
+    float *crow = &workspace->lag_cos[bin * workspace->lag_count];
+    float *srow = &workspace->lag_sin[bin * workspace->lag_count];
+
+    for (uint32_t lag = 0U; lag < workspace->lag_count; lag++)
+    {
+      float angle_deg = step_deg * ((float)lag - workspace->lag_center);
+
+      /* arm_sin_cos_f32 expects [-180, 180); wrap without fmodf. */
+      while (angle_deg >= 180.0f)
+      {
+        angle_deg -= 360.0f;
+      }
+      while (angle_deg < -180.0f)
+      {
+        angle_deg += 360.0f;
+      }
+      arm_sin_cos_f32(angle_deg, &srow[lag], &crow[lag]);
+    }
   }
 }
 
@@ -520,117 +651,30 @@ static float App_AcousticSrp_SecondMaxExcludingNeighbor(const AppAcousticSrpWork
   return second_max;
 }
 
-static float App_AcousticSrp_AccumulatePhasePointContiguous(const AppAcousticSrpContext_t *ctx,
-                                                            const AppAcousticSrpPhaseStep_t *phase)
+/* SRP power for one steering direction: per-pair correlation lookup at the
+ * direction's TDOA. Replaces the per-bin phasor accumulation (the lag domain
+ * already integrates all bins; weights were folded in before the IRFFT). */
+static float App_AcousticSrp_SrpPowerAtTau(const AppAcousticSrpContext_t *ctx,
+                                           const float *tau_seconds)
 {
   const AppAcousticSrpWorkspace_t *workspace = &s_srp_workspace;
+  const uint32_t lag_count = workspace->lag_count;
+  const float lag_scale = workspace->lag_scale;
   float power = 0.0f;
 
   for (uint32_t pair = 0U; pair < ctx->pair_count; pair++)
   {
-    const float *gcc = &workspace->gcc[pair * ctx->active_bin_count * 2U];
-    const float *weight = &workspace->srp_weight[pair * ctx->active_bin_count];
-    float sin_d = phase[pair].sin_delta;
-    float cos_d = phase[pair].cos_delta;
-    float sin_phi = phase[pair].sin_start;
-    float cos_phi = phase[pair].cos_start;
-    float pair_sum = 0.0f;
-    uint32_t bin = ctx->active_bin_count;
-
-#define APP_ACOUSTIC_SRP_ACCUMULATE_BIN()                                      \
-    do                                                                         \
-    {                                                                          \
-      float c_new;                                                             \
-      float s_new;                                                             \
-      pair_sum += (*weight++) * ((gcc[0] * cos_phi) + (gcc[1] * sin_phi));     \
-      gcc += 2U;                                                               \
-      c_new = (cos_phi * cos_d) - (sin_phi * sin_d);                           \
-      s_new = (sin_phi * cos_d) + (cos_phi * sin_d);                           \
-      cos_phi = c_new;                                                         \
-      sin_phi = s_new;                                                         \
-    } while (0)
-
-    while (bin >= 4U)
+    if (workspace->pair_active[pair] == 0U)
     {
-      APP_ACOUSTIC_SRP_ACCUMULATE_BIN();
-      APP_ACOUSTIC_SRP_ACCUMULATE_BIN();
-      APP_ACOUSTIC_SRP_ACCUMULATE_BIN();
-      APP_ACOUSTIC_SRP_ACCUMULATE_BIN();
-      bin -= 4U;
+      continue;
     }
 
-    while (bin > 0U)
-    {
-      APP_ACOUSTIC_SRP_ACCUMULATE_BIN();
-      bin--;
-    }
-
-#undef APP_ACOUSTIC_SRP_ACCUMULATE_BIN
-
-    power += pair_sum;
+    power += App_AcousticSrp_CorrLookup(workspace,
+                                        &workspace->corr[pair * lag_count],
+                                        tau_seconds[pair] * lag_scale);
   }
 
   return power;
-}
-
-static void App_AcousticSrp_AdvancePhase(float *sin_phi,
-                                         float *cos_phi,
-                                         float sin_d,
-                                         float cos_d,
-                                         uint16_t step_count)
-{
-  for (uint32_t step = 0U; step < step_count; step++)
-  {
-    float c_new = ((*cos_phi) * cos_d) - ((*sin_phi) * sin_d);
-    float s_new = ((*sin_phi) * cos_d) + ((*cos_phi) * sin_d);
-
-    *cos_phi = c_new;
-    *sin_phi = s_new;
-  }
-}
-
-static float App_AcousticSrp_AccumulatePhasePointSparse(const AppAcousticSrpContext_t *ctx,
-                                                        const AppAcousticSrpPhaseStep_t *phase)
-{
-  const AppAcousticSrpWorkspace_t *workspace = &s_srp_workspace;
-  float power = 0.0f;
-
-  for (uint32_t pair = 0U; pair < ctx->pair_count; pair++)
-  {
-    const float *gcc = &workspace->gcc[pair * ctx->active_bin_count * 2U];
-    const float *weight = &workspace->srp_weight[pair * ctx->active_bin_count];
-    float sin_d = phase[pair].sin_delta;
-    float cos_d = phase[pair].cos_delta;
-    float sin_phi = phase[pair].sin_start;
-    float cos_phi = phase[pair].cos_start;
-    float pair_sum = 0.0f;
-
-    for (uint32_t bin = 0U; bin < ctx->active_bin_count; bin++)
-    {
-      pair_sum += weight[bin] * ((gcc[2U * bin] * cos_phi) + (gcc[(2U * bin) + 1U] * sin_phi));
-
-      if ((bin + 1U) < ctx->active_bin_count)
-      {
-        uint16_t gap = (uint16_t)(ctx->config.active_bins[bin + 1U] - ctx->config.active_bins[bin]);
-        App_AcousticSrp_AdvancePhase(&sin_phi, &cos_phi, sin_d, cos_d, gap);
-      }
-    }
-
-    power += pair_sum;
-  }
-
-  return power;
-}
-
-static float App_AcousticSrp_AccumulatePhasePoint(const AppAcousticSrpContext_t *ctx,
-                                                  const AppAcousticSrpPhaseStep_t *phase)
-{
-  if (ctx->active_bins_contiguous != 0U)
-  {
-    return App_AcousticSrp_AccumulatePhasePointContiguous(ctx, phase);
-  }
-
-  return App_AcousticSrp_AccumulatePhasePointSparse(ctx, phase);
 }
 
 static AppAcousticImagingStatus_t App_AcousticSrp_Preprocess(AppAcousticSrpContext_t *ctx,
@@ -734,38 +778,28 @@ uint32_t App_AcousticSrp_GetRefSpectrum(const AppAcousticSrpContext_t *ctx,
   return mag_count;
 }
 
-static uint8_t App_AcousticSrp_PairHasWeight(const AppAcousticSrpContext_t *ctx,
-                                             uint32_t pair_index)
-{
-  const AppAcousticSrpWorkspace_t *workspace = &s_srp_workspace;
-
-  for (uint32_t bin = 0U; bin < ctx->active_bin_count; bin++)
-  {
-    if (workspace->srp_weight[(pair_index * ctx->active_bin_count) + bin] > 0.0f)
-    {
-      return 1U;
-    }
-  }
-
-  return 0U;
-}
-
-static void App_AcousticSrp_ComputeGccPhat(const AppAcousticSrpContext_t *ctx)
+static void App_AcousticSrp_ComputeGccPhat(AppAcousticSrpContext_t *ctx)
 {
   AppAcousticSrpWorkspace_t *workspace = &s_srp_workspace;
+  const float beta = APP_ACOUSTIC_SRP_CROSS_EMA_BETA;
+  const uint8_t history_valid = workspace->cross_valid;
 
   for (uint32_t pair = 0U; pair < ctx->pair_count; pair++)
   {
     uint32_t mic_a = workspace->pairs[pair].mic_a;
     uint32_t mic_b = workspace->pairs[pair].mic_b;
+    const float *weight = &workspace->srp_weight[pair * ctx->active_bin_count];
+    float *accum = &workspace->cross_accum[pair * ctx->active_bin_count * 2U];
     float *out = &workspace->gcc[pair * ctx->active_bin_count * 2U];
 
-    if (App_AcousticSrp_PairHasWeight(ctx, pair) == 0U)
+    if (workspace->pair_active[pair] == 0U)
     {
       memset(out, 0, ctx->active_bin_count * 2U * sizeof(float));
+      memset(accum, 0, ctx->active_bin_count * 2U * sizeof(float));
       continue;
     }
 
+    /* Raw cross-spectrum of the current frame into scratch_cross. */
     if (ctx->active_bins_contiguous != 0U)
     {
       const float *xi = &workspace->freq[(mic_a * ctx->config.nfft) + (2U * ctx->config.active_bin_start)];
@@ -773,15 +807,6 @@ static void App_AcousticSrp_ComputeGccPhat(const AppAcousticSrpContext_t *ctx)
 
       arm_cmplx_conj_f32(xj, workspace->scratch_conj, ctx->active_bin_count);
       arm_cmplx_mult_cmplx_f32(xi, workspace->scratch_conj, workspace->scratch_cross, ctx->active_bin_count);
-      arm_cmplx_mag_f32(workspace->scratch_cross, workspace->scratch_mag, ctx->active_bin_count);
-
-      for (uint32_t bin = 0U; bin < ctx->active_bin_count; bin++)
-      {
-        float inv_mag = 1.0f / (workspace->scratch_mag[bin] + APP_ACOUSTIC_SRP_PHAT_EPSILON);
-
-        out[2U * bin] = workspace->scratch_cross[2U * bin] * inv_mag;
-        out[(2U * bin) + 1U] = workspace->scratch_cross[(2U * bin) + 1U] * inv_mag;
-      }
     }
     else
     {
@@ -795,18 +820,41 @@ static void App_AcousticSrp_ComputeGccPhat(const AppAcousticSrpContext_t *ctx)
         float ai = freq_a[fft_index + 1U];
         float br = freq_b[fft_index];
         float bi = freq_b[fft_index + 1U];
-        float cross_re = (ar * br) + (ai * bi);
-        float cross_im = (ai * br) - (ar * bi);
-        float mag;
-        float inv_mag;
 
-        arm_sqrt_f32((cross_re * cross_re) + (cross_im * cross_im), &mag);
-        inv_mag = 1.0f / (mag + APP_ACOUSTIC_SRP_PHAT_EPSILON);
-        out[2U * bin] = cross_re * inv_mag;
-        out[(2U * bin) + 1U] = cross_im * inv_mag;
+        workspace->scratch_cross[2U * bin] = (ar * br) + (ai * bi);
+        workspace->scratch_cross[(2U * bin) + 1U] = (ai * br) - (ar * bi);
       }
     }
+
+    /* Welch-style running average of the cross-spectrum BEFORE the PHAT
+     * whitening: coherent phase adds up across frames, uncorrelated noise
+     * and single-frame sidelobes average down. */
+    if (history_valid != 0U)
+    {
+      for (uint32_t i = 0U; i < ctx->active_bin_count * 2U; i++)
+      {
+        accum[i] = (beta * accum[i]) + workspace->scratch_cross[i];
+      }
+    }
+    else
+    {
+      memcpy(accum, workspace->scratch_cross,
+             ctx->active_bin_count * 2U * sizeof(float));
+    }
+
+    /* PHAT whitening of the averaged spectrum, per-bin weight folded in
+     * (the lag-domain search cannot apply per-bin weights anymore). */
+    arm_cmplx_mag_f32(accum, workspace->scratch_mag, ctx->active_bin_count);
+    for (uint32_t bin = 0U; bin < ctx->active_bin_count; bin++)
+    {
+      float w = weight[bin] / (workspace->scratch_mag[bin] + APP_ACOUSTIC_SRP_PHAT_EPSILON);
+
+      out[2U * bin] = accum[2U * bin] * w;
+      out[(2U * bin) + 1U] = accum[(2U * bin) + 1U] * w;
+    }
   }
+
+  workspace->cross_valid = 1U;
 }
 
 static void App_AcousticSrp_RunCoarseSearch(const AppAcousticSrpContext_t *ctx)
@@ -816,7 +864,7 @@ static void App_AcousticSrp_RunCoarseSearch(const AppAcousticSrpContext_t *ctx)
   for (uint32_t grid = 0U; grid < APP_ACOUSTIC_IMAGING_COARSE_TOTAL; grid++)
   {
     workspace->srp_power[grid] =
-        App_AcousticSrp_AccumulatePhasePoint(ctx, &workspace->coarse_phase[grid * APP_ACOUSTIC_SRP_MAX_PAIRS]);
+        App_AcousticSrp_SrpPowerAtTau(ctx, &workspace->coarse_tdoa[grid * ctx->pair_count]);
   }
 }
 
@@ -864,12 +912,8 @@ static void App_AcousticSrp_RunFineSearch(const AppAcousticSrpContext_t *ctx,
                (workspace->pairs[pair].dy_m * sin_phi)) * inv_c;
         }
 
-        App_AcousticSrp_BuildPhaseSteps(ctx,
-                                        workspace->tau,
-                                        &workspace->fine_phase[fine_idx * APP_ACOUSTIC_SRP_MAX_PAIRS]);
         workspace->srp_power[APP_ACOUSTIC_IMAGING_COARSE_TOTAL + fine_idx] =
-            App_AcousticSrp_AccumulatePhasePoint(ctx,
-                                                 &workspace->fine_phase[fine_idx * APP_ACOUSTIC_SRP_MAX_PAIRS]);
+            App_AcousticSrp_SrpPowerAtTau(ctx, workspace->tau);
       }
     }
   }
@@ -1095,6 +1139,8 @@ AppAcousticImagingStatus_t App_AcousticSrp_Init(AppAcousticSrpContext_t *ctx,
     return APP_ACOUSTIC_IMAGING_PROCESSING_FAILED;
   }
 
+  workspace->cross_valid = 0U;
+
   if (backend == APP_ACOUSTIC_BACKEND_NPU_HEATMAP)
   {
     status = App_AcousticNpuHeatmap_Init(config);
@@ -1115,7 +1161,7 @@ AppAcousticImagingStatus_t App_AcousticSrp_Init(AppAcousticSrpContext_t *ctx,
   ctx->active_channel_mask = config->channel_mask & ~config->bad_channel_mask;
   ctx->smoothing_valid = 0U;
   App_AcousticSrp_RebuildWeights(ctx);
-  App_AcousticSrp_RebuildCoarsePhase(ctx);
+  App_AcousticSrp_BuildLagTables(ctx);
   if (ctx->weight_sum <= 0.0f)
   {
     return APP_ACOUSTIC_IMAGING_INVALID_ARGUMENT;
@@ -1209,6 +1255,12 @@ AppAcousticImagingStatus_t App_AcousticSrp_ProcessFrame(AppAcousticSrpContext_t 
   }
   else
   {
+    /* Correlation-row build replaces the per-grid phasor accumulation; its
+     * cycles ride in npu_quantize_cycles (unused on the F32 path) so the
+     * bench scripts can split it from the grid lookups. */
+    App_AcousticSrp_BuildCorrelations(ctx);
+    t1 = App_AcousticSrp_CycleNow();
+    perf.npu_quantize_cycles = App_AcousticSrp_CycleDelta(t0, t1);
     App_AcousticSrp_RunCoarseSearch(ctx);
     t1 = App_AcousticSrp_CycleNow();
     perf.coarse_cycles = App_AcousticSrp_CycleDelta(t0, t1);
