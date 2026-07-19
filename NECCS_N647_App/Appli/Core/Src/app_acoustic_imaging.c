@@ -524,7 +524,14 @@ AppAcousticImagingStatus_t App_AcousticImaging_GetDefaultConfig(AppMicArrayMode_
   config->ui_target_fps = 20U;
   config->ui_min_fps = 10U;
   config->channel_mask = App_AcousticImaging_ChannelMaskForCount(config->channel_count);
-  config->bad_channel_mask = 0U;
+  /* M31 (physical index 30, bus A TDM slot 14) is a known-dead microphone
+   * (constant zero since bring-up, hardware fault - see AGENTS.md). A zero
+   * channel still enters GCC-PHAT as a phase-free term in every pair it
+   * touches, lifting sidelobes and dragging quality toward the gate. Mask
+   * it out by default; RebuildWeights zeroes all pairs using it. Core16
+   * (M01..M16) does not contain M31, so its mask stays clean. */
+  config->bad_channel_mask =
+      (mode == APP_MIC_ARRAY_MODE_WIDE32_48K) ? (1UL << 30) : 0U;
   config->temperature_c = APP_ACOUSTIC_IMAGING_DEFAULT_TEMP_C;
   config->speed_of_sound_mps = APP_ACOUSTIC_IMAGING_SPEED_OF_SOUND_MPS;
   config->smoothing_alpha = APP_ACOUSTIC_IMAGING_DEFAULT_SMOOTHING_ALPHA;
@@ -890,7 +897,14 @@ AppAcousticImagingBinPolicy_t App_AcousticImaging_ResolveBinPolicy(AppAcousticIm
     return APP_ACOUSTIC_IMAGING_BIN_POLICY_QUALITY_B40;
   case APP_ACOUSTIC_IMAGING_PROFILE_BALANCED:
   default:
-    return APP_ACOUSTIC_IMAGING_BIN_POLICY_STANDARD_B16;
+    /* B24, not B16: board A/B 2026-07-12 (commit 9d68b8e6) - B16 angles
+     * jumped +/-30 deg frame-to-frame on a fixed source, B24 tracked
+     * within +/-4 deg. GetDefaultRunModeArrayConfig already picked B24 for
+     * STANDARD, but the service re-applies its requested policy through
+     * this resolver, which silently mapped BALANCED back to B16 (baseline
+     * probe 2026-07-19: running bins=16). Keep the resolver aligned with
+     * the board-verified default. */
+    return APP_ACOUSTIC_IMAGING_BIN_POLICY_STANDARD_B24;
   }
 }
 
@@ -1036,12 +1050,20 @@ AppAcousticImagingStatus_t App_AcousticImaging_BuildPairSet(const AppAcousticIma
 
   for (uint32_t a = 0U; a < config->channel_count; a++)
   {
+    if (((config->bad_channel_mask >> a) & 1UL) != 0U)
+    {
+      continue; /* dead mic: don't waste pair budget on zero channels */
+    }
     for (uint32_t b = a + 1U; b < config->channel_count; b++)
     {
       const AppMicArrayMic_t *mic_a = App_MicArray_GetModeMic(config->mic_mode, a);
       const AppMicArrayMic_t *mic_b = App_MicArray_GetModeMic(config->mic_mode, b);
       AppAcousticImagingPair_t candidate;
 
+      if (((config->bad_channel_mask >> b) & 1UL) != 0U)
+      {
+        continue;
+      }
       if ((mic_a == NULL) || (mic_b == NULL))
       {
         return APP_ACOUSTIC_IMAGING_UNSUPPORTED_MODE;

@@ -1,0 +1,115 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="45mm" height="20mm" viewBox="0 0 45 20"
+     shape-rendering="geometricPrecision" text-rendering="geometricPrecision">
+  <defs>
+    <style>
+      .title { font: 700 1.30px Arial, sans-serif; letter-spacing: 0.05px; }
+      .label { font: 700 1.35px Arial, sans-serif; }
+      .small { font: 700 1.05px Arial, sans-serif; }
+      .tiny  { font: 700 1.00px Arial, sans-serif; }
+      .rule  { stroke: #000; stroke-width: 0.20; }
+    </style>
+
+    <!-- Five selectable pads in their PCB top-view orientation. -->
+    <g id="selector-pads">
+      <g fill="#000">
+        <circle cx="0" cy="-1.65" r="0.50"/>
+        <circle cx="-1.65" cy="0" r="0.50"/>
+        <circle cx="0" cy="0" r="0.50"/>
+        <circle cx="1.65" cy="0" r="0.50"/>
+        <circle cx="0" cy="1.65" r="0.50"/>
+      </g>
+      <g fill="#fff">
+        <circle cx="0" cy="-1.65" r="0.23"/>
+        <circle cx="-1.65" cy="0" r="0.23"/>
+        <circle cx="0" cy="0" r="0.23"/>
+        <circle cx="1.65" cy="0" r="0.23"/>
+        <circle cx="0" cy="1.65" r="0.23"/>
+      </g>
+    </g>
+
+    <g id="power-pads">
+      <g fill="#000">
+        <circle cx="0" cy="0" r="0.50"/>
+        <circle cx="1.80" cy="0" r="0.50"/>
+        <circle cx="3.60" cy="0" r="0.50"/>
+      </g>
+      <g fill="#fff">
+        <circle cx="0" cy="0" r="0.23"/>
+        <circle cx="1.80" cy="0" r="0.23"/>
+        <circle cx="3.60" cy="0" r="0.23"/>
+      </g>
+    </g>
+  </defs>
+
+  <!-- Compact ASCII-only heading for reliable silkscreen conversion. -->
+  <text x="0.5" y="1.45" class="title">GPIO SELECT</text>
+  <text x="44.5" y="1.45" text-anchor="end" class="small">HPWR / HPWM1 / HPWM2</text>
+  <path d="M0.5 2.05H44.5" class="rule" fill="none"/>
+
+  <!-- G1: cap from center to the physical left pad. -->
+  <g transform="translate(5.5 7.0)">
+    <text x="0" y="-3.25" text-anchor="middle" class="label">G1</text>
+    <rect x="-2.25" y="-0.68" width="2.93" height="1.36" rx="0.68" fill="#000"/>
+    <use href="#selector-pads"/>
+  </g>
+
+  <!-- G2: cap from center to the physical bottom pad. -->
+  <g transform="translate(16.7 7.0)">
+    <text x="0" y="-3.25" text-anchor="middle" class="label">G2</text>
+    <rect x="-0.68" y="-0.68" width="1.36" height="2.93" rx="0.68" fill="#000"/>
+    <use href="#selector-pads"/>
+  </g>
+
+  <!-- G3: cap from center to the physical right pad. -->
+  <g transform="translate(28.0 7.0)">
+    <text x="0" y="-3.25" text-anchor="middle" class="label">G3</text>
+    <rect x="-0.68" y="-0.68" width="2.93" height="1.36" rx="0.68" fill="#000"/>
+    <use href="#selector-pads"/>
+  </g>
+
+  <!-- G4: cap from center to the physical top pad. -->
+  <g transform="translate(39.2 7.0)">
+    <text x="0" y="-3.25" text-anchor="middle" class="label">G4</text>
+    <rect x="-0.68" y="-2.25" width="1.36" height="2.93" rx="0.68" fill="#000"/>
+    <use href="#selector-pads"/>
+  </g>
+
+  <text x="22.5" y="10.85" text-anchor="middle" class="small">ONE CAP / SELECTOR</text>
+  <path d="M0.5 11.55H44.5" class="rule" fill="none"/>
+
+  <!-- Power selector: physical left-to-right pin order is 1, 2, 3. -->
+  <text x="0.5" y="13.15" class="title">PWR SELECT</text>
+
+  <g transform="translate(3.0 16.0)">
+    <text x="0" y="0.40" class="label">5V</text>
+    <g transform="translate(4.2 0)">
+      <rect x="-0.68" y="-0.68" width="3.16" height="1.36" rx="0.68" fill="#000"/>
+      <use href="#power-pads"/>
+      <g class="tiny" text-anchor="middle">
+        <text x="0" y="1.62">1</text>
+        <text x="1.80" y="1.62">2</text>
+        <text x="3.60" y="1.62">3</text>
+      </g>
+    </g>
+    <text x="9.15" y="0.40" class="small">1-2</text>
+  </g>
+
+  <path d="M22.5 13.8V18.8" class="rule" fill="none"/>
+
+  <g transform="translate(25.0 16.0)">
+    <text x="0" y="0.40" class="label">3V3</text>
+    <g transform="translate(5.0 0)">
+      <rect x="1.12" y="-0.68" width="3.16" height="1.36" rx="0.68" fill="#000"/>
+      <use href="#power-pads"/>
+      <g class="tiny" text-anchor="middle">
+        <text x="0" y="1.62">1</text>
+        <text x="1.80" y="1.62">2</text>
+        <text x="3.60" y="1.62">3</text>
+      </g>
+    </g>
+    <text x="10.0" y="0.40" class="small">2-3</text>
+  </g>
+
+  <text x="44.5" y="19.05" text-anchor="end" class="tiny">TOP VIEW</text>
+</svg>

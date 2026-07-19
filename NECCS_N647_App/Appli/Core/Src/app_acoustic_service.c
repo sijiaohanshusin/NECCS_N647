@@ -40,15 +40,17 @@
 #define APP_ACOUSTIC_SERVICE_TEMP_MAX_C         60
 
 static AppAcousticSrpContext_t s_srp_ctx __attribute__((aligned(32)));
-/* CPU-only structures: cached external RAM keeps internal SRAM free for the
- * hot paths (the 96x72 field grew these by ~10 KB). GDB symbol names are
- * unchanged (debug scripts reference them by name, not by address). */
+/* Cold CPU-only structures stay in cached external RAM; the per-frame HOT
+ * buffers moved to internal SRAM 2026-07-19: every SRP frame used to stream
+ * 32ch x 256 floats through HyperRAM twice (capture ring -> service copy)
+ * while the camera worker hammered the same HyperRAM port - measured as the
+ * overlay dragging SRP from ~7 to ~3-4 fps. GDB symbol names unchanged. */
 static AppAcousticImagingVisFrame_t s_vis_frame
-    __attribute__((section(".EXTRAM"), aligned(32)));
+    __attribute__((section(".SRP_FAST"), aligned(32)));
 static AppAcousticServiceSnapshot_t s_snapshot
     __attribute__((section(".EXTRAM"), aligned(32)));
 static float s_service_samples[APP_ACOUSTIC_SERVICE_SAMPLE_COUNT]
-    __attribute__((section(".EXTRAM"), aligned(32)));
+    __attribute__((section(".SRP_FAST"), aligned(32)));
 
 /* Heat-field working state (service thread only; CPU-only access, so the
  * cached external RAM is fine and keeps internal SRAM for code). */

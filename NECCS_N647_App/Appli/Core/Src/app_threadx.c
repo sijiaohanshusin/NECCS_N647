@@ -44,22 +44,31 @@
  *   5  TouchGFX          - event driven, must stay fluid
  *  11  bringup           - init + 1 Hz polling
  *  12  pcmd_capture      - hard real-time audio, must never starve
- *  13  camdisp worker    - compose+overlay ~2 ms per camera frame
- *  14  acoustic (SRP)    - elastic CPU hog (~150 ms/frame), soaks leftover
+ *  13  camdisp worker    - compose+overlay, time-sliced with acoustic
+ *  13  acoustic (SRP)    - time-sliced with camdisp (2-tick round robin)
  *  12  media             - FileX, mostly blocked
- * SRP sits BELOW the camera worker on purpose: measured on-board, anything
- * else either freezes the preview (SRP saturates the core) or drops every
- * SAI half. The PCMD thread is CREATED at priority 4 and demotes itself
- * (app_pcmd_capture.c): during the boot screen TouchGFX renders full-time,
- * so a 12-priority thread would never run its I2C config sequence. */
+ * SRP used to sit BELOW the camera worker (prio 14, TX_NO_TIME_SLICE):
+ * with the overlay active the worker monopolized the level and SRP fell
+ * from ~7 to ~3-4 fps (the "crosshair lags the sound" complaint). Now both
+ * share priority 13 WITH a 1-tick (10 ms) time slice: the worker's ~2 ms
+ * compose bursts still fit well inside a camera frame (waits at most one
+ * slice), while SRP round-robins instead of starving. Do NOT raise SRP to
+ * 12: that level round-robins with the streaming-state PCMD thread and a
+ * 70 ms SRP burst there starves the 5.3 ms SAI half cadence (dropped
+ * halves, board-measured on earlier experiments). The PCMD thread is
+ * CREATED at priority 4 and demotes itself (app_pcmd_capture.c): during
+ * the boot screen TouchGFX renders full-time, so a 12-priority thread
+ * would never run its I2C config sequence. */
 #define APP_BRINGUP_THREAD_STACK_SIZE  4096U
 #define APP_BRINGUP_THREAD_PRIORITY    11U
 #define APP_PCMD_THREAD_STACK_SIZE     8192U
 #define APP_PCMD_THREAD_PRIORITY       4U
 #define APP_ACOUSTIC_THREAD_STACK_SIZE 12288U
-#define APP_ACOUSTIC_THREAD_PRIORITY   14U
+#define APP_ACOUSTIC_THREAD_PRIORITY   13U
+#define APP_ACOUSTIC_THREAD_TIME_SLICE 1U
 #define APP_CAMDISP_THREAD_STACK_SIZE  4096U
 #define APP_CAMDISP_THREAD_PRIORITY    13U
+#define APP_CAMDISP_THREAD_TIME_SLICE  1U
 
 /* USER CODE END PD */
 
@@ -121,7 +130,7 @@ UINT App_ThreadX_Init(VOID *memory_ptr)
                              APP_CAMDISP_THREAD_STACK_SIZE,
                              APP_CAMDISP_THREAD_PRIORITY,
                              APP_CAMDISP_THREAD_PRIORITY,
-                             TX_NO_TIME_SLICE,
+                             APP_CAMDISP_THREAD_TIME_SLICE,
                              TX_AUTO_START);
     }
     if (ret != TX_SUCCESS)
@@ -193,7 +202,7 @@ UINT App_ThreadX_Init(VOID *memory_ptr)
                              APP_ACOUSTIC_THREAD_STACK_SIZE,
                              APP_ACOUSTIC_THREAD_PRIORITY,
                              APP_ACOUSTIC_THREAD_PRIORITY,
-                             TX_NO_TIME_SLICE,
+                             APP_ACOUSTIC_THREAD_TIME_SLICE,
                              TX_AUTO_START);
       if (ret != TX_SUCCESS)
       {

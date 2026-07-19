@@ -114,6 +114,10 @@ static int16_t s_bus_a_rx[APP_PCMD_CAPTURE_DMA_WORDS]
     __attribute__((section(".noncacheable"), aligned(32)));
 static int16_t s_bus_b_rx[APP_PCMD_CAPTURE_DMA_WORDS]
     __attribute__((section(".noncacheable"), aligned(32)));
+/* Frame ring stays in cached external RAM: 3 x 32 KB does not fit the
+ * internal budget (2026-07-19 attempt overflowed RAM by 78 KB). The SRP
+ * service's per-frame working copy (s_service_samples) is internal instead,
+ * so the hot FFT/GCC path only crosses HyperRAM once per processed frame. */
 static float s_frame_samples[APP_PCMD_CAPTURE_FRAME_RING_COUNT]
                             [APP_MIC_ARRAY_PHYSICAL_MIC_COUNT * APP_PCMD_CAPTURE_FRAME_LEN]
     __attribute__((section(".EXTRAM"), aligned(32)));
