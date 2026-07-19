@@ -16,9 +16,12 @@
  * q=5 -> ~7 deg, q>=10 -> ~5.4 deg. Squared into R. */
 #define TRK_MEAS_SIGMA_BASE_DEG      4.0f
 #define TRK_MEAS_SIGMA_SCALE         12.0f
-/* Process noise: white angular acceleration driving the CV model. A hand-
- * held source pan is <200 deg/s^2; higher values track faster but jitter. */
-#define TRK_ACCEL_SIGMA_DPS2         150.0f
+/* Process noise: white angular acceleration driving the CV model. Higher
+ * tracks faster but lets the position ride measurement noise; 60 keeps a
+ * stationary source visually pinned while still following a hand-swept
+ * source (reaches 30 deg/s in ~0.5 s). Was 150: stationary earphone test
+ * wandered several degrees frame to frame (board 2026-07-19). */
+#define TRK_ACCEL_SIGMA_DPS2         60.0f
 /* Velocity damping while coasting (no measurement), per second. */
 #define TRK_COAST_VEL_DECAY_PER_S    2.0f
 /* Confidence integrator: attack per ASSOCIATED estimate is quality-scaled
@@ -36,7 +39,11 @@
  * frame associates and opens. Strong transients bypass via the fast path. */
 #define TRK_CONF_SEED_GAIN           0.15f
 #define TRK_CONF_DECAY_PER_S         1.1f   /* full->off in ~0.9 s of silence */
-#define TRK_CONF_ON_THRESHOLD        0.30f
+/* ON at 0.45: seed (0.15) + one margin-1 association (0.24) = 0.39 stays
+ * DARK - board 2026-07-19 evening, two chance-agreeing noise frames at the
+ * grid corners flashed the display ("position wanders"). A real margin-1
+ * source opens on its 3rd frame (~200 ms @15fps), margin-2+ on its 2nd. */
+#define TRK_CONF_ON_THRESHOLD        0.45f
 #define TRK_CONF_OFF_THRESHOLD      0.12f
 /* Transient fast path: one estimate at/above this quality seeds the track
  * and forces the display on immediately (claps, door slams). */

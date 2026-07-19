@@ -41,9 +41,11 @@
 #define APP_ACOUSTIC_SRP_MAX_TABLE_FLOATS   (APP_ACOUSTIC_SRP_MAX_ACTIVE_BINS * APP_ACOUSTIC_SRP_MAX_LAGS * 2U)
 /* Cross-spectrum EMA across processed frames (Welch-style, pre-PHAT):
  * accum = beta*accum + cross. Coherent averaging lifts weak-source SNR and
- * dilutes single-frame sidelobe flicker; at ~15-25 SRP fps beta=0.5 spans
- * roughly 2-3 frames (~100 ms) which keeps claps detectable. */
-#define APP_ACOUSTIC_SRP_CROSS_EMA_BETA     0.5f
+ * dilutes single-frame sidelobe flicker. 0.65 spans ~3-4 frames (~200 ms
+ * at 15-20 fps): raised from 0.5 for the weak-source case (stationary
+ * earphone measured q=0..1, detections too sparse to hold the tracker);
+ * claps still dominate the current frame (weight 1 vs 0.65 history). */
+#define APP_ACOUSTIC_SRP_CROSS_EMA_BETA     0.65f
 
 /* Mode invariants the union sizing relies on. */
 _Static_assert((APP_MIC_ARRAY_CORE16_MIC_COUNT * 512U) <=
@@ -1144,6 +1146,16 @@ static void App_AcousticSrp_FillCandidates(const AppAcousticSrpContext_t *ctx,
       }
 
       App_AcousticSrp_GetGridAngle(workspace, idx, &theta, &phi);
+      /* Fine patches around +/-60 coarse corners probe out to +/-68 deg
+       * (peak centering), but those points sit OUTSIDE the array's designed
+       * FOV: diffuse noise piles up there (largest-|tau| rim) and the
+       * corner blips seeded the tracker at the frame corners ("position
+       * wanders", board 2026-07-19 evening). Don't report them. */
+      if ((App_AcousticSrp_AbsF32(theta) > 61.0f) ||
+          (App_AcousticSrp_AbsF32(phi) > 61.0f))
+      {
+        continue;
+      }
       if (App_AcousticSrp_IsCandidateTooClose(vis_frame, count, theta, phi) != 0U)
       {
         continue;
