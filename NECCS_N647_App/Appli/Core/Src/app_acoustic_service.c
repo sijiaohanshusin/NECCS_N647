@@ -4,10 +4,13 @@
 #include <stddef.h>
 #include <string.h>
 
+#include "app_acoustic_tracker.h"
 #include "app_pcmd_capture.h"
 #include "app_bringup_thread.h"
 #include "app_npu.h"
 #include "main.h"
+
+#include "stm32n6xx.h"
 
 /* 33 Hz scheduling ceiling (was 20): the lag-domain GCC engine cut a full
  * SRP frame to ~20-30 ms wall (time-sliced with the camera worker), so the
@@ -403,6 +406,7 @@ static AppAcousticImagingStatus_t AppAcousticService_InitRuntime(AppAcousticImag
   }
 
   status = App_AcousticSrp_Init(&s_srp_ctx, &config, APP_ACOUSTIC_BACKEND_F32_CMSIS);
+  AppAcousticTracker_Reset(); /* runtime re-init invalidates the track */
   if (status == APP_ACOUSTIC_IMAGING_OK)
   {
     s_active_mode = mode;
@@ -1148,6 +1152,36 @@ static void AppAcousticService_FillVisSnapshot(AppAcousticServiceSnapshot_t *sna
     snapshot->theta_deg = 0;
     snapshot->phi_deg = 0;
   }
+
+  /* Tracker: one update per SRP estimate. dt from DWT (the HAL tick is
+   * 100 Hz on this build, far too coarse for 15-30 Hz estimate spacing). */
+  {
+    static uint32_t s_track_last_cyc;
+    static uint8_t s_track_cyc_valid;
+    const uint32_t now_cyc = DWT->CYCCNT;
+    const uint32_t cyc_per_ms = (SystemCoreClock != 0U) ? (SystemCoreClock / 1000U) : 800000U;
+    uint32_t dt_ms = 40U;
+    AppAcousticTrackerState_t track;
+
+    if (s_track_cyc_valid != 0U)
+    {
+      dt_ms = (now_cyc - s_track_last_cyc) / cyc_per_ms;
+    }
+    s_track_last_cyc = now_cyc;
+    s_track_cyc_valid = 1U;
+
+    AppAcousticTracker_Update(((vis_frame->valid != 0U) && (candidate != NULL)) ? 1U : 0U,
+                              (candidate != NULL) ? candidate->theta_deg : 0.0f,
+                              (candidate != NULL) ? candidate->phi_deg : 0.0f,
+                              snapshot->quality_pct,
+                              dt_ms);
+    AppAcousticTracker_GetState(&track);
+    snapshot->track_theta_deg = AppAcousticService_RoundDeg(track.theta_deg);
+    snapshot->track_phi_deg = AppAcousticService_RoundDeg(track.phi_deg);
+    snapshot->track_conf_pct = (uint8_t)((AppAcousticService_Clamp01(track.confidence) * 100.0f) + 0.5f);
+    snapshot->track_display = ((track.display != 0U) && (track.seeded != 0U)) ? 1U : 0U;
+  }
+
   AppAcousticService_FillCameraField(snapshot, vis_frame);
 }
 

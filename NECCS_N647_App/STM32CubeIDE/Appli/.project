@@ -277,6 +277,11 @@
 			<locationURI>PARENT-2-PROJECT_LOC/Appli/Core/Src/app_audio_frame.c</locationURI>
 		</link>
 		<link>
+			<name>Application/User/Core/app_acoustic_tracker.c</name>
+			<type>1</type>
+			<locationURI>PARENT-2-PROJECT_LOC/Appli/Core/Src/app_acoustic_tracker.c</locationURI>
+		</link>
+		<link>
 			<name>Application/User/Core/app_beam_record.c</name>
 			<type>1</type>
 			<locationURI>PARENT-2-PROJECT_LOC/Appli/Core/Src/app_beam_record.c</locationURI>

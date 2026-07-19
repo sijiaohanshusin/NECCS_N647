@@ -653,79 +653,27 @@ void pollAcoustic(AppUiSnapshot& snapshot)
     snapshot.srpTotalCycles = acoustic.perf.total_cycles;
     memcpy(snapshot.perfLoad, acoustic.perf_load, sizeof(snapshot.perfLoad));
 
-    /* Angles/candidates freeze on the last *valid* detection and hold for
-     * ~2 s; without this the card and markers track SRP noise peaks while
-     * the room is quiet (random angles with fake 98% strengths).
-     *
-     * Jump debounce: single-frame outliers (reflections/sidelobes right at
-     * the quality gate) otherwise get amplified into a 2 s wrong readout by
-     * the hold. Small moves track immediately; a jump farther than ~20 deg
-     * replaces the display only when two consecutive SRP frames agree. */
-    static uint8_t sourceHoldTicks = 0U;
-    static uint32_t lastValidSeq = 0U;
-    static uint8_t jumpPending = 0U;
-    static int16_t pendTheta = 0;
-    static int16_t pendPhi = 0;
-    /* Mic health only. A -70 dBFS "audible" gate used to sit here as well,
-     * but audible headphone-level sources measure -72..-78 dBFS on this
-     * array (board 2026-07-12) - the gate silently discarded most genuine
-     * detections, so the display only refreshed in rare loud moments and
-     * the 2 s hold cycling read as "position updates every 2 seconds".
-     * Phantom-lock rejection is carried entirely by the SRP quality gate
-     * plus the two-frame angle agreement below (quiet-room noise peaks land
-     * at random angles frame to frame and never agree twice). */
+    /* Crosshair/card follow the TRACKER output (app_acoustic_tracker on the
+     * service thread: per-estimate Kalman + confidence hysteresis). The old
+     * Model-side gating (two-frame 20 deg agreement + 2 s freeze-hold at
+     * the 60 Hz UI tick) was designed for a ~7 fps estimator; measured
+     * against the 2026-07-19 15-25 fps pipeline it added 300-600 ms lock-in
+     * latency, dropped one-frame transients outright, and produced the
+     * "crosshair still at the previous spot / somewhere else" complaint.
+     * arrayAudible (mic-array health) stays as a hard mute. */
     const bool arrayAudible =
         ((snapshot.pcmdFlags & APP_UI_PCMD_FLAG_RAW_VALID) != 0U);
-    if (arrayAudible && (acoustic.valid != 0U) && (acoustic.output_seq != lastValidSeq))
+    const bool trackDisplay = arrayAudible && (acoustic.track_display != 0U);
+    if (trackDisplay)
     {
-        lastValidSeq = acoustic.output_seq;
+        snapshot.thetaDeg = acoustic.track_theta_deg;
+        snapshot.phiDeg = acoustic.track_phi_deg;
+        snapshot.sourceDisplayValid = 1U;
 
-        const int16_t dTheta = static_cast<int16_t>(acoustic.theta_deg - snapshot.thetaDeg);
-        const int16_t dPhi = static_cast<int16_t>(acoustic.phi_deg - snapshot.phiDeg);
-        const bool nearPrev = (dTheta >= -20) && (dTheta <= 20) &&
-                              (dPhi >= -20) && (dPhi <= 20);
-        bool accept = true;
-        if ((sourceHoldTicks != 0U) && !nearPrev)
+        if (acoustic.valid != 0U)
         {
-            /* Jump while locked: the second far frame must agree with the
-             * FIRST far frame (both near the new position), not merely be
-             * far again - two unrelated sidelobes must not move the lock. */
-            const int16_t dpTheta = static_cast<int16_t>(acoustic.theta_deg - pendTheta);
-            const int16_t dpPhi = static_cast<int16_t>(acoustic.phi_deg - pendPhi);
-            const bool nearPend = (dpTheta >= -20) && (dpTheta <= 20) &&
-                                  (dpPhi >= -20) && (dpPhi <= 20);
-
-            accept = ((jumpPending != 0U) && nearPend);
-            jumpPending = accept ? 0U : 1U;
-            pendTheta = acoustic.theta_deg;
-            pendPhi = acoustic.phi_deg;
-        }
-        else if (sourceHoldTicks == 0U)
-        {
-            /* Fresh lock: require two consecutive SRP frames agreeing
-             * within 20 deg. Noise peaks land at RANDOM angles frame to
-             * frame (they pass the prominence gate on the elevated 192k
-             * floor), so this suppresses phantom locks in both modes at
-             * the cost of one SRP frame (~50-100 ms) of latency. */
-            const int16_t dpTheta = static_cast<int16_t>(acoustic.theta_deg - pendTheta);
-            const int16_t dpPhi = static_cast<int16_t>(acoustic.phi_deg - pendPhi);
-            const bool nearPend = (dpTheta >= -20) && (dpTheta <= 20) &&
-                                  (dpPhi >= -20) && (dpPhi <= 20);
-
-            accept = ((jumpPending != 0U) && nearPend);
-            jumpPending = accept ? 0U : 1U;
-            pendTheta = acoustic.theta_deg;
-            pendPhi = acoustic.phi_deg;
-        }
-        else
-        {
-            jumpPending = 0U;
-        }
-
-        if (accept)
-        {
-            snapshot.thetaDeg = acoustic.theta_deg;
-            snapshot.phiDeg = acoustic.phi_deg;
+            /* Secondary candidates refresh on live frames; the primary
+             * marker is pinned to the smoothed track, not the raw peak. */
             snapshot.candCount = (acoustic.cand_count <= 3U) ? acoustic.cand_count : 3U;
             for (uint32_t i = 0U; i < 3U; ++i)
             {
@@ -734,24 +682,18 @@ void pollAcoustic(AppUiSnapshot& snapshot)
                 snapshot.candStrength[i] = (i < snapshot.candCount) ? acoustic.cand_strength[i] : 0U;
             }
         }
-        sourceHoldTicks = 120U; /* 2 s at the 60 Hz model tick */
-        snapshot.sourceDisplayValid = 1U;
-    }
-    else if (arrayAudible && (acoustic.valid != 0U))
-    {
-        /* Same SRP frame as last tick: keep displaying, no re-evaluation. */
-        snapshot.sourceDisplayValid = 1U;
-    }
-    else if (sourceHoldTicks != 0U)
-    {
-        --sourceHoldTicks;
-        snapshot.sourceDisplayValid = 1U; /* keep last detection on screen */
+        if (snapshot.candCount == 0U)
+        {
+            snapshot.candCount = 1U;
+            snapshot.candStrength[0] = 255U;
+        }
+        snapshot.candTheta[0] = acoustic.track_theta_deg;
+        snapshot.candPhi[0] = acoustic.track_phi_deg;
     }
     else
     {
         snapshot.candCount = 0U;
         snapshot.sourceDisplayValid = 0U;
-        jumpPending = 0U;
     }
     snapshot.heatPalette = AppCameraDisplay_GetHeatPalette();
     snapshot.acousticScene = acoustic.scene;
@@ -792,32 +734,11 @@ void pollAcoustic(AppUiSnapshot& snapshot)
     const bool acousticOverlayPreview =
         APP_UI_ACOUSTIC_OVERLAY_PREVIEW_ENABLE &&
         (acoustic.processed_frames == 0U);
-    /* Heat blob gate, SEPARATE from the marker lock: it opens on the FIRST
-     * valid frame (no two-frame agreement) and holds ~1.5 s past the last
-     * one. The old design keyed the blob to sourceDisplayValid and froze the
-     * field on valid frames only; with a marginal source (quality hovering
-     * right at the gate, board-measured q=2 vs gate 2) valid frames are
-     * sparse, so the blob appeared ~0.5 s late, refreshed only every 1-2 s,
-     * and strobed on/off at the 2 s hold boundary - the reported "flicker"
-     * and "slow heatmap". */
-    static uint8_t heatHoldTicks = 0U;
-    /* Hysteresis: q>=2 to OPEN (keeps lone ambient q=1 blips from lighting
-     * the screen; measured tone/demo sources run q=2..5), any valid frame
-     * REFRESHES an open gate. The refresh matters because overlay drawing
-     * costs CPU+HyperRAM bandwidth and slows SRP from ~7 to ~3-4 fps; with
-     * a strict q>=2 refresh the gate dropped out mid-tone (board-observed)
-     * and the blob strobed - the exact symptom this gate is meant to fix. */
-    const bool heatRefresh = arrayAudible && (acoustic.valid != 0U) &&
-                             ((heatHoldTicks != 0U) || (acoustic.quality_pct >= 2U));
-    if (heatRefresh)
-    {
-        heatHoldTicks = 90U; /* 1.5 s at the 60 Hz model tick */
-    }
-    else if (heatHoldTicks != 0U)
-    {
-        --heatHoldTicks;
-    }
-    const bool heatDisplayValid = (heatHoldTicks != 0U);
+    /* Heat blob gate: driven by the tracker's confidence hysteresis (on at
+     * 30%, off at 12%, ~0.5-0.9 s decay after the last evidence). Replaces
+     * the Model-side q>=2 open + 1.5 s tick-hold - single authority for
+     * "is there a source", same for blob and marker. */
+    const bool heatDisplayValid = trackDisplay;
     const bool acousticOverlayEnabled =
         (snapshot.activeScreen == APP_UI_SCREEN_IMAGE) &&
         (heatDisplayValid || acousticOverlayPreview);

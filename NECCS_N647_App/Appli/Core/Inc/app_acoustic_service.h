@@ -104,6 +104,13 @@ typedef struct
   int16_t cand_theta[APP_ACOUSTIC_SERVICE_CAND_MAX];
   int16_t cand_phi[APP_ACOUSTIC_SERVICE_CAND_MAX];
   uint8_t cand_strength[APP_ACOUSTIC_SERVICE_CAND_MAX];
+  /* Tracked source (app_acoustic_tracker, updated once per SRP estimate):
+   * the UI consumes THESE for the crosshair/card, not the raw per-frame
+   * theta_deg/phi_deg above. */
+  int16_t track_theta_deg;
+  int16_t track_phi_deg;
+  uint8_t track_conf_pct;
+  uint8_t track_display;
   uint8_t spectrum[APP_ACOUSTIC_SERVICE_SPECTRUM_BINS];
   uint8_t spectrum_peak_bin;
   uint8_t field[APP_ACOUSTIC_SERVICE_FIELD_COUNT];
