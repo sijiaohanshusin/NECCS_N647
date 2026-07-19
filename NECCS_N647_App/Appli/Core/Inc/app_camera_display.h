@@ -110,12 +110,15 @@ extern volatile uint32_t g_app_camera_dma2d_error_code;
 
 int32_t AppCameraDisplay_InitLayers(uint32_t initial_camera_addr);
 void AppCameraDisplay_SetVisible(uint8_t visible);
+/* fade_pct 0..100 scales the whole overlay alpha (tracker-confidence fade
+ * in/out); 100 = legacy behaviour. */
 void AppCameraDisplay_SetAcousticField(const uint8_t *field,
                                        uint32_t count,
                                        const AppCameraDisplayMarker_t *markers,
                                        uint8_t marker_count,
                                        uint8_t quality_pct,
-                                       uint8_t enabled);
+                                       uint8_t enabled,
+                                       uint8_t fade_pct);
 void AppCameraDisplay_SetHeatPalette(uint8_t palette);
 uint8_t AppCameraDisplay_GetHeatPalette(void);
 /* Fading dot trail of the primary source position. */

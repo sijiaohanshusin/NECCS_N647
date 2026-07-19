@@ -37,8 +37,13 @@
  * background subtraction (bg_gain, H7-style noise_adapt_gain): the display
  * floor is the field mean scaled by that gain, so a diffuse ambient field
  * stays dark and only sources standing out of the background light up. */
-#define APP_ACOUSTIC_SERVICE_FIELD_EMA_ATTACK   0.65f
-#define APP_ACOUSTIC_SERVICE_FIELD_EMA_DECAY    0.12f
+/* Field temporal smoothing defined in TIME CONSTANTS (rate-independent):
+ * per-frame alpha = 1 - exp(-dt/tau) ~= dt/(tau+dt). The old fixed alphas
+ * (0.65/0.12) were tuned at ~7 SRP fps; at the 2026-07-19 15-25 fps they
+ * made rise ~2x snappier but decay linger ~3x longer per second (the "blob
+ * sticks around / smears behind the source" complaint). */
+#define APP_ACOUSTIC_SERVICE_FIELD_ATTACK_TAU_S 0.06f
+#define APP_ACOUSTIC_SERVICE_FIELD_DECAY_TAU_S  0.35f
 /* (fine bumps removed 2026-07-12: the fine patches are resampled as real
  * measurements in FillCameraField, no synthetic gain/sigma needed) */
 /* Frequency resolution: Wide32 48000/256, Core16 192000/512. */
@@ -815,11 +820,40 @@ static void AppAcousticService_NormalizeField(AppAcousticServiceSnapshot_t *snap
   float bg_floor;
   float span_db = -s_field_active.db_floor;
   float inv_span_db = 1.0f / span_db;
+  float attack;
+  float decay;
+
+  /* Rate-normalised smoothing coefficients from the measured frame gap. */
+  {
+    static uint32_t s_field_last_cyc;
+    static uint8_t s_field_cyc_valid;
+    const uint32_t now_cyc = DWT->CYCCNT;
+    const uint32_t cyc_per_ms = (SystemCoreClock != 0U) ? (SystemCoreClock / 1000U) : 800000U;
+    float dt_s = 0.05f;
+
+    if (s_field_cyc_valid != 0U)
+    {
+      uint32_t dt_ms = (now_cyc - s_field_last_cyc) / cyc_per_ms;
+
+      if (dt_ms > 500U)
+      {
+        dt_ms = 500U;
+      }
+      if (dt_ms == 0U)
+      {
+        dt_ms = 1U;
+      }
+      dt_s = (float)dt_ms * 0.001f;
+    }
+    s_field_last_cyc = now_cyc;
+    s_field_cyc_valid = 1U;
+
+    attack = dt_s / (APP_ACOUSTIC_SERVICE_FIELD_ATTACK_TAU_S + dt_s);
+    decay = dt_s / (APP_ACOUSTIC_SERVICE_FIELD_DECAY_TAU_S + dt_s);
+  }
 
   for (uint32_t i = 0U; i < APP_ACOUSTIC_SERVICE_FIELD_COUNT; i++)
   {
-    const float attack = APP_ACOUSTIC_SERVICE_FIELD_EMA_ATTACK;
-    const float decay = APP_ACOUSTIC_SERVICE_FIELD_EMA_DECAY;
     const float value = s_field_work[i];
     const float accum = s_field_accum[i];
     const float alpha = (value > accum) ? attack : decay;
@@ -835,11 +869,11 @@ static void AppAcousticService_NormalizeField(AppAcousticServiceSnapshot_t *snap
 
   if (peak > s_field_peak_ema)
   {
-    s_field_peak_ema += APP_ACOUSTIC_SERVICE_FIELD_EMA_ATTACK * (peak - s_field_peak_ema);
+    s_field_peak_ema += attack * (peak - s_field_peak_ema);
   }
   else
   {
-    s_field_peak_ema += APP_ACOUSTIC_SERVICE_FIELD_EMA_DECAY * (peak - s_field_peak_ema);
+    s_field_peak_ema += decay * (peak - s_field_peak_ema);
   }
 
   if (s_field_peak_ema < 1.0e-12f)

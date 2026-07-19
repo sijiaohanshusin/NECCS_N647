@@ -51,6 +51,7 @@ typedef struct
 {
   uint8_t enabled;
   uint8_t quality_pct;
+  uint8_t fade_pct;
   uint8_t marker_count;
   uint8_t trail_enabled;
   uint8_t beam_style; /* APP_CAMERA_DISPLAY_BEAM_* */
@@ -735,8 +736,11 @@ static void AppCameraDisplay_DrawAcousticOverlay(uint32_t frame_addr)
 
   palette = s_heat_palette_lut[(s_heat_palette_index < 3U) ? s_heat_palette_index : 0U];
 
-  /* Alpha confidence scaling: quality 0..100 -> qscale 168..255. */
+  /* Alpha confidence scaling: quality 0..100 -> qscale 168..255, then the
+   * tracker-confidence fade (0..100) scales the whole overlay so the blob
+   * slides in/out instead of popping with the display gate. */
   qscale = 168U + (((uint32_t)overlay.quality_pct * 87U) / 100U);
+  qscale = (qscale * (uint32_t)overlay.fade_pct) / 100U;
 
   framebuffer = (uint16_t *)frame_addr;
   s_overlay_dirty_y0 = (int32_t)APP_CAMERA_DISPLAY_HEIGHT;
@@ -1240,7 +1244,8 @@ void AppCameraDisplay_SetAcousticField(const uint8_t *field,
                                        const AppCameraDisplayMarker_t *markers,
                                        uint8_t marker_count,
                                        uint8_t quality_pct,
-                                       uint8_t enabled)
+                                       uint8_t enabled,
+                                       uint8_t fade_pct)
 {
   uint32_t primask;
 
@@ -1250,6 +1255,7 @@ void AppCameraDisplay_SetAcousticField(const uint8_t *field,
   s_acoustic_overlay.enabled = ((enabled != 0U) && (field != 0) &&
                                 (count >= APP_CAMERA_DISPLAY_FIELD_COUNT)) ? 1U : 0U;
   s_acoustic_overlay.quality_pct = (quality_pct > 100U) ? 100U : quality_pct;
+  s_acoustic_overlay.fade_pct = (fade_pct > 100U) ? 100U : fade_pct;
 
   if (s_acoustic_overlay.enabled != 0U)
   {

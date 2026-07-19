@@ -266,6 +266,10 @@ typedef struct
     int16_t cand_theta[APP_ACOUSTIC_SERVICE_CAND_MAX];
     int16_t cand_phi[APP_ACOUSTIC_SERVICE_CAND_MAX];
     uint8_t cand_strength[APP_ACOUSTIC_SERVICE_CAND_MAX];
+    int16_t track_theta_deg;
+    int16_t track_phi_deg;
+    uint8_t track_conf_pct;
+    uint8_t track_display;
     uint8_t spectrum[APP_ACOUSTIC_SERVICE_SPECTRUM_BINS];
     uint8_t spectrum_peak_bin;
     uint8_t field[APP_ACOUSTIC_SERVICE_FIELD_COUNT];
@@ -356,7 +360,8 @@ static void AppCameraDisplay_SetAcousticField(const uint8_t* field,
                                               const AppCameraDisplayMarker_t* markers,
                                               uint8_t markerCount,
                                               uint8_t qualityPct,
-                                              uint8_t enabled)
+                                              uint8_t enabled,
+                                              uint8_t fadePct)
 {
     (void)field;
     (void)count;
@@ -364,6 +369,7 @@ static void AppCameraDisplay_SetAcousticField(const uint8_t* field,
     (void)markerCount;
     (void)qualityPct;
     (void)enabled;
+    (void)fadePct;
 }
 
 static void AppCameraDisplay_SetHeatPalette(uint8_t palette)
@@ -734,11 +740,20 @@ void pollAcoustic(AppUiSnapshot& snapshot)
     const bool acousticOverlayPreview =
         APP_UI_ACOUSTIC_OVERLAY_PREVIEW_ENABLE &&
         (acoustic.processed_frames == 0U);
-    /* Heat blob gate: driven by the tracker's confidence hysteresis (on at
-     * 30%, off at 12%, ~0.5-0.9 s decay after the last evidence). Replaces
-     * the Model-side q>=2 open + 1.5 s tick-hold - single authority for
-     * "is there a source", same for blob and marker. */
-    const bool heatDisplayValid = trackDisplay;
+    /* Heat blob gate: driven by the tracker confidence. The fade ramps the
+     * overlay alpha from 0 at 12% confidence (the tracker's OFF threshold,
+     * so ambient one-frame blips stay black) to full at 35%; the blob
+     * therefore slides in/out instead of popping with a binary gate. The
+     * single confidence authority replaces the old Model-side q>=2 open +
+     * 1.5 s tick-hold. */
+    uint8_t heatFade = 0U;
+    if (arrayAudible && (acoustic.track_conf_pct > 12U))
+    {
+        const uint32_t conf = acoustic.track_conf_pct;
+        const uint32_t fade = ((conf >= 35U) ? 100U : (((conf - 12U) * 100U) / 23U));
+        heatFade = (uint8_t)fade;
+    }
+    const bool heatDisplayValid = (heatFade != 0U);
     const bool acousticOverlayEnabled =
         (snapshot.activeScreen == APP_UI_SCREEN_IMAGE) &&
         (heatDisplayValid || acousticOverlayPreview);
@@ -800,7 +815,8 @@ void pollAcoustic(AppUiSnapshot& snapshot)
                                       markers,
                                       markerCount,
                                       heldQuality,
-                                      acousticOverlayEnabled ? 1U : 0U);
+                                      acousticOverlayEnabled ? 1U : 0U,
+                                      acousticOverlayPreview ? 100U : heatFade);
 }
 
 void pollPcmd(AppUiSnapshot& snapshot)
