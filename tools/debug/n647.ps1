@@ -22,14 +22,26 @@
 # - Tool paths are resolved by globbing the newest CubeIDE install.
 # - GDB reads use SYMBOL NAMES against the current ELF (addresses drift
 #   between builds; never hardcode them).
-# - H7 relay/BOOT1 controller is on the CH340 COM port (default COM3,
-#   921600 baud, commands: status|on|off|cycle|boot1 low|high|hiz|xipboot|devboot).
+# - H7 relay/BOOT1 controller is a CH340 (VID_1A86&PID_7523) COM port,
+#   921600 baud, text commands: status|on|off|cycle|boot1 low|high|hiz|
+#   xipboot|devboot. Port is auto-detected by USB PID (COM number drifts
+#   when the lab USB tree changes; was COM3, then COM8).
+# - USB 5V relay (in the VBUS wire of the N647's OTG1 Type-C link) is a
+#   CH341 (VID_1A86&PID_5523) COM port speaking the LCUS "A0" protocol at
+#   9600: ch1 ON = A0 01 01 A2, OFF = A0 01 00 A1, query = A0 01 05 A6
+#   (feedback variants 03/02). BOTH supplies must be cut for a true power
+#   cycle, so devboot/xipboot drop USB 5V first and leave it OFF (USB
+#   data does not need VBUS: the board has no VBUS sense and powers from
+#   the H7-switched rail; usb5v-on re-enables charging/back-feed on
+#   purpose).
+#   .\tools\debug\n647.ps1 usb5v-on|usb5v-off|usb5v-status
 
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true, Position = 0)]
     [ValidateSet("devboot", "xipboot", "build", "flash-debug", "flash-release",
-                 "status", "screenshot", "openocd", "relay-status", "uitour")]
+                 "status", "screenshot", "openocd", "relay-status", "uitour",
+                 "usb5v-on", "usb5v-off", "usb5v-status")]
     [string]$Action,
 
     [ValidateSet("Debug", "Release")]
@@ -37,7 +49,8 @@ param(
 
     [switch]$SkipBuild,
     [switch]$Freeze,
-    [string]$RelayPort = "COM3",
+    [string]$RelayPort = "",
+    [string]$Usb5vPort = "",
     [int]$OffMs = 3000
 )
 
@@ -64,9 +77,32 @@ $script:Gdb = Resolve-CubeIdeTool "com.st.stm32cube.ide.mcu.externaltools.gnu-to
 $script:DebugElf = Join-Path $RepoRoot "NECCS_N647_App\STM32CubeIDE\Appli\Debug\NECCS_N647_App_Appli.elf"
 
 # ---------------------------------------------------------------- helpers
+function Resolve-RelayComPort {
+    # H7 controller = CH340 (PID_7523), USB 5V relay = CH341 (PID_5523).
+    # COM numbers drift with the lab USB tree; match by PID instead.
+    param([string]$PidToken)
+    $dev = Get-PnpDevice -Class Ports -PresentOnly -ErrorAction SilentlyContinue |
+        Where-Object { $_.InstanceId -match "VID_1A86&$PidToken" } |
+        Select-Object -First 1
+    if ($dev -and ($dev.FriendlyName -match "\((COM\d+)\)")) { return $Matches[1] }
+    return $null
+}
+
+function Get-H7Port {
+    if ($RelayPort) { return $RelayPort }
+    $port = Resolve-RelayComPort "PID_7523"
+    if (-not $port) { throw "H7 relay controller (CH340, VID_1A86&PID_7523) not found" }
+    return $port
+}
+
+function Get-Usb5vPort {
+    if ($Usb5vPort) { return $Usb5vPort }
+    return Resolve-RelayComPort "PID_5523"   # absent = no USB relay wired, callers tolerate
+}
+
 function Send-RelayCommand {
     param([string]$Command, [int]$WaitSeconds = 12)
-    $port = New-Object System.IO.Ports.SerialPort($RelayPort, 921600, 'None', 8, 'One')
+    $port = New-Object System.IO.Ports.SerialPort((Get-H7Port), 921600, 'None', 8, 'One')
     $port.ReadTimeout = 1500; $port.WriteTimeout = 1500
     $port.DtrEnable = $false; $port.RtsEnable = $false
     $port.Open()
@@ -76,13 +112,58 @@ function Send-RelayCommand {
         $deadline = (Get-Date).AddSeconds($WaitSeconds)
         $resp = ""
         while ((Get-Date) -lt $deadline) {
-            while ($port.BytesToRead -gt 0) { $resp += $port.ReadExisting() }
+            # A power cycle can glitch the CH340's USB hub: the handle then
+            # throws "port closed" even though the command was already sent.
+            try {
+                while ($port.BytesToRead -gt 0) { $resp += $port.ReadExisting() }
+            } catch {
+                $resp += " (com-glitch: $($_.Exception.Message))"
+                break
+            }
             if ($resp -match "state=USB_ON") { break }
             Start-Sleep -Milliseconds 200
         }
         return ($resp -replace "`r`n", " | ")
     } finally {
+        if ($port.IsOpen) { $port.Close() }
+    }
+}
+
+# USB 5V relay (LCUS "A0" protocol). op: 0x00 off, 0x01 on (no reply),
+# 0x02 off + feedback, 0x03 on + feedback, 0x05 query. Returns reply hex.
+function Send-Usb5vOp {
+    param([byte]$Op)
+    $comName = Get-Usb5vPort
+    if (-not $comName) { return $null }
+    $port = New-Object System.IO.Ports.SerialPort($comName, 9600, 'None', 8, 'One')
+    $port.ReadTimeout = 1200; $port.WriteTimeout = 1200
+    $port.Open()
+    try {
+        $port.DiscardInBuffer()
+        $sum = [byte]((0xA0 + 0x01 + $Op) % 256)
+        $port.Write([byte[]](0xA0, 0x01, $Op, $sum), 0, 4)
+        Start-Sleep -Milliseconds 500
+        $n = $port.BytesToRead
+        if ($n -gt 0) {
+            $buf = New-Object byte[] $n
+            $port.Read($buf, 0, $n) | Out-Null
+            return (($buf | ForEach-Object { $_.ToString('X2') }) -join ' ')
+        }
+        return "(no reply)"
+    } finally {
         $port.Close()
+    }
+}
+
+# Cut USB-supplied 5V ahead of an H7 power cycle (both rails must drop for
+# the BootROM strap latch to reset). Leaves it OFF: USB data needs no VBUS
+# on this board, and back-feed would defeat every future power cycle.
+function Disable-Usb5vForPowerCycle {
+    $reply = Send-Usb5vOp 0x02
+    if ($null -eq $reply) {
+        Write-Host "usb5v: relay not present, assuming no USB back-feed"
+    } else {
+        Write-Host "usb5v: cut (reply $reply)"
     }
 }
 
@@ -140,14 +221,35 @@ switch ($Action) {
 
     "devboot" {
         Get-Process -Name openocd -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+        Disable-Usb5vForPowerCycle
         Write-Host (Send-RelayCommand "devboot $OffMs")
         Write-Host "board rebooted into DEBUG boot mode (BOOT1=1, BootROM waits, SWD available)"
     }
 
     "xipboot" {
         Get-Process -Name openocd -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+        Disable-Usb5vForPowerCycle
         Write-Host (Send-RelayCommand "xipboot $OffMs")
         Write-Host "board cold-booted into RELEASE (XIP) mode from external flash"
+    }
+
+    "usb5v-on" {
+        $reply = Send-Usb5vOp 0x03
+        if ($null -eq $reply) { throw "USB 5V relay (CH341, VID_1A86&PID_5523) not found" }
+        Write-Host "usb5v ON (reply $reply) - NOTE: H7 power cycles no longer reset the board until usb5v-off"
+    }
+
+    "usb5v-off" {
+        $reply = Send-Usb5vOp 0x02
+        if ($null -eq $reply) { throw "USB 5V relay (CH341, VID_1A86&PID_5523) not found" }
+        Write-Host "usb5v OFF (reply $reply)"
+    }
+
+    "usb5v-status" {
+        $reply = Send-Usb5vOp 0x05
+        if ($null -eq $reply) { throw "USB 5V relay (CH341, VID_1A86&PID_5523) not found" }
+        # A0 01 01 A2 = energized (5V passing), A0 01 00 A1 = released (cut)
+        Write-Host "usb5v relay query reply: $reply  (01=on/passing, 00=off/cut)"
     }
 
     "openocd" {
@@ -159,6 +261,7 @@ switch ($Action) {
     }
 
     "flash-debug" {
+        Disable-Usb5vForPowerCycle
         Write-Host (Send-RelayCommand "devboot $OffMs")
         if (-not $SkipBuild) { Invoke-Build }
         Start-OpenOcdServer
@@ -178,6 +281,7 @@ printf "tag=RUNNING\n"
     }
 
     "flash-release" {
+        Disable-Usb5vForPowerCycle
         Write-Host (Send-RelayCommand "devboot $OffMs")
         Get-Process -Name openocd -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
         if ($SkipBuild) {

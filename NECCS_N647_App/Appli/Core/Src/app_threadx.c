@@ -29,6 +29,7 @@
 #include "app_i2c2_bus.h"
 #include "app_media.h"
 #include "app_pcmd_capture.h"
+#include "app_usb_device.h"
 
 /* USER CODE END Includes */
 
@@ -232,6 +233,12 @@ UINT App_ThreadX_Init(VOID *memory_ptr)
     {
       App_BringUpStatus_Skip(APP_BRINGUP_MODULE_MEDIA, 0);
     }
+  }
+  if (ret == TX_SUCCESS)
+  {
+    /* USB MSC service: waits for the SD capacity, then raises the D+
+     * pullup. Depends on media only through AppMedia_UsbBlockCount. */
+    ret = AppUsbDevice_Init();
   }
   /* USER CODE END App_ThreadX_Init */
 

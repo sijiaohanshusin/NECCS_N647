@@ -51,6 +51,7 @@ public:
     void cycleHeatPalette();
     void setBandHz(uint16_t loHz, uint16_t hiHz);
     void toggleBandMode();
+    void toggleUsbStorage();
     void adjustFieldParam(uint8_t param, int8_t dir);
     void toggleTrigger();
     void toggleTrail();

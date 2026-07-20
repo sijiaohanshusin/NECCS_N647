@@ -133,6 +133,11 @@ static AppMediaThumbInfo_t s_thumb_info;
 static AppMediaStatus_t s_status;
 static JPEG_HandleTypeDef s_jpeg_handle;
 static uint32_t s_media_mounted = 0U;
+/* USB mass-storage handover: requested is written from UI/USB threads,
+ * active is media-thread-owned and only flips after the FileX volume is
+ * really closed (enter) / remounted (exit). */
+static volatile uint8_t s_usb_mode_requested = 0U;
+static volatile uint8_t s_usb_mode_active = 0U;
 static uint32_t s_jpeg_ready = 0U;
 static uint32_t s_recording = 0U;
 static uint32_t s_playing = 0U;
@@ -2949,6 +2954,16 @@ static void process_command(AppMediaCommand_t command, uint32_t arg)
 {
   status_set_busy(1U);
 
+  /* USB mode: the PC owns the disk; every filesystem-touching command is
+   * refused (the UI shows the USB banner instead). Exiting USB mode is
+   * the only way back. */
+  if (s_usb_mode_active != 0U)
+  {
+    status_set_error(APP_MEDIA_ERROR_USB_MODE);
+    status_set_busy(0U);
+    return;
+  }
+
   if (s_media_mounted == 0U)
   {
     if (mount_or_format_media() != FX_SUCCESS)
@@ -3027,6 +3042,10 @@ static void process_command(AppMediaCommand_t command, uint32_t arg)
  * it on the media thread. Safer than GDB function calls on a live RTOS. */
 volatile uint32_t g_app_media_test_request = 0U;
 
+/* GDB USB-mode hook: 1 = enter USB mass-storage mode, 2 = exit. Remote
+ * acceptance testing without touching the panel. */
+volatile uint32_t g_app_media_usb_request = 0U;
+
 /* GDB file-pull channel: the board has no removable card, so files are
  * hauled off over SWD. Write pull_offset, then pull_request = audio clip
  * index; the media thread reads one chunk into g_app_media_pull_buffer and
@@ -3076,6 +3095,53 @@ static void process_pull_request(void)
 }
 #endif
 
+/* USB mass-storage handover, media-thread context only. Enter: quiesce
+ * every producer, flush + close the FileX volume, then flag the LUN
+ * ready. Exit: remount (mount_or_format_media re-reads the boot sector,
+ * so a PC-side reformat is picked up too) and rescan the library. */
+static void process_usb_mode_transition(void)
+{
+  const uint8_t want = s_usb_mode_requested;
+
+  if (want == s_usb_mode_active)
+  {
+    return;
+  }
+
+  status_set_busy(1U);
+  if (want != 0U)
+  {
+    set_playing(0U);
+    (void)stop_recording();
+    (void)stop_beam_recording();
+    if (s_media_mounted != 0U)
+    {
+      (void)fx_media_flush(&s_media);
+      (void)fx_media_close(&s_media);
+      s_media_mounted = 0U;
+    }
+    status_lock();
+    s_status.flags &= ~APP_MEDIA_FLAG_FS_MOUNTED;
+    s_status.flags |= APP_MEDIA_FLAG_USB_MODE;
+    status_unlock();
+    s_usb_mode_active = 1U;
+  }
+  else
+  {
+    s_usb_mode_active = 0U;
+    status_lock();
+    s_status.flags &= ~APP_MEDIA_FLAG_USB_MODE;
+    status_unlock();
+    if (mount_or_format_media() == FX_SUCCESS)
+    {
+      scan_media_files();
+      update_space_status();
+      status_set_error(APP_MEDIA_ERROR_NONE);
+    }
+  }
+  status_set_busy(0U);
+}
+
 static void AppMedia_ThreadEntry(ULONG thread_input)
 {
   ULONG message = 0U;
@@ -3093,7 +3159,17 @@ static void AppMedia_ThreadEntry(ULONG thread_input)
                       (uint32_t)(message >> APP_MEDIA_CMD_ARG_SHIFT));
     }
 
+    process_usb_mode_transition();
+
 #ifdef DEBUG
+    if (g_app_media_usb_request != 0U)
+    {
+      const uint32_t usb_request = g_app_media_usb_request;
+
+      g_app_media_usb_request = 0U;
+      AppMedia_RequestUsbMode((usb_request == 1U) ? 1U : 0U);
+      process_usb_mode_transition();
+    }
     if (g_app_media_test_request != 0U)
     {
       const uint32_t test_message = g_app_media_test_request;
@@ -3102,12 +3178,18 @@ static void AppMedia_ThreadEntry(ULONG thread_input)
       process_command((AppMediaCommand_t)(test_message & 0xFFU),
                       test_message >> APP_MEDIA_CMD_ARG_SHIFT);
     }
-    process_pull_request();
+    if (s_usb_mode_active == 0U)
+    {
+      process_pull_request();
+    }
 #endif
 
-    process_record_tick();
-    process_play_tick();
-    process_beam_tick();
+    if (s_usb_mode_active == 0U)
+    {
+      process_record_tick();
+      process_play_tick();
+      process_beam_tick();
+    }
   }
 }
 
@@ -3364,4 +3446,24 @@ const uint16_t *AppMedia_GetPreviewBuffer(AppMediaPreviewInfo_t *info)
   }
 
   return s_preview_buffer;
+}
+
+void AppMedia_RequestUsbMode(uint8_t enable)
+{
+  s_usb_mode_requested = (enable != 0U) ? 1U : 0U;
+}
+
+uint8_t AppMedia_UsbModeActive(void)
+{
+  return s_usb_mode_active;
+}
+
+uint8_t AppMedia_UsbModeRequested(void)
+{
+  return s_usb_mode_requested;
+}
+
+uint32_t AppMedia_UsbBlockCount(void)
+{
+  return app_media_visible_blocks();
 }

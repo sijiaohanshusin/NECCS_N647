@@ -127,6 +127,11 @@ void TemplatePresenter::toggleBandMode()
     model->toggleBandMode();
 }
 
+void TemplatePresenter::toggleUsbStorage()
+{
+    model->toggleUsbStorage();
+}
+
 void TemplatePresenter::adjustFieldParam(uint8_t param, int8_t dir)
 {
     model->adjustFieldParam(param, dir);

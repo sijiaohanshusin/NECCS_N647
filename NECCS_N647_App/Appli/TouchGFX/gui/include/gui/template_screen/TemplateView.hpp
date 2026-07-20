@@ -204,6 +204,10 @@ private:
     AppRoundedPanel sysPowerBtn;
     AppTextLabel sysPowerLabel;
     touchgfx::TouchArea sysPowerTouch;
+    /* USB mass-storage handover (SD -> PC while active) */
+    AppRoundedPanel sysUsbBtn;
+    AppTextLabel sysUsbLabel;
+    touchgfx::TouchArea sysUsbTouch;
 
     /* ---- params page ---- */
     AppTextLabel paramsTitle;

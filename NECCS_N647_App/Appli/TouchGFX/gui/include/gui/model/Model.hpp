@@ -75,7 +75,9 @@ enum AppUiMediaFlag
     APP_UI_MEDIA_FLAG_RECORDING = 0x00000010UL,
     APP_UI_MEDIA_FLAG_BUSY = 0x00000020UL,
     APP_UI_MEDIA_FLAG_PREVIEW_VALID = 0x00000040UL,
-    APP_UI_MEDIA_FLAG_PLAYING = 0x00000080UL
+    APP_UI_MEDIA_FLAG_PLAYING = 0x00000080UL,
+    /* SD handed to the USB host (MSC); media commands are refused. */
+    APP_UI_MEDIA_FLAG_USB_MODE = 0x00000200UL
 };
 
 enum AppUiPcmdFlag
@@ -322,6 +324,8 @@ public:
     void adjustTemperature(int8_t deltaC);
     void setBandHz(uint16_t loHz, uint16_t hiHz);
     void toggleBandMode();
+    /* USB mass-storage handover (system page). */
+    void toggleUsbStorage();
     /* param: 0=db_floor 1=gamma 2=noise_gate 3=smooth_passes; dir: -1/+1 */
     void adjustFieldParam(uint8_t param, int8_t dir);
     void toggleTrigger();

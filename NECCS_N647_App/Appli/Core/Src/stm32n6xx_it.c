@@ -79,6 +79,7 @@ extern DMA_HandleTypeDef handle_GPDMA1_Channel0;
 extern DMA_HandleTypeDef handle_GPDMA1_Channel1;
 extern SAI_HandleTypeDef hsai_BlockA1;
 extern SAI_HandleTypeDef hsai_BlockB1;
+extern PCD_HandleTypeDef g_hpcd_usb1_otg_hs;
 
 /* USER CODE END EV */
 
@@ -383,5 +384,17 @@ void USART1_IRQHandler(void)
 }
 
 /* USER CODE BEGIN 1 */
+
+volatile uint32_t g_app_usb_irq_count = 0U;
+
+/**
+  * @brief This function handles USB1 OTG HS global interrupt.
+  */
+void USB1_OTG_HS_IRQHandler(void)
+{
+  g_app_boot_diag.last_irqn = (uint32_t)USB1_OTG_HS_IRQn;
+  g_app_usb_irq_count++;
+  HAL_PCD_IRQHandler(&g_hpcd_usb1_otg_hs);
+}
 
 /* USER CODE END 1 */

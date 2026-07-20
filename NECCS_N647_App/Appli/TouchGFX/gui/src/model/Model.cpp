@@ -155,6 +155,18 @@ static const uint16_t* AppMedia_GetPreviewBuffer(AppMediaPreviewInfo_t* info)
     return 0;
 }
 
+static uint8_t s_sim_usb_mode = 0U;
+
+static void AppMedia_RequestUsbMode(uint8_t enable)
+{
+    s_sim_usb_mode = enable;
+}
+
+static uint8_t AppMedia_UsbModeRequested()
+{
+    return s_sim_usb_mode;
+}
+
 typedef struct
 {
     uint32_t generation;
@@ -1433,6 +1445,13 @@ void Model::toggleBandMode()
     {
         modelListener->uiSnapshotUpdated(snapshot);
     }
+}
+
+void Model::toggleUsbStorage()
+{
+    /* Toggle against the REQUESTED state so rapid taps behave; the flag in
+     * the snapshot follows once the media thread completes the handover. */
+    AppMedia_RequestUsbMode((AppMedia_UsbModeRequested() != 0U) ? 0U : 1U);
 }
 
 void Model::adjustFieldParam(uint8_t param, int8_t dir)

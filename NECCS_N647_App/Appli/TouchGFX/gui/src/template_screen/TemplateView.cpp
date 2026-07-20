@@ -754,26 +754,37 @@ void TemplateView::setupSystemPage()
                ColorBlueDim, AppTextLabel::ALIGN_CENTER);
     add(sysAccelLabel);
 
-    /* Power controls at the bottom of the perf card. */
-    sysRebootBtn.setPosition(ContentX + 48, 496, 200, 38);
+    /* Power + USB controls at the bottom of the perf card. */
+    sysRebootBtn.setPosition(ContentX + 48, 496, 148, 38);
     sysRebootBtn.setStyle(ColorPanel2, 10U);
     sysRebootBtn.setBorder(ColorLine, true);
     add(sysRebootBtn);
-    setupLabel(sysRebootLabel, ContentX + 48, 504, 200, 22, 1, "重启", ColorText, AppTextLabel::ALIGN_CENTER);
+    setupLabel(sysRebootLabel, ContentX + 48, 504, 148, 22, 1, "重启", ColorText, AppTextLabel::ALIGN_CENTER);
     add(sysRebootLabel);
-    sysRebootTouch.setPosition(ContentX + 48, 496, 200, 38);
+    sysRebootTouch.setPosition(ContentX + 48, 496, 148, 38);
     sysRebootTouch.setAction(systemPressedCallback);
     add(sysRebootTouch);
 
-    sysPowerBtn.setPosition(ContentX + 272, 496, 200, 38);
+    sysPowerBtn.setPosition(ContentX + 212, 496, 148, 38);
     sysPowerBtn.setStyle(ColorPanel2, 10U);
     sysPowerBtn.setBorder(ColorRedDim, true);
     add(sysPowerBtn);
-    setupLabel(sysPowerLabel, ContentX + 272, 504, 200, 22, 1, "关机", ColorText, AppTextLabel::ALIGN_CENTER);
+    setupLabel(sysPowerLabel, ContentX + 212, 504, 148, 22, 1, "关机", ColorText, AppTextLabel::ALIGN_CENTER);
     add(sysPowerLabel);
-    sysPowerTouch.setPosition(ContentX + 272, 496, 200, 38);
+    sysPowerTouch.setPosition(ContentX + 212, 496, 148, 38);
     sysPowerTouch.setAction(systemPressedCallback);
     add(sysPowerTouch);
+
+    /* USB mass-storage handover: SD is lent to the PC while active. */
+    sysUsbBtn.setPosition(ContentX + 376, 496, 148, 38);
+    sysUsbBtn.setStyle(ColorPanel2, 10U);
+    sysUsbBtn.setBorder(ColorBlueDim, true);
+    add(sysUsbBtn);
+    setupLabel(sysUsbLabel, ContentX + 376, 504, 148, 22, 1, "USB 存储", ColorBlue, AppTextLabel::ALIGN_CENTER);
+    add(sysUsbLabel);
+    sysUsbTouch.setPosition(ContentX + 376, 496, 148, 38);
+    sysUsbTouch.setAction(systemPressedCallback);
+    add(sysUsbTouch);
 }
 
 void TemplateView::setupParamsPage()
@@ -1457,6 +1468,9 @@ void TemplateView::refreshVisibility()
     sysPowerBtn.setVisible(sysVisible);
     sysPowerLabel.setVisible(sysVisible);
     sysPowerTouch.setVisible(sysVisible);
+    sysUsbBtn.setVisible(sysVisible);
+    sysUsbLabel.setVisible(sysVisible);
+    sysUsbTouch.setVisible(sysVisible);
 
     /* params */
     paramsTitle.setVisible(paramsVisible);
@@ -2216,6 +2230,14 @@ void TemplateView::refreshSystemPage(const AppUiSnapshot& snapshot)
                        (snapshot.npuInferences >= 1000U) ? text : "NPU 运行中");
         sysAccelLabel.setText(line);
     }
+
+    /* USB mass-storage state: amber while the PC owns the SD. */
+    {
+        const bool usbMode = (snapshot.mediaFlags & APP_UI_MEDIA_FLAG_USB_MODE) != 0U;
+        sysUsbLabel.setText(usbMode ? "退出 USB" : "USB 存储");
+        sysUsbLabel.setColors(usbMode ? ColorAmber : ColorBlue, ColorBg, false);
+        sysUsbBtn.setBorder(usbMode ? ColorAmber : ColorBlueDim, true);
+    }
 }
 
 void TemplateView::refreshParamsPage(const AppUiSnapshot& snapshot)
@@ -2447,6 +2469,10 @@ void TemplateView::onSystemPressed(const touchgfx::AbstractButton& source)
     if (&source == &sysRebootTouch)
     {
         presenter->rebootSystem();
+    }
+    else if (&source == &sysUsbTouch)
+    {
+        presenter->toggleUsbStorage();
     }
     else if (&source == &sysPowerTouch)
     {

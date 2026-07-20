@@ -35,7 +35,8 @@ extern "C" {
 #define APP_MEDIA_FLAG_PREVIEW_VALID   0x00000040UL
 #define APP_MEDIA_FLAG_PLAYING         0x00000080UL
 #define APP_MEDIA_FLAG_BEAM_RECORDING  0x00000100UL
-#define APP_MEDIA_FLAG_BEAM_RECORDING  0x00000100UL
+/* SD handed over to the USB MSC bridge (FileX closed, PC owns the disk). */
+#define APP_MEDIA_FLAG_USB_MODE        0x00000200UL
 
 typedef enum
 {
@@ -58,7 +59,9 @@ typedef enum
   APP_MEDIA_ERROR_NO_SELECTION = 16,
   APP_MEDIA_ERROR_NO_SPACE = 17,
   APP_MEDIA_ERROR_UNSUPPORTED_FORMAT = 18,
-  APP_MEDIA_ERROR_INVALID_MEDIA = 19
+  APP_MEDIA_ERROR_INVALID_MEDIA = 19,
+  /* Command refused: the SD belongs to the USB host right now. */
+  APP_MEDIA_ERROR_USB_MODE = 20
 } AppMediaError_t;
 
 typedef enum
@@ -150,6 +153,18 @@ void AppMedia_GetStatus(AppMediaStatus_t *status);
 const uint16_t *AppMedia_GetPreviewBuffer(AppMediaPreviewInfo_t *info);
 /* Slot pixel buffer (THUMB_W x THUMB_H RGB565); info optionally filled. */
 const uint16_t *AppMedia_GetThumbBuffer(uint32_t slot, AppMediaThumbInfo_t *info);
+
+/* ---- USB mass-storage handover ----
+ * enable=1: media thread stops recording/playback, closes the FileX
+ * volume and flags the SD as PC-owned (MSC reports media present).
+ * enable=0: remounts and rescans. The transition is asynchronous; poll
+ * AppMedia_UsbModeActive() (it flips only after the handover completed). */
+void AppMedia_RequestUsbMode(uint8_t enable);
+uint8_t AppMedia_UsbModeActive(void);
+uint8_t AppMedia_UsbModeRequested(void);
+/* Raw device capacity for the MSC LUN (0 until the SD came up). Matches
+ * the FileX view: logical sector n == physical LBA n, boot sector at 0. */
+uint32_t AppMedia_UsbBlockCount(void);
 
 #ifdef __cplusplus
 }
