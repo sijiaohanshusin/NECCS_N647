@@ -823,8 +823,9 @@ void TemplateView::setupParamsPage()
         add(paramRowName[i]);
         add(paramRowValue[i]);
 
-        /* Scene, palette and trail rows toggle on tap anywhere in the row. */
-        if ((i == 0U) || (i == 3U) || (i == 4U))
+        /* Scene, band-mode, palette and trail rows toggle on tap anywhere
+         * in the row. */
+        if ((i == 0U) || (i == 1U) || (i == 3U) || (i == 4U))
         {
             paramRowTouch[i].setPosition(leftX, y, colW, 60);
             paramRowTouch[i].setAction(paramsPressedCallback);
@@ -1471,7 +1472,7 @@ void TemplateView::refreshVisibility()
         paramRowPanel[i].setVisible(paramsVisible);
         paramRowName[i].setVisible(paramsVisible);
         paramRowValue[i].setVisible(paramsVisible);
-        paramRowTouch[i].setVisible(paramsVisible && ((i == 0U) || (i == 3U)));
+        paramRowTouch[i].setVisible(paramsVisible && ((i == 0U) || (i == 1U) || (i == 3U)));
     }
     for (uint32_t i = 0U; i < 2U; ++i)
     {
@@ -1794,9 +1795,14 @@ void TemplateView::refreshImagePage(const AppUiSnapshot& snapshot)
                           snapshot.acousticBandLoHz,
                           snapshot.acousticBandHiHz,
                           snapshot.spectrumPeakBin);
-    (void)snprintf(text, sizeof(text), "频带 %u-%u Hz",
+    (void)snprintf(text, sizeof(text), "%s %u-%u Hz",
+                   (snapshot.acousticBandMode != 0U)
+                       ? "手动"
+                       : ((snapshot.acousticBandAutoActive != 0U) ? "自动·追踪" : "自动"),
                    snapshot.acousticBandLoHz,
                    snapshot.acousticBandHiHz);
+    spectrumBandLabel.setColors((snapshot.acousticBandMode != 0U) ? ColorAmber : ColorMuted,
+                                ColorBg, false);
     spectrumBandLabel.setText(text);
 
     /* AI signature card */
@@ -2227,9 +2233,15 @@ void TemplateView::refreshParamsPage(const AppUiSnapshot& snapshot)
 
     paramRowValue[0].setText(sceneName(snapshot.acousticScene));
 
-    (void)snprintf(text, sizeof(text), "%u - %u Hz",
+    /* Band row: mode prefix + live band; tap toggles auto/manual. */
+    (void)snprintf(text, sizeof(text), "%s %u-%u Hz",
+                   (snapshot.acousticBandMode != 0U)
+                       ? "手动"
+                       : ((snapshot.acousticBandAutoActive != 0U) ? "自动·追踪" : "自动"),
                    snapshot.acousticBandLoHz,
                    snapshot.acousticBandHiHz);
+    paramRowValue[1].setColors((snapshot.acousticBandMode != 0U) ? ColorAmber : ColorBlue,
+                               ColorBg, false);
     paramRowValue[1].setText(text);
 
     (void)snprintf(text, sizeof(text), "%d℃ / %u.%u m/s",
@@ -2533,6 +2545,10 @@ void TemplateView::onParamsPressed(const touchgfx::AbstractButton& source)
     else if (&source == &paramRowTouch[0])
     {
         presenter->cycleScene();
+    }
+    else if (&source == &paramRowTouch[1])
+    {
+        presenter->toggleBandMode();
     }
     else if (&source == &paramRowTouch[3])
     {

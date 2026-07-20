@@ -52,6 +52,63 @@
 #define APP_ACOUSTIC_SERVICE_TEMP_MIN_C         (-20)
 #define APP_ACOUSTIC_SERVICE_TEMP_MAX_C         60
 
+/* ---- AUTO band tracker (Fluke-style "let the tool pick the band") ----
+ * Wide32 only: the SRP FFT always yields the full 0..24 kHz half-spectrum,
+ * but the analysis band is a narrow window of it. In AUTO mode the service
+ * watches the wideband reference spectrum for a PERSISTENT energy
+ * concentration and re-anchors the analysis band onto it (the gas-leak
+ * demo: scene band ends at 7.9/12 kHz while the hiss peaks at 13.8 kHz -
+ * no in-band fix can see it). MANUAL freezes the band where the user
+ * dragged it.
+ *   hot bin: smoothed mag >= HOT_RATIO x its noise floor AND >= ABS_MIN x
+ *   the loudest bin (junk guard, same rationale as the SRP gate).
+ *   floor: asymmetric EMA, capped at CAP x cross-bin median so a
+ *   continuous hiss can never absorb its own floor (median sits at the
+ *   room level of the many cold bins).
+ *   apply: >= MIN_HOT hot bins, candidate stable (edges within
+ *   STABLE_TOL bins, edges EMA-blended while stable) for STREAK_APPLY
+ *   consecutive frames, AND the current band covers < COVER_KEEP of the
+ *   hot energy. Window = hot span + margin, clamped to the profile's
+ *   pair*bin budget; at most one move per MOVE_MIN_MS.
+ *   revert: no candidate for REVERT_FRAMES -> back to the scene preset.
+ *   ABS_ENGAGE anchors everything to an absolute level: ratios vs the
+ *   noise floor are meaningless at near-zero magnitudes (board
+ *   2026-07-20: after the source stopped, room noise at bins 3..14 with
+ *   |X|~0.003 read 2x its own drained floor and began accumulating a
+ *   bogus candidate; leak hiss bins measure 0.02..0.09).
+ *   BIN_MAX 42, NOT the display range's 96: bands above ~8 kHz are
+ *   grating-lobe territory for the 94 mm aperture - board 2026-07-20,
+ *   auto window 9.7-16.7 kHz: estimates clustered TIGHTLY at a lobe tens
+ *   of degrees off (long AND short baseline pair sets both failed).
+ *   Wide32 physically cannot aim there; >8 kHz inspection is what the
+ *   Core16/192k ultrasonic mode exists for. The tracker therefore only
+ *   repositions inside the alias-safe range; the SNR gate (SRP side)
+ *   handles in-band concentration, and a leak's 5-8 kHz tail is the
+ *   aimable part of its signature (verified locking on the demo). The
+ *   user can still MANUALLY drag beyond 42 (explicit choice, Fluke
+ *   semantics). */
+#define APP_ACOUSTIC_AUTOBAND_BIN_MIN         3U
+#define APP_ACOUSTIC_AUTOBAND_BIN_MAX         42U
+#define APP_ACOUSTIC_AUTOBAND_MAG_ALPHA       0.35f
+#define APP_ACOUSTIC_AUTOBAND_FLOOR_UP        0.01f
+#define APP_ACOUSTIC_AUTOBAND_FLOOR_DOWN      0.2f
+#define APP_ACOUSTIC_AUTOBAND_FLOOR_CAP       3.0f
+#define APP_ACOUSTIC_AUTOBAND_HOT_RATIO       2.0f
+#define APP_ACOUSTIC_AUTOBAND_ABS_MIN         0.02f
+#define APP_ACOUSTIC_AUTOBAND_ABS_ENGAGE      0.008f
+#define APP_ACOUSTIC_AUTOBAND_MIN_HOT         3U
+/* 12 frames (~0.6-0.8 s) with +/-10-bin edge tolerance: the demo leak
+ * audio alternates three hiss textures whose hot span shifts by several
+ * bins; the original 24-frame/+/-6-bin rule never accumulated (board
+ * 2026-07-20: streak reset at 2..9 all through 22 s of hiss). */
+#define APP_ACOUSTIC_AUTOBAND_STREAK_APPLY    12U
+#define APP_ACOUSTIC_AUTOBAND_STABLE_TOL      10U
+#define APP_ACOUSTIC_AUTOBAND_COVER_KEEP      0.6f
+#define APP_ACOUSTIC_AUTOBAND_MARGIN_BINS     3U
+#define APP_ACOUSTIC_AUTOBAND_MIN_WIDTH       16U
+#define APP_ACOUSTIC_AUTOBAND_REVERT_FRAMES   90U
+#define APP_ACOUSTIC_AUTOBAND_MOVE_MIN_MS     2500U
+
 static AppAcousticSrpContext_t s_srp_ctx __attribute__((aligned(32)));
 /* Cold CPU-only structures stay in cached external RAM; the per-frame HOT
  * buffers moved to internal SRAM 2026-07-19: every SRP frame used to stream
@@ -123,8 +180,9 @@ static float AppAcousticService_BinHz(void)
 }
 
 /* Scene / temperature / field-parameter runtime state. Scene band presets
- * are clamped to the Wide32/48k observable range (bins 3..42). bin_lo==0
- * means "keep the profile's default bin policy" (the verified baseline). */
+ * use Wide32/48k bin semantics (187.5 Hz/bin, ceiling nfft/2=128).
+ * bin_lo==0 means "keep the profile's default bin policy" (the verified
+ * baseline). */
 typedef struct
 {
   uint16_t bin_lo;
@@ -141,8 +199,12 @@ static const AppAcousticScenePreset_t s_scene_presets[APP_ACOUSTIC_SCENE_COUNT] 
 {
   /* GENERAL: policy-default bins, balanced rendering (verified baseline). */
   { 0U, 0U,   { -18.0f, 1.30f, 0.10f, 1.08f, 2U } },
-  /* LEAK: high band, crisp and responsive. */
-  { 27U, 42U, { -12.0f, 1.25f, 0.06f, 1.05f, 1U } },
+  /* LEAK: high band, crisp and responsive. 27..64 = 5.1-12 kHz: real leak
+   * hiss (and the demo videos) put most in-band energy ABOVE the old 42
+   * (7.9 kHz) ceiling - measured 8-12 kHz carries ~4x the 5-8 kHz energy.
+   * Long baselines alias there (FrequencyPairWeight caps them at 0.35);
+   * the wideband PHAT average across 38 bins keeps the true peak on top. */
+  { 27U, 64U, { -12.0f, 1.25f, 0.06f, 1.05f, 1U } },
   /* BEARING: mid band, extra smoothing for steady hot-spots. */
   { 11U, 32U, { -18.0f, 1.15f, 0.10f, 1.10f, 3U } },
   /* ELECTRICAL: upper band, high contrast. */
@@ -159,6 +221,20 @@ static volatile uint16_t s_requested_band_lo_bin;
 static volatile uint16_t s_requested_band_hi_bin;
 static uint16_t s_active_band_lo_bin;
 static uint16_t s_active_band_hi_bin;
+/* Band selection mode + AUTO tracker state (Wide32 only; see the
+ * APP_ACOUSTIC_AUTOBAND_* block). The auto band lives in its own pair of
+ * requested bins so a scene change or mode toggle can drop it cleanly. */
+static volatile uint8_t s_band_mode = (uint8_t)APP_ACOUSTIC_BAND_MODE_AUTO;
+static volatile uint16_t s_auto_band_lo_bin;
+static volatile uint16_t s_auto_band_hi_bin;
+static float s_ab_mag[APP_ACOUSTIC_AUTOBAND_BIN_MAX + 1U];
+static float s_ab_floor[APP_ACOUSTIC_AUTOBAND_BIN_MAX + 1U];
+static uint8_t s_ab_floor_valid;
+static uint16_t s_ab_streak;
+static uint16_t s_ab_quiet_frames;
+static uint16_t s_ab_cand_lo;
+static uint16_t s_ab_cand_hi;
+static uint32_t s_ab_last_move_ms;
 /* -18 dB window + gamma 1.30: wider window keeps a visible gradient inside
  * the blob core instead of one flat saturated patch (board-tuned 2026-07-12). */
 static AppAcousticFieldParams_t s_field_params = { -18.0f, 1.30f, 0.10f, 1.08f, 2U };
@@ -173,6 +249,39 @@ static uint32_t s_fps_window_frames;
 static uint16_t s_effective_fps_x10;
 
 static void AppAcousticService_FillConfigSnapshot(AppAcousticServiceSnapshot_t *snapshot);
+static void AppAcousticService_AutoBandReset(void);
+
+/* The band request that actually wins for the next runtime init:
+ * MANUAL: the user's dragged band (0 = freeze wasn't set yet -> scene).
+ * AUTO:   the tracker's band when engaged, else 0 (scene preset / policy). */
+static void AppAcousticService_EffectiveBandRequest(uint16_t *lo_bin, uint16_t *hi_bin)
+{
+  if (s_band_mode == (uint8_t)APP_ACOUSTIC_BAND_MODE_MANUAL)
+  {
+    *lo_bin = s_requested_band_lo_bin;
+    *hi_bin = s_requested_band_hi_bin;
+  }
+  else
+  {
+    *lo_bin = s_auto_band_lo_bin;
+    *hi_bin = s_auto_band_hi_bin;
+  }
+}
+
+/* Widest analysis band the SRP workspace can hold for a pair count:
+ * pair*bins is bounded by APP_ACOUSTIC_SRP_MAX_PAIR_BINS (QUALITY/240
+ * pairs -> 48 bins, STANDARD/160 -> 72, capped at MAX_ACTIVE_BINS). */
+static uint16_t AppAcousticService_MaxBandWidthBins(uint32_t pair_count)
+{
+  uint32_t width = APP_ACOUSTIC_SRP_MAX_PAIR_BINS /
+                   ((pair_count != 0U) ? pair_count : 1U);
+
+  if (width > APP_ACOUSTIC_SRP_MAX_ACTIVE_BINS)
+  {
+    width = APP_ACOUSTIC_SRP_MAX_ACTIVE_BINS;
+  }
+  return (uint16_t)width;
+}
 
 static uint8_t AppAcousticService_ClampPercentU32(uint32_t value)
 {
@@ -368,21 +477,21 @@ static AppAcousticImagingStatus_t AppAcousticService_InitRuntime(AppAcousticImag
     return status;
   }
 
-  /* Band priority: user's custom band (spectrum panel) > scene preset >
-   * profile default bins. */
+  /* Band priority: mode-effective request (MANUAL drag / AUTO tracker) >
+   * scene preset > profile default bins. */
   {
-    const uint16_t custom_lo = s_requested_band_lo_bin;
-    const uint16_t custom_hi = s_requested_band_hi_bin;
-    uint16_t band_lo = 0U;
-    uint16_t band_hi = 0U;
+    uint16_t request_lo = 0U;
+    uint16_t request_hi = 0U;
+    uint16_t band_lo;
+    uint16_t band_hi;
 
-    if (custom_lo != 0U)
-    {
-      band_lo = custom_lo;
-      band_hi = custom_hi;
-    }
-    else if ((preset->bin_lo != 0U) &&
-             (s_requested_array_mode == APP_MIC_ARRAY_MODE_WIDE32_48K))
+    AppAcousticService_EffectiveBandRequest(&request_lo, &request_hi);
+    band_lo = request_lo;
+    band_hi = request_hi;
+
+    if ((band_lo == 0U) &&
+        (preset->bin_lo != 0U) &&
+        (s_requested_array_mode == APP_MIC_ARRAY_MODE_WIDE32_48K))
     {
       /* Scene band presets are Wide32/48k bin semantics; Core16 falls back
        * to its full ultrasonic default band (11..107). */
@@ -392,15 +501,30 @@ static AppAcousticImagingStatus_t AppAcousticService_InitRuntime(AppAcousticImag
 
     if (band_lo != 0U)
     {
+      /* The workspace budget depends on the profile's pair count; shrink
+       * from the top so the low anchor the user placed stays put. */
+      const uint16_t max_width = AppAcousticService_MaxBandWidthBins(config.pair_count);
+
+      if ((uint16_t)((band_hi - band_lo) + 1U) > max_width)
+      {
+        band_hi = (uint16_t)(band_lo + (max_width - 1U));
+      }
       status = App_AcousticImaging_SetBand(&config, band_lo, band_hi);
       if (status != APP_ACOUSTIC_IMAGING_OK)
       {
         memset(&s_srp_ctx, 0, sizeof(s_srp_ctx));
         return status;
       }
+      /* (2026-07-20 note: a short-baseline pair-select experiment for
+       * pure-HF bands produced tightly clustered but WRONG positions -
+       * reverted. The auto tracker instead refuses to move the window
+       * above the Wide32 alias ceiling; manual bands are the user's
+       * explicit choice and keep the standard long-baseline set.) */
     }
-    s_active_band_lo_bin = custom_lo;
-    s_active_band_hi_bin = custom_hi;
+    /* Change detection stores the pre-clamp REQUEST (what the setters
+     * mutate), not the clamped result. */
+    s_active_band_lo_bin = request_lo;
+    s_active_band_hi_bin = request_hi;
   }
 
   status = App_AcousticImaging_SetTemperature(&config, (float)temperature_c);
@@ -1063,6 +1187,289 @@ static void AppAcousticService_UpdatePerf(AppAcousticServiceSnapshot_t *snapshot
   snapshot->perf_load[4] = total_load;
 }
 
+static void AppAcousticService_AutoBandReset(void)
+{
+  s_auto_band_lo_bin = 0U;
+  s_auto_band_hi_bin = 0U;
+  s_ab_floor_valid = 0U;
+  s_ab_streak = 0U;
+  s_ab_quiet_frames = 0U;
+  s_ab_cand_lo = 0U;
+  s_ab_cand_hi = 0U;
+}
+
+/* AUTO band tracker (see the APP_ACOUSTIC_AUTOBAND_* block). Consumes the
+ * RAW wideband reference magnitudes (bins 0..got-1) each processed frame;
+ * the analysis band never limits what this sees because the FFT always
+ * produces the full half-spectrum. */
+static void AppAcousticService_AutoBandUpdate(const float *mags, uint32_t got)
+{
+  const uint16_t lo_lim = APP_ACOUSTIC_AUTOBAND_BIN_MIN;
+  uint16_t hi_lim = APP_ACOUSTIC_AUTOBAND_BIN_MAX;
+  uint8_t hot[APP_ACOUSTIC_AUTOBAND_BIN_MAX + 1U];
+  float excess[APP_ACOUSTIC_AUTOBAND_BIN_MAX + 1U];
+  float max_smooth = 0.0f;
+  float hot_energy = 0.0f;
+  float cover_energy = 0.0f;
+  uint32_t hot_count = 0U;
+  uint16_t hot_lo = 0U;
+  uint16_t hot_hi = 0U;
+
+  if ((s_band_mode != (uint8_t)APP_ACOUSTIC_BAND_MODE_AUTO) ||
+      (s_active_array_mode != APP_MIC_ARRAY_MODE_WIDE32_48K) ||
+      (mags == NULL))
+  {
+    return;
+  }
+  if (got == 0U)
+  {
+    return;
+  }
+  if (hi_lim > (uint16_t)(got - 1U))
+  {
+    hi_lim = (uint16_t)(got - 1U);
+  }
+  if (hi_lim <= (lo_lim + APP_ACOUSTIC_AUTOBAND_MIN_WIDTH))
+  {
+    return;
+  }
+
+  if (s_ab_floor_valid == 0U)
+  {
+    for (uint16_t bin = lo_lim; bin <= hi_lim; bin++)
+    {
+      s_ab_mag[bin] = mags[bin];
+      s_ab_floor[bin] = mags[bin];
+    }
+    s_ab_floor_valid = 1U;
+    return;
+  }
+
+  for (uint16_t bin = lo_lim; bin <= hi_lim; bin++)
+  {
+    s_ab_mag[bin] += APP_ACOUSTIC_AUTOBAND_MAG_ALPHA * (mags[bin] - s_ab_mag[bin]);
+    if (s_ab_mag[bin] > max_smooth)
+    {
+      max_smooth = s_ab_mag[bin];
+    }
+  }
+
+  /* Cross-bin median -> floor cap (a continuous hiss must not absorb its
+   * own floor; the many cold bins pin the median at the room level). */
+  {
+    float sorted[APP_ACOUSTIC_AUTOBAND_BIN_MAX + 1U];
+    uint32_t count = 0U;
+    float floor_cap;
+
+    for (uint16_t bin = lo_lim; bin <= hi_lim; bin++)
+    {
+      const float v = s_ab_mag[bin];
+      uint32_t j = count;
+
+      while ((j > 0U) && (sorted[j - 1U] > v))
+      {
+        sorted[j] = sorted[j - 1U];
+        j--;
+      }
+      sorted[j] = v;
+      count++;
+    }
+    floor_cap = APP_ACOUSTIC_AUTOBAND_FLOOR_CAP * sorted[count / 2U];
+
+    for (uint16_t bin = lo_lim; bin <= hi_lim; bin++)
+    {
+      float floor_v = s_ab_floor[bin];
+      const float mag = s_ab_mag[bin];
+
+      if (mag < floor_v)
+      {
+        floor_v += APP_ACOUSTIC_AUTOBAND_FLOOR_DOWN * (mag - floor_v);
+      }
+      else
+      {
+        floor_v += APP_ACOUSTIC_AUTOBAND_FLOOR_UP * (mag - floor_v);
+      }
+      if (floor_v > floor_cap)
+      {
+        floor_v = floor_cap;
+      }
+      s_ab_floor[bin] = floor_v;
+    }
+  }
+
+  for (uint16_t bin = lo_lim; bin <= hi_lim; bin++)
+  {
+    const float floor_v = s_ab_floor[bin];
+    float ex = s_ab_mag[bin] - floor_v;
+
+    if (ex < 0.0f)
+    {
+      ex = 0.0f;
+    }
+    excess[bin] = ex;
+    if ((s_ab_mag[bin] >= (APP_ACOUSTIC_AUTOBAND_HOT_RATIO * floor_v)) &&
+        (s_ab_mag[bin] >= (APP_ACOUSTIC_AUTOBAND_ABS_MIN * max_smooth)) &&
+        (s_ab_mag[bin] >= APP_ACOUSTIC_AUTOBAND_ABS_ENGAGE))
+    {
+      hot[bin] = 1U;
+      hot_energy += ex;
+      if (hot_count == 0U)
+      {
+        hot_lo = bin;
+      }
+      hot_hi = bin;
+      hot_count++;
+    }
+    else
+    {
+      hot[bin] = 0U;
+    }
+  }
+
+  if ((hot_count < APP_ACOUSTIC_AUTOBAND_MIN_HOT) || (hot_energy <= 0.0f))
+  {
+    s_ab_streak = 0U;
+    if (s_auto_band_lo_bin != 0U)
+    {
+      if (s_ab_quiet_frames < 65535U)
+      {
+        s_ab_quiet_frames++;
+      }
+      if (s_ab_quiet_frames >= APP_ACOUSTIC_AUTOBAND_REVERT_FRAMES)
+      {
+        /* Long quiet: hand the band back to the scene preset. */
+        s_auto_band_lo_bin = 0U;
+        s_auto_band_hi_bin = 0U;
+        s_ab_quiet_frames = 0U;
+        s_profile_change_pending = 1U;
+      }
+    }
+    return;
+  }
+  s_ab_quiet_frames = 0U;
+
+  /* How much of the hot energy does the CURRENT analysis band already
+   * cover? Well-covered -> stay put (hysteresis against band ping-pong). */
+  for (uint16_t bin = hot_lo; bin <= hot_hi; bin++)
+  {
+    if ((hot[bin] != 0U) &&
+        (bin >= s_srp_ctx.config.active_bin_start) &&
+        (bin <= s_srp_ctx.config.active_bin_end))
+    {
+      cover_energy += excess[bin];
+    }
+  }
+  if (cover_energy >= (APP_ACOUSTIC_AUTOBAND_COVER_KEEP * hot_energy))
+  {
+    s_ab_streak = 0U;
+    return;
+  }
+
+  /* Trim outlier hot bins: shrink the span from whichever edge carries
+   * less energy while the removed total stays under 20%. */
+  {
+    float removed = 0.0f;
+    const float removable = 0.2f * hot_energy;
+
+    while (hot_lo < hot_hi)
+    {
+      const float e_lo = excess[hot_lo];
+      const float e_hi = excess[hot_hi];
+
+      if (hot[hot_lo] == 0U)
+      {
+        hot_lo++;
+        continue;
+      }
+      if (hot[hot_hi] == 0U)
+      {
+        hot_hi--;
+        continue;
+      }
+      if (e_lo <= e_hi)
+      {
+        if ((removed + e_lo) > removable)
+        {
+          break;
+        }
+        removed += e_lo;
+        hot_lo++;
+      }
+      else
+      {
+        if ((removed + e_hi) > removable)
+        {
+          break;
+        }
+        removed += e_hi;
+        hot_hi--;
+      }
+    }
+  }
+
+  /* Margin, minimum width, range and budget clamps. */
+  {
+    uint16_t win_lo = (hot_lo > (lo_lim + APP_ACOUSTIC_AUTOBAND_MARGIN_BINS))
+                      ? (uint16_t)(hot_lo - APP_ACOUSTIC_AUTOBAND_MARGIN_BINS) : lo_lim;
+    uint16_t win_hi = ((hot_hi + APP_ACOUSTIC_AUTOBAND_MARGIN_BINS) < hi_lim)
+                      ? (uint16_t)(hot_hi + APP_ACOUSTIC_AUTOBAND_MARGIN_BINS) : hi_lim;
+    const uint16_t max_width = AppAcousticService_MaxBandWidthBins(s_srp_ctx.pair_count);
+
+    if ((uint16_t)((win_hi - win_lo) + 1U) < APP_ACOUSTIC_AUTOBAND_MIN_WIDTH)
+    {
+      const uint16_t need = APP_ACOUSTIC_AUTOBAND_MIN_WIDTH - (uint16_t)((win_hi - win_lo) + 1U);
+      const uint16_t grow_lo = need / 2U;
+      const uint16_t grow_hi = (uint16_t)(need - grow_lo);
+
+      win_lo = (win_lo > (lo_lim + grow_lo)) ? (uint16_t)(win_lo - grow_lo) : lo_lim;
+      win_hi = ((win_hi + grow_hi) < hi_lim) ? (uint16_t)(win_hi + grow_hi) : hi_lim;
+    }
+    if ((uint16_t)((win_hi - win_lo) + 1U) > max_width)
+    {
+      win_hi = (uint16_t)(win_lo + (max_width - 1U));
+    }
+
+    /* Candidate stability streak, then apply (rate-limited). While the
+     * streak holds, blend the edges toward the newest window (integer
+     * EMA) so a slowly-breathing hiss converges instead of resetting. */
+    if ((s_ab_cand_lo != 0U) &&
+        (((win_lo > s_ab_cand_lo) ? (win_lo - s_ab_cand_lo) : (s_ab_cand_lo - win_lo)) <=
+         APP_ACOUSTIC_AUTOBAND_STABLE_TOL) &&
+        (((win_hi > s_ab_cand_hi) ? (win_hi - s_ab_cand_hi) : (s_ab_cand_hi - win_hi)) <=
+         APP_ACOUSTIC_AUTOBAND_STABLE_TOL))
+    {
+      if (s_ab_streak < 65535U)
+      {
+        s_ab_streak++;
+      }
+      s_ab_cand_lo = (uint16_t)((s_ab_cand_lo * 3U + win_lo + 2U) / 4U);
+      s_ab_cand_hi = (uint16_t)((s_ab_cand_hi * 3U + win_hi + 2U) / 4U);
+    }
+    else
+    {
+      s_ab_streak = 1U;
+      s_ab_cand_lo = win_lo;
+      s_ab_cand_hi = win_hi;
+    }
+
+    if (s_ab_streak >= APP_ACOUSTIC_AUTOBAND_STREAK_APPLY)
+    {
+      /* HAL tick is 100 Hz on this build: 1 tick = 10 real ms. */
+      const uint32_t now_ticks = HAL_GetTick();
+
+      if ((s_ab_last_move_ms == 0U) ||
+          ((now_ticks - s_ab_last_move_ms) >= (APP_ACOUSTIC_AUTOBAND_MOVE_MIN_MS / 10U)))
+      {
+        s_auto_band_lo_bin = s_ab_cand_lo;
+        s_auto_band_hi_bin = s_ab_cand_hi;
+        s_ab_last_move_ms = now_ticks;
+        s_ab_streak = 0U;
+        s_profile_change_pending = 1U;
+      }
+    }
+  }
+}
+
 /* Log-scaled display spectrum from the SRP reference-channel FFT.
  * Peak tracking uses a slow-decay EMA so the bars stay readable across
  * loud/quiet scenes without manual gain. */
@@ -1081,6 +1488,9 @@ static void AppAcousticService_FillSpectrum(AppAcousticServiceSnapshot_t *snapsh
     snapshot->spectrum_peak_bin = 0U;
     return;
   }
+
+  /* AUTO band tracker feeds on the same raw magnitudes. */
+  AppAcousticService_AutoBandUpdate(mags, got);
 
   for (uint32_t bin = 1U; bin < got; bin++)
   {
@@ -1352,6 +1762,10 @@ static void AppAcousticService_FillConfigSnapshot(AppAcousticServiceSnapshot_t *
       (uint16_t)(((float)s_srp_ctx.config.active_bin_start * AppAcousticService_BinHz()) + 0.5f);
   snapshot->band_hi_hz =
       (uint16_t)(((float)s_srp_ctx.config.active_bin_end * AppAcousticService_BinHz()) + 0.5f);
+  snapshot->band_mode = s_band_mode;
+  snapshot->band_auto_active =
+      ((s_band_mode == (uint8_t)APP_ACOUSTIC_BAND_MODE_AUTO) &&
+       (s_auto_band_lo_bin != 0U)) ? 1U : 0U;
   AppAcousticService_GetFieldParams(&snapshot->field_params);
 }
 
@@ -1400,17 +1814,23 @@ static uint8_t AppAcousticService_SyncRuntimeConfig(AppAcousticServiceSnapshot_t
     s_profile_change_pending = 1U;
   }
 
-  if ((s_profile_change_pending == 0U) &&
-      (s_srp_ctx.initialized != 0U) &&
-      (s_active_mode == s_requested_mode) &&
-      (s_active_scene == s_requested_scene) &&
-      (s_active_temperature_c == s_requested_temperature_c) &&
-      (s_active_band_lo_bin == s_requested_band_lo_bin) &&
-      (s_active_band_hi_bin == s_requested_band_hi_bin) &&
-      (s_srp_ctx.config.bin_policy ==
-       App_AcousticImaging_ResolveBinPolicy(s_requested_profile, s_requested_bin_policy)))
   {
-    return 1U;
+    uint16_t effective_lo = 0U;
+    uint16_t effective_hi = 0U;
+
+    AppAcousticService_EffectiveBandRequest(&effective_lo, &effective_hi);
+    if ((s_profile_change_pending == 0U) &&
+        (s_srp_ctx.initialized != 0U) &&
+        (s_active_mode == s_requested_mode) &&
+        (s_active_scene == s_requested_scene) &&
+        (s_active_temperature_c == s_requested_temperature_c) &&
+        (s_active_band_lo_bin == effective_lo) &&
+        (s_active_band_hi_bin == effective_hi) &&
+        (s_srp_ctx.config.bin_policy ==
+         App_AcousticImaging_ResolveBinPolicy(s_requested_profile, s_requested_bin_policy)))
+    {
+      return 1U;
+    }
   }
 
   status = AppAcousticService_InitRuntime(s_requested_mode, s_requested_bin_policy);
@@ -1643,9 +2063,10 @@ AppAcousticImagingStatus_t AppAcousticService_SetArrayMode(AppMicArrayMode_t mod
 
   s_requested_array_mode = mode;
   /* Custom band bins carry per-mode Hz semantics; fall back to the target
-   * mode's default band. */
+   * mode's default band. The auto tracker restarts too (Wide32-only). */
   s_requested_band_lo_bin = 0U;
   s_requested_band_hi_bin = 0U;
+  AppAcousticService_AutoBandReset();
   s_profile_change_pending = 1U;
 
   return APP_ACOUSTIC_IMAGING_OK;
@@ -1664,10 +2085,12 @@ AppAcousticImagingStatus_t AppAcousticService_SetScene(AppAcousticScene_t scene)
   }
 
   /* Scene switch re-baselines the rendering parameters to the preset and
-   * drops any custom band from the spectrum panel. */
+   * drops any custom/auto band (the preset IS the new starting band; the
+   * auto tracker re-engages from it if the mode is AUTO). */
   AppAcousticService_SetFieldParams(&s_scene_presets[scene].params);
   s_requested_band_lo_bin = 0U;
   s_requested_band_hi_bin = 0U;
+  AppAcousticService_AutoBandReset();
   s_requested_scene = scene;
   s_profile_change_pending = 1U;
 
@@ -1676,11 +2099,14 @@ AppAcousticImagingStatus_t AppAcousticService_SetScene(AppAcousticScene_t scene)
 
 AppAcousticImagingStatus_t AppAcousticService_SetBandHz(uint16_t lo_hz, uint16_t hi_hz)
 {
-  /* Observable ranges: Wide32/48k bins 3..42, Core16/192k bins 11..107. */
+  /* Observable ranges: Wide32/48k bins 3..96 (563 Hz..18 kHz, full-range
+   * since the 2026-07-20 band-mode rework - the old 42 ceiling hid
+   * everything a leak hiss actually does), Core16/192k bins 11..107. */
   const uint8_t core16 = (s_active_array_mode == APP_MIC_ARRAY_MODE_CORE16_192K) ? 1U : 0U;
   const uint16_t bin_min = core16 ? 11U : 3U;
-  const uint16_t bin_max = core16 ? 107U : 42U;
+  const uint16_t bin_max = core16 ? 107U : 96U;
   const float bin_hz = AppAcousticService_BinHz();
+  const uint16_t max_width = AppAcousticService_MaxBandWidthBins(s_srp_ctx.pair_count);
   uint16_t lo_bin;
   uint16_t hi_bin;
 
@@ -1704,12 +2130,67 @@ AppAcousticImagingStatus_t AppAcousticService_SetBandHz(uint16_t lo_hz, uint16_t
   {
     return APP_ACOUSTIC_IMAGING_INVALID_ARGUMENT;
   }
+  /* Workspace budget (pair count x bins): shrink from the top so the low
+   * handle lands where the user put it. InitRuntime re-clamps in case the
+   * profile changes later. */
+  if ((uint16_t)((hi_bin - lo_bin) + 1U) > max_width)
+  {
+    hi_bin = (uint16_t)(lo_bin + (max_width - 1U));
+  }
 
+  /* Dragging the band box IS the manual gesture (Fluke semantics). */
+  s_band_mode = (uint8_t)APP_ACOUSTIC_BAND_MODE_MANUAL;
   s_requested_band_lo_bin = lo_bin;
   s_requested_band_hi_bin = hi_bin;
   s_profile_change_pending = 1U;
 
   return APP_ACOUSTIC_IMAGING_OK;
+}
+
+AppAcousticImagingStatus_t AppAcousticService_SetBandMode(AppAcousticBandMode_t mode)
+{
+  if ((mode != APP_ACOUSTIC_BAND_MODE_AUTO) && (mode != APP_ACOUSTIC_BAND_MODE_MANUAL))
+  {
+    return APP_ACOUSTIC_IMAGING_INVALID_ARGUMENT;
+  }
+
+  if (mode == APP_ACOUSTIC_BAND_MODE_AUTO)
+  {
+    /* Back to auto: drop the manual band, restart the tracker from the
+     * scene preset (it will move again once it sees persistent energy). */
+    s_requested_band_lo_bin = 0U;
+    s_requested_band_hi_bin = 0U;
+    AppAcousticService_AutoBandReset();
+  }
+  else
+  {
+    /* Freeze the band exactly where it currently sits (auto result or
+     * scene preset) so the toggle itself never moves anything. */
+    uint16_t lo = s_auto_band_lo_bin;
+    uint16_t hi = s_auto_band_hi_bin;
+
+    if ((lo == 0U) && (s_srp_ctx.initialized != 0U))
+    {
+      lo = s_srp_ctx.config.active_bin_start;
+      hi = s_srp_ctx.config.active_bin_end;
+    }
+    if (lo != 0U)
+    {
+      s_requested_band_lo_bin = lo;
+      s_requested_band_hi_bin = hi;
+    }
+    s_auto_band_lo_bin = 0U;
+    s_auto_band_hi_bin = 0U;
+  }
+  s_band_mode = (uint8_t)mode;
+  s_profile_change_pending = 1U;
+
+  return APP_ACOUSTIC_IMAGING_OK;
+}
+
+AppAcousticBandMode_t AppAcousticService_GetBandMode(void)
+{
+  return (AppAcousticBandMode_t)s_band_mode;
 }
 
 AppAcousticImagingStatus_t AppAcousticService_SetTemperature(int8_t temperature_c)

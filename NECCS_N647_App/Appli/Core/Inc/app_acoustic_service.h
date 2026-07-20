@@ -26,9 +26,24 @@ extern "C" {
   (APP_ACOUSTIC_SERVICE_FIELD_W * APP_ACOUSTIC_SERVICE_FIELD_H)
 #define APP_ACOUSTIC_SERVICE_CAND_MAX         3U
 
-/* Display spectrum: log-scaled magnitudes of FFT bins 1..64
- * (187.5 Hz per bin -> the panel spans 187.5 Hz .. 12 kHz). */
-#define APP_ACOUSTIC_SERVICE_SPECTRUM_BINS    64U
+/* Display spectrum: log-scaled magnitudes of FFT bins 1..96 (Wide32:
+ * 187.5 Hz per bin -> 18 kHz span). 64 -> 96 in 2026-07-20 band-mode
+ * rework: leak-type sources peak ABOVE 12 kHz (demo hiss: 13.8 kHz), the
+ * old panel could not even show them, let alone let the user drag the
+ * band there. The NPU classifier keeps consuming the FIRST 64 slots
+ * (AppNpu_FeedSpectrum reads exactly 64 - its training window). */
+#define APP_ACOUSTIC_SERVICE_SPECTRUM_BINS    96U
+
+/* Analysis band selection mode (Fluke ii900-style split):
+ * AUTO   - the service watches the wideband spectrum and moves the SRP
+ *          band onto persistent energy concentrations by itself.
+ * MANUAL - the band is exactly where the user dragged it (spectrum-panel
+ *          handles); no automatic repositioning. */
+typedef enum
+{
+  APP_ACOUSTIC_BAND_MODE_AUTO = 0,
+  APP_ACOUSTIC_BAND_MODE_MANUAL = 1
+} AppAcousticBandMode_t;
 
 typedef enum
 {
@@ -98,6 +113,10 @@ typedef struct
   int8_t temperature_c;
   uint16_t band_lo_hz;
   uint16_t band_hi_hz;
+  /* Band selection mode (AppAcousticBandMode_t) + 1 while the auto tracker
+   * has actually moved the band off the scene default (UI shows "自动·追踪"). */
+  uint8_t band_mode;
+  uint8_t band_auto_active;
   uint16_t speed_mps_x10;
   AppAcousticFieldParams_t field_params;
   uint8_t cand_count;
@@ -141,9 +160,16 @@ AppMicArrayMode_t AppAcousticService_GetArrayMode(void);
 AppAcousticImagingStatus_t AppAcousticService_SetScene(AppAcousticScene_t scene);
 
 /* Custom analysis band in Hz (from the spectrum panel drag handles).
- * Clamped to the observable range (563..7875 Hz, bins 3..42); overrides the
- * scene band until the next scene change. Triggers an SRP re-init. */
+ * Wide32 accepts bins 3..96 (563 Hz..18 kHz), Core16 bins 11..107; the
+ * width is additionally capped by the runtime pair*bin budget. Overrides
+ * the scene band until the next scene change, and switches the band mode
+ * to MANUAL. Triggers an SRP re-init. */
 AppAcousticImagingStatus_t AppAcousticService_SetBandHz(uint16_t lo_hz, uint16_t hi_hz);
+
+/* Band mode: AUTO re-enables the spectrum-driven band tracker and drops
+ * any manual band; MANUAL freezes the band where it currently sits. */
+AppAcousticImagingStatus_t AppAcousticService_SetBandMode(AppAcousticBandMode_t mode);
+AppAcousticBandMode_t AppAcousticService_GetBandMode(void);
 
 /* Ambient temperature -> speed of sound; triggers an SRP LUT re-init. */
 AppAcousticImagingStatus_t AppAcousticService_SetTemperature(int8_t temperature_c);

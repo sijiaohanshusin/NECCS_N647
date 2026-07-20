@@ -508,6 +508,7 @@ AppSpectrumPanel::AppSpectrumPanel()
       bandHiHz(7875U),
       peakBin(0U),
       dragging(0U),
+      dragAnchorBin(0U),
       binHz(BinHz)
 {
     (void)memset(bars, 0, sizeof(bars));
@@ -658,14 +659,20 @@ void AppSpectrumPanel::handleClickEvent(const touchgfx::ClickEvent& event)
         const int16_t dLo = static_cast<int16_t>((event.getX() > loX) ? (event.getX() - loX) : (loX - event.getX()));
         const int16_t dHi = static_cast<int16_t>((event.getX() > hiX) ? (event.getX() - hiX) : (hiX - event.getX()));
 
-        /* Grab the nearest handle; generous 60px capture radius. */
-        if ((dLo <= dHi) && (dLo < 60))
+        /* Nearest edge handle wins within its capture radius; a press in
+         * the box interior slides the WHOLE band (Fluke-style). */
+        dragAnchorBin = xToBin(event.getX());
+        if ((dLo <= dHi) && (dLo < 40))
         {
             dragging = 1U;
         }
-        else if (dHi < 60)
+        else if (dHi < 40)
         {
             dragging = 2U;
+        }
+        else if ((event.getX() > loX) && (event.getX() < hiX))
+        {
+            dragging = 3U;
         }
         else
         {
@@ -706,18 +713,43 @@ void AppSpectrumPanel::handleDragEvent(const touchgfx::DragEvent& event)
         }
         bandLoHz = static_cast<uint16_t>((float)loBin * binHz);
     }
-    else
+    else if (dragging == 2U)
     {
         hiBin = bin;
-        if (hiBin > 42U)
+        if (hiBin > Bins)
         {
-            hiBin = 42U;
+            hiBin = Bins;
         }
         if (hiBin < (loBin + 3U))
         {
             hiBin = loBin + 3U;
         }
         bandHiHz = static_cast<uint16_t>((float)hiBin * binHz);
+    }
+    else
+    {
+        /* Slide the whole band, width preserved. */
+        const int32_t delta = static_cast<int32_t>(bin) - static_cast<int32_t>(dragAnchorBin);
+
+        if (delta != 0)
+        {
+            const uint32_t width = hiBin - loBin;
+            int32_t newLo = static_cast<int32_t>(loBin) + delta;
+
+            if (newLo < 3)
+            {
+                newLo = 3;
+            }
+            if ((newLo + static_cast<int32_t>(width)) > static_cast<int32_t>(Bins))
+            {
+                newLo = static_cast<int32_t>(Bins) - static_cast<int32_t>(width);
+            }
+            loBin = static_cast<uint32_t>(newLo);
+            hiBin = loBin + width;
+            dragAnchorBin = bin;
+            bandLoHz = static_cast<uint16_t>((float)loBin * binHz);
+            bandHiHz = static_cast<uint16_t>((float)hiBin * binHz);
+        }
     }
 
     invalidate();

@@ -115,7 +115,9 @@ private:
 class AppSpectrumPanel : public touchgfx::Widget
 {
 public:
-    static const uint32_t Bins = 64U;
+    /** 96 bins (was 64): Wide32 span is now 18 kHz so HF leak hiss is
+     * visible and the band handles can reach it. */
+    static const uint32_t Bins = 96U;
     /** Default frequency per bin (Wide32/48k pipeline: 48000/256). */
     static constexpr float BinHz = 187.5f;
 
@@ -141,8 +143,10 @@ private:
     uint16_t bandLoHz;
     uint16_t bandHiHz;
     uint8_t peakBin;
-    /* 0 = none, 1 = low handle, 2 = high handle */
+    /* 0 = none, 1 = low handle, 2 = high handle, 3 = move whole band
+     * (Fluke-style: drag the middle of the box to slide the band). */
     uint8_t dragging;
+    uint32_t dragAnchorBin;
     float binHz;
 };
 

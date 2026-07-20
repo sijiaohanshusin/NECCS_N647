@@ -122,6 +122,11 @@ void TemplatePresenter::setBandHz(uint16_t loHz, uint16_t hiHz)
     model->setBandHz(loHz, hiHz);
 }
 
+void TemplatePresenter::toggleBandMode()
+{
+    model->toggleBandMode();
+}
+
 void TemplatePresenter::adjustFieldParam(uint8_t param, int8_t dir)
 {
     model->adjustFieldParam(param, dir);

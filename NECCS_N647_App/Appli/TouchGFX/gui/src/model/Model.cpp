@@ -231,9 +231,15 @@ typedef enum
 #define APP_ACOUSTIC_SERVICE_FIELD_H 72U
 #define APP_ACOUSTIC_SERVICE_FIELD_COUNT (APP_ACOUSTIC_SERVICE_FIELD_W * APP_ACOUSTIC_SERVICE_FIELD_H)
 #define APP_ACOUSTIC_SERVICE_CAND_MAX 3U
-#define APP_ACOUSTIC_SERVICE_SPECTRUM_BINS 64U
+#define APP_ACOUSTIC_SERVICE_SPECTRUM_BINS 96U
 #define APP_ACOUSTIC_SERVICE_CAMERA_HFOV_DEG 77.0f
 #define APP_ACOUSTIC_SERVICE_CAMERA_VFOV_DEG 61.1f
+
+typedef enum
+{
+    APP_ACOUSTIC_BAND_MODE_AUTO = 0,
+    APP_ACOUSTIC_BAND_MODE_MANUAL = 1
+} AppAcousticBandMode_t;
 
 typedef struct
 {
@@ -262,6 +268,8 @@ typedef struct
     int8_t temperature_c;
     uint16_t band_lo_hz;
     uint16_t band_hi_hz;
+    uint8_t band_mode;
+    uint8_t band_auto_active;
     uint16_t speed_mps_x10;
     uint8_t cand_count;
     int16_t cand_theta[APP_ACOUSTIC_SERVICE_CAND_MAX];
@@ -318,6 +326,17 @@ static int32_t AppAcousticService_SetBandHz(uint16_t loHz, uint16_t hiHz)
     (void)loHz;
     (void)hiHz;
     return 0;
+}
+
+static int32_t AppAcousticService_SetBandMode(AppAcousticBandMode_t mode)
+{
+    (void)mode;
+    return 0;
+}
+
+static AppAcousticBandMode_t AppAcousticService_GetBandMode(void)
+{
+    return APP_ACOUSTIC_BAND_MODE_AUTO;
 }
 
 typedef struct
@@ -728,6 +747,8 @@ void pollAcoustic(AppUiSnapshot& snapshot)
     snapshot.acousticTempC = acoustic.temperature_c;
     snapshot.acousticBandLoHz = acoustic.band_lo_hz;
     snapshot.acousticBandHiHz = acoustic.band_hi_hz;
+    snapshot.acousticBandMode = acoustic.band_mode;
+    snapshot.acousticBandAutoActive = acoustic.band_auto_active;
     snapshot.acousticSpeedX10 = acoustic.speed_mps_x10;
     memcpy(snapshot.spectrum, acoustic.spectrum, sizeof(snapshot.spectrum));
     snapshot.spectrumPeakBin = acoustic.spectrum_peak_bin;
@@ -1390,7 +1411,24 @@ void Model::cycleHeatPalette()
 
 void Model::setBandHz(uint16_t loHz, uint16_t hiHz)
 {
+    /* Service-side this also flips the band mode to MANUAL. */
     (void)AppAcousticService_SetBandHz(loHz, hiHz);
+    snapshot.acousticBandMode = 1U;
+    if (modelListener != 0)
+    {
+        modelListener->uiSnapshotUpdated(snapshot);
+    }
+}
+
+void Model::toggleBandMode()
+{
+    const AppAcousticBandMode_t next =
+        (AppAcousticService_GetBandMode() == APP_ACOUSTIC_BAND_MODE_AUTO)
+        ? APP_ACOUSTIC_BAND_MODE_MANUAL
+        : APP_ACOUSTIC_BAND_MODE_AUTO;
+
+    (void)AppAcousticService_SetBandMode(next);
+    snapshot.acousticBandMode = (uint8_t)next;
     if (modelListener != 0)
     {
         modelListener->uiSnapshotUpdated(snapshot);

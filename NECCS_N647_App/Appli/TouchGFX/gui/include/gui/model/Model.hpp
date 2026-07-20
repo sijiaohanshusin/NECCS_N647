@@ -234,7 +234,9 @@ struct AppUiSnapshot
     uint16_t mediaEncodeMs;
     uint8_t triggerArmed;
     uint8_t trailEnabled;
-    uint8_t spectrum[64];
+    /* Display spectrum: 96 bins (Wide32 187.5 Hz/bin -> 18 kHz; widened
+     * from 64 so HF leak hiss is visible and band-draggable). */
+    uint8_t spectrum[96];
     uint8_t spectrumPeakBin;
     /* Edge acoustic-signature classifier (rule-based scoring over live
      * spectrum features; presented as edge inference on the UI). */
@@ -249,6 +251,10 @@ struct AppUiSnapshot
     int8_t acousticTempC;
     uint16_t acousticBandLoHz;
     uint16_t acousticBandHiHz;
+    /* Band selection: 0 = auto (spectrum-driven tracker), 1 = manual
+     * (dragged band frozen); bandAutoActive = tracker moved off preset. */
+    uint8_t acousticBandMode;
+    uint8_t acousticBandAutoActive;
     uint16_t acousticSpeedX10;
     /* Heat-field rendering parameters (settings page steppers). */
     int8_t fieldDbFloor;
@@ -315,6 +321,7 @@ public:
     void toggleArrayMode();
     void adjustTemperature(int8_t deltaC);
     void setBandHz(uint16_t loHz, uint16_t hiHz);
+    void toggleBandMode();
     /* param: 0=db_floor 1=gamma 2=noise_gate 3=smooth_passes; dir: -1/+1 */
     void adjustFieldParam(uint8_t param, int8_t dir);
     void toggleTrigger();

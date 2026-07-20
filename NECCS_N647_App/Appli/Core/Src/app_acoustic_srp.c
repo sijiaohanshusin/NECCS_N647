@@ -46,6 +46,78 @@
  * earphone measured q=0..1, detections too sparse to hold the tracker);
  * claps still dominate the current frame (weight 1 vs 0.65 history). */
 #define APP_ACOUSTIC_SRP_CROSS_EMA_BETA     0.65f
+/* Per-bin SNR gate folded into the PHAT whitening (2026-07-19): PHAT
+ * equalises every bin to unit magnitude, so active bins with NO source
+ * energy inject full-strength random phase. A band-limited source (gas
+ * leak hiss: measured 88% of energy above 8 kHz, in-band only bins 27..42
+ * carry signal) drowns in the empty low bins - board data: correct
+ * direction but q=2..8 and phi wobbling 4..17 deg. The gate scales each
+ * bin by an SNR-derived weight (vs a slow per-bin noise floor), normalised
+ * so the strongest bin keeps weight 1. In silence (no bin above the
+ * floor) all gates fall back to 1 = plain PHAT, so the silence/tracker
+ * behaviour is untouched.
+ *   mag: per-frame mean |X| across mics is Rayleigh-noisy (sigma ~= mean
+ *   for a 187 Hz bin), so it is EMA-smoothed (~4-frame window) before the
+ *   floor comparison - without this, silence fluctuations randomly poke
+ *   above the floor and the gate fires on noise (board 2026-07-19: q=4
+ *   valid=1 blips in a quiet room).
+ *   floor: asymmetric EMA per bin - drops fairly fast (source pauses pull
+ *   it down), rises slowly, AND is capped at FLOOR_CAP x the cross-bin
+ *   median. The cap is what keeps a CONTINUOUS band-limited source (a
+ *   real leak hisses without pause) gated forever: its median across
+ *   bins stays at the room-noise level of the empty bins, so the source
+ *   bins' floors can never absorb the source. Broadband signals put the
+ *   median at the common level and the cap never binds (= plain PHAT).
+ *   knee: excess-over-floor ratio giving half weight; s = excess/knee,
+ *   w = s^2/(1+s^2).
+ *   engage: gating only applies when the best bin clears ENGAGE_MIN
+ *   (excess >= knee, i.e. smoothed mag >= 2x floor). Below that the
+ *   spectrum is flat-ish (silence / broadband) and plain PHAT runs -
+ *   identical to the pre-gate pipeline.
+ *   blend by bandwidth: the gate strength scales with HOW MANY bins are
+ *   strong. A pure tone (1-3 strong bins) must NOT be hard-gated: its
+ *   single-frequency correlation is periodically ambiguous, so
+ *   concentrating the surface on the tone bins collapsed the peak-vs-2nd
+ *   quality to 1% (synthetic 2 kHz self-test: angle right, valid=0).
+ *   Wideband sources are where empty-bin noise actually hurts AND where
+ *   gating is safe (many strong bins keep the lag surface unambiguous):
+ *   leak hiss lights up 10+ bins -> full gating. blend ramps 0..1 over
+ *   STRONG_LO..STRONG_HI strong bins; effective = 1 - blend*(1-gate),
+ *   floored at GATE_MIN. */
+#define APP_ACOUSTIC_SRP_GATE_MAG_ALPHA     0.4f
+#define APP_ACOUSTIC_SRP_GATE_FLOOR_UP      0.008f
+#define APP_ACOUSTIC_SRP_GATE_FLOOR_DOWN    0.15f
+#define APP_ACOUSTIC_SRP_GATE_FLOOR_CAP     3.0f
+#define APP_ACOUSTIC_SRP_GATE_KNEE          1.0f
+#define APP_ACOUSTIC_SRP_GATE_ENGAGE_MIN    0.5f
+#define APP_ACOUSTIC_SRP_GATE_MIN           0.15f
+#define APP_ACOUSTIC_SRP_GATE_STRONG_LO     3U
+#define APP_ACOUSTIC_SRP_GATE_STRONG_HI     8U
+/* A bin only counts as "strong" (for the bandwidth blend) if it also
+ * carries real energy relative to the loudest bin. Ratio-vs-floor alone
+ * mislabels fp-junk bins of a clean tone (junk floor ~1e-7, any flutter
+ * doubles it): the blend then saturated and hard-gated the tone - caught
+ * by the synthetic self-test (angle exact, quality 1%). 2% of max = -34 dB,
+ * far under any bin a source actually excites. */
+#define APP_ACOUSTIC_SRP_GATE_STRONG_ABS    0.02f
+/* Absolute engage floor for the strongest bin's smoothed magnitude:
+ * ratios against the tracked noise floor are meaningless near zero - in a
+ * QUIET room random bins sit 2x above their own drained floor and the
+ * ratio-only engage condition held for dozens of frames (board
+ * 2026-07-20: gstreak 26..57 in silence, gating inflated q, tracker
+ * flashed disp=1). Silence measures |X|~0.001..0.004 on this capture
+ * chain; a real source's hot bins measure 0.02..0.09. */
+#define APP_ACOUSTIC_SRP_GATE_ABS_ENGAGE    0.008f
+/* Gating additionally requires the wideband-strong condition to PERSIST:
+ * ambient one-shot transients (keyboard click, chair creak - one 5 ms
+ * capture window, echoed 2-3 SRP frames by the mag EMA) ride on plain
+ * PHAT and keep their pre-gate (low) quality, so the quiet room stays
+ * dark. Board 2026-07-20: without the streak, random q=3 blips in
+ * silence charged the tracker to disp=1 in 3/14 samples. A real hiss
+ * holds the condition continuously and engages after ~4 frames
+ * (~250 ms), which the tracker's own 2-3 frame confidence ramp mostly
+ * hides anyway. */
+#define APP_ACOUSTIC_SRP_GATE_STREAK_MIN    4U
 
 /* Mode invariants the union sizing relies on. */
 _Static_assert((APP_MIC_ARRAY_CORE16_MIC_COUNT * 512U) <=
@@ -88,6 +160,16 @@ typedef struct
   float lag_center;    /* row index of lag 0                               */
   float lag_scale;     /* seconds -> taps (= fs * UPSAMPLE)                */
   uint8_t cross_valid;
+  /* Per-bin SNR gate state (mean |X| across active mics vs noise floor). */
+  float bin_mag[APP_ACOUSTIC_SRP_MAX_ACTIVE_BINS];
+  float bin_mag_smooth[APP_ACOUSTIC_SRP_MAX_ACTIVE_BINS];
+  float bin_floor[APP_ACOUSTIC_SRP_MAX_ACTIVE_BINS];
+  float bin_gate[APP_ACOUSTIC_SRP_MAX_ACTIVE_BINS];
+  float srp_weight_col[APP_ACOUSTIC_SRP_MAX_ACTIVE_BINS];
+  float gate_weight_sum; /* per-frame sum(srp_weight x gate), for quality */
+  float bin_floor_cap;   /* FLOOR_CAP x cross-bin median, this frame      */
+  uint32_t gate_streak;  /* consecutive frames the engage condition held  */
+  uint8_t bin_floor_valid;
   arm_rfft_fast_instance_f32 rfft;
 } AppAcousticSrpWorkspace_t;
 
@@ -413,9 +495,249 @@ static void App_AcousticSrp_RebuildWeights(AppAcousticSrpContext_t *ctx)
     }
   }
 
+  /* Per-bin column sums of the pair weights: the SNR gate scales whole
+   * bins, so the effective weight sum is sum_bins(col[bin] * gate[bin]). */
+  for (uint32_t bin = 0U; bin < ctx->active_bin_count; bin++)
+  {
+    float col = 0.0f;
+
+    for (uint32_t pair = 0U; pair < ctx->pair_count; pair++)
+    {
+      col += workspace->srp_weight[(pair * ctx->active_bin_count) + bin];
+    }
+    workspace->srp_weight_col[bin] = col;
+  }
+
   /* Active-set change invalidates the cross-spectrum history (stale phase
-   * relations from a different mic set would leak into the average). */
+   * relations from a different mic set would leak into the average) and
+   * the per-bin noise floor (mean magnitude scale shifts with the set). */
   workspace->cross_valid = 0U;
+  workspace->bin_floor_valid = 0U;
+  workspace->gate_streak = 0U;
+}
+
+/* Per-bin SNR gate: mean |X| across active mics per active bin, tracked
+ * against a slow noise floor. See the APP_ACOUSTIC_SRP_GATE_* block for
+ * the rationale. Publishes workspace->bin_gate[] and gate_weight_sum. */
+static void App_AcousticSrp_UpdateBinGate(const AppAcousticSrpContext_t *ctx)
+{
+  AppAcousticSrpWorkspace_t *workspace = &s_srp_workspace;
+  uint32_t active_mics = 0U;
+  float gate_max = 0.0f;
+  float weight_sum = 0.0f;
+
+  for (uint32_t bin = 0U; bin < ctx->active_bin_count; bin++)
+  {
+    workspace->bin_mag[bin] = 0.0f;
+  }
+
+  for (uint32_t channel = 0U; channel < ctx->config.channel_count; channel++)
+  {
+    const float *freq = &workspace->freq[channel * ctx->config.nfft];
+
+    if (App_AcousticSrp_ChannelIsActive(ctx, channel) == 0U)
+    {
+      continue;
+    }
+    active_mics++;
+    for (uint32_t bin = 0U; bin < ctx->active_bin_count; bin++)
+    {
+      const uint32_t fft_index = 2U * (uint32_t)ctx->config.active_bins[bin];
+
+      workspace->bin_mag[bin] += App_AcousticSrp_AbsF32(freq[fft_index]) +
+                                 App_AcousticSrp_AbsF32(freq[fft_index + 1U]);
+    }
+  }
+
+  if (active_mics == 0U)
+  {
+    for (uint32_t bin = 0U; bin < ctx->active_bin_count; bin++)
+    {
+      workspace->bin_gate[bin] = 1.0f;
+    }
+    workspace->gate_weight_sum = ctx->weight_sum;
+    return;
+  }
+
+  {
+    const float inv_mics = 1.0f / (float)active_mics;
+
+    for (uint32_t bin = 0U; bin < ctx->active_bin_count; bin++)
+    {
+      workspace->bin_mag[bin] *= inv_mics;
+    }
+  }
+
+  if (workspace->bin_floor_valid == 0U)
+  {
+    for (uint32_t bin = 0U; bin < ctx->active_bin_count; bin++)
+    {
+      workspace->bin_mag_smooth[bin] = workspace->bin_mag[bin];
+    }
+  }
+  else
+  {
+    for (uint32_t bin = 0U; bin < ctx->active_bin_count; bin++)
+    {
+      workspace->bin_mag_smooth[bin] +=
+          APP_ACOUSTIC_SRP_GATE_MAG_ALPHA *
+          (workspace->bin_mag[bin] - workspace->bin_mag_smooth[bin]);
+    }
+  }
+
+  /* Cross-bin median of the smoothed magnitudes -> floor cap (see the
+   * GATE_* comment block). Insertion sort of <=97 floats, once per frame. */
+  {
+    float sorted[APP_ACOUSTIC_SRP_MAX_ACTIVE_BINS];
+
+    for (uint32_t bin = 0U; bin < ctx->active_bin_count; bin++)
+    {
+      const float v = workspace->bin_mag_smooth[bin];
+      uint32_t j = bin;
+
+      while ((j > 0U) && (sorted[j - 1U] > v))
+      {
+        sorted[j] = sorted[j - 1U];
+        j--;
+      }
+      sorted[j] = v;
+    }
+    workspace->bin_floor_cap =
+        APP_ACOUSTIC_SRP_GATE_FLOOR_CAP * sorted[ctx->active_bin_count / 2U];
+  }
+
+  if (workspace->bin_floor_valid == 0U)
+  {
+    for (uint32_t bin = 0U; bin < ctx->active_bin_count; bin++)
+    {
+      float seed = workspace->bin_mag_smooth[bin];
+
+      if (seed > workspace->bin_floor_cap)
+      {
+        seed = workspace->bin_floor_cap;
+      }
+      workspace->bin_floor[bin] = seed;
+    }
+    workspace->bin_floor_valid = 1U;
+  }
+
+  for (uint32_t bin = 0U; bin < ctx->active_bin_count; bin++)
+  {
+    const float mag = workspace->bin_mag_smooth[bin];
+    float floor_v = workspace->bin_floor[bin];
+    float excess;
+    float s;
+    float gate;
+
+    if (mag < floor_v)
+    {
+      floor_v += APP_ACOUSTIC_SRP_GATE_FLOOR_DOWN * (mag - floor_v);
+    }
+    else
+    {
+      floor_v += APP_ACOUSTIC_SRP_GATE_FLOOR_UP * (mag - floor_v);
+    }
+    if (floor_v > workspace->bin_floor_cap)
+    {
+      floor_v = workspace->bin_floor_cap;
+    }
+    workspace->bin_floor[bin] = floor_v;
+
+    excess = (mag - floor_v) / (floor_v + 1.0e-12f);
+    if (excess < 0.0f)
+    {
+      excess = 0.0f;
+    }
+    s = excess / APP_ACOUSTIC_SRP_GATE_KNEE;
+    gate = (s * s) / (1.0f + (s * s));
+    workspace->bin_gate[bin] = gate;
+    if (gate > gate_max)
+    {
+      gate_max = gate;
+    }
+  }
+
+  {
+    const float inv_max = (gate_max > 1.0e-12f) ? (1.0f / gate_max) : 0.0f;
+    uint32_t strong_bins = 0U;
+    float mag_max = 0.0f;
+    float blend;
+
+    for (uint32_t bin = 0U; bin < ctx->active_bin_count; bin++)
+    {
+      if (workspace->bin_mag_smooth[bin] > mag_max)
+      {
+        mag_max = workspace->bin_mag_smooth[bin];
+      }
+    }
+
+    for (uint32_t bin = 0U; bin < ctx->active_bin_count; bin++)
+    {
+      workspace->bin_gate[bin] *= inv_max;
+      if ((workspace->bin_gate[bin] >= 0.5f) &&
+          (workspace->bin_mag_smooth[bin] >=
+           (APP_ACOUSTIC_SRP_GATE_STRONG_ABS * mag_max)))
+      {
+        strong_bins++;
+      }
+    }
+
+    /* Engage only on a PERSISTENT wideband exceedance (see STREAK_MIN)
+     * that also clears the ABSOLUTE level floor (see GATE_ABS_ENGAGE).
+     * Misses DECAY the streak instead of zeroing it: a textured hiss
+     * (the leak demo alternates bursts) drops the condition for a frame
+     * or two and a hard reset flapped the gate on/off, which flapped the
+     * quality normalisation with it (board 2026-07-20: gstreak 56->0->13
+     * during continuous hiss). One-shot transients still never reach 4:
+     * +1 per hit, -2 per miss. */
+    if ((mag_max >= APP_ACOUSTIC_SRP_GATE_ABS_ENGAGE) &&
+        (gate_max >= APP_ACOUSTIC_SRP_GATE_ENGAGE_MIN) &&
+        (strong_bins > APP_ACOUSTIC_SRP_GATE_STRONG_LO))
+    {
+      if (workspace->gate_streak < 1000000U)
+      {
+        workspace->gate_streak++;
+      }
+    }
+    else if (workspace->gate_streak > 2U)
+    {
+      workspace->gate_streak -= 2U;
+    }
+    else
+    {
+      workspace->gate_streak = 0U;
+    }
+
+    if (workspace->gate_streak < APP_ACOUSTIC_SRP_GATE_STREAK_MIN)
+    {
+      for (uint32_t bin = 0U; bin < ctx->active_bin_count; bin++)
+      {
+        workspace->bin_gate[bin] = 1.0f;
+      }
+      workspace->gate_weight_sum = ctx->weight_sum;
+      return;
+    }
+
+    /* Bandwidth-scaled gate strength (see comment block): tones ride on
+     * (almost) plain PHAT, wideband sources get the full empty-bin cut. */
+    blend = ((float)strong_bins - (float)APP_ACOUSTIC_SRP_GATE_STRONG_LO) /
+            (float)(APP_ACOUSTIC_SRP_GATE_STRONG_HI - APP_ACOUSTIC_SRP_GATE_STRONG_LO);
+    blend = App_AcousticSrp_Clamp01(blend);
+
+    for (uint32_t bin = 0U; bin < ctx->active_bin_count; bin++)
+    {
+      float gate = 1.0f - (blend * (1.0f - workspace->bin_gate[bin]));
+
+      if (gate < APP_ACOUSTIC_SRP_GATE_MIN)
+      {
+        gate = APP_ACOUSTIC_SRP_GATE_MIN;
+      }
+      workspace->bin_gate[bin] = gate;
+      weight_sum += workspace->srp_weight_col[bin] * gate;
+    }
+  }
+  workspace->gate_weight_sum =
+      (weight_sum > 1.0e-6f) ? weight_sum : ctx->weight_sum;
 }
 
 /* --------------------------------------------------------------------- */
@@ -876,6 +1198,8 @@ static void App_AcousticSrp_ComputeGccPhat(AppAcousticSrpContext_t *ctx)
   const float beta = APP_ACOUSTIC_SRP_CROSS_EMA_BETA;
   const uint8_t history_valid = workspace->cross_valid;
 
+  App_AcousticSrp_UpdateBinGate(ctx);
+
   for (uint32_t pair = 0U; pair < ctx->pair_count; pair++)
   {
     uint32_t mic_a = workspace->pairs[pair].mic_a;
@@ -934,12 +1258,13 @@ static void App_AcousticSrp_ComputeGccPhat(AppAcousticSrpContext_t *ctx)
              ctx->active_bin_count * 2U * sizeof(float));
     }
 
-    /* PHAT whitening of the averaged spectrum, per-bin weight folded in
-     * (the lag-domain search cannot apply per-bin weights anymore). */
+    /* PHAT whitening of the averaged spectrum, per-bin weight and SNR gate
+     * folded in (the lag-domain search cannot apply per-bin weights). */
     arm_cmplx_mag_f32(accum, workspace->scratch_mag, ctx->active_bin_count);
     for (uint32_t bin = 0U; bin < ctx->active_bin_count; bin++)
     {
-      float w = weight[bin] / (workspace->scratch_mag[bin] + APP_ACOUSTIC_SRP_PHAT_EPSILON);
+      float w = (weight[bin] * workspace->bin_gate[bin]) /
+                (workspace->scratch_mag[bin] + APP_ACOUSTIC_SRP_PHAT_EPSILON);
 
       out[2U * bin] = accum[2U * bin] * w;
       out[(2U * bin) + 1U] = accum[(2U * bin) + 1U] * w;
@@ -1178,8 +1503,12 @@ static void App_AcousticSrp_FillCandidates(const AppAcousticSrpContext_t *ctx,
     vis_frame->candidate[count].theta_deg = best_theta;
     vis_frame->candidate[count].phi_deg = best_phi;
     vis_frame->candidate[count].power = best_value;
+    /* Normalise by the gated weight sum: with the SNR gate concentrating
+     * power in a few bins, the static weight_sum would understate the
+     * achievable peak and starve the energy gate. */
     vis_frame->candidate[count].quality =
-        App_AcousticSrp_Clamp01(best_value / App_AcousticSrp_MaxF32(ctx->weight_sum, 1.0e-6f));
+        App_AcousticSrp_Clamp01(best_value /
+                                App_AcousticSrp_MaxF32(workspace->gate_weight_sum, 1.0e-6f));
     vis_frame->candidate[count].contrast = 0.0f;
     count++;
   }
@@ -1237,7 +1566,8 @@ static void App_AcousticSrp_FillVisFrame(AppAcousticSrpContext_t *ctx,
 
   vis_frame->valid =
       ((vis_frame->quality >= ctx->config.quality_min) &&
-       (App_AcousticSrp_Clamp01(max_value / App_AcousticSrp_MaxF32(ctx->weight_sum, 1.0e-6f)) >=
+       (App_AcousticSrp_Clamp01(max_value /
+                                App_AcousticSrp_MaxF32(workspace->gate_weight_sum, 1.0e-6f)) >=
         ctx->config.energy_min)) ? 1U : 0U;
 }
 
@@ -1550,7 +1880,13 @@ static AppAcousticImagingStatus_t App_AcousticSrp_RunOneSyntheticCheck(AppAcoust
 
   /* Stride is the CONFIG frame length: channel_count x frame_len fills the
    * staging buffer exactly in both modes; the old MAX_FRAME_LEN stride
-   * would overflow it for Wide32 once the max moved to 512. */
+   * would overflow it for Wide32 once the max moved to 512.
+   * Zero noise on purpose: this is an ENGINE correctness check (steering,
+   * lag tables, projection). A noisy tone is a different test: peak-vs-2nd
+   * quality of a 2 kHz tone against 20 whitened noise bins reads ~1% (below
+   * quality_min) even when the angle is exact - tried 0.04 noise 2026-07-19,
+   * angle (15,-15) exact but valid=0. The SNR gate's bandwidth blend keeps
+   * tones on plain PHAT, so the gate is inert here either way. */
   status = App_AcousticSynthetic_FillPlaneWave(&config,
                                                expected_theta,
                                                expected_phi,
