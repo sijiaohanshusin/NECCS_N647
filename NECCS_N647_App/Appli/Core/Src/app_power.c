@@ -90,6 +90,12 @@ static uint8_t s_charge_dirty;
  * current on the next 1 Hz poll (clamped to APP_POWER_CHARGE_CURRENT_MAX_MA,
  * 0 stops charging). Reads back as -1 once consumed. */
 volatile int32_t g_app_power_charge_request_ma = -1;
+/* Per-op status of the LAST poll: which I2C read is failing. */
+volatile int32_t g_app_power_poll_chgstat_status = 99;
+volatile int32_t g_app_power_poll_adc_status = 99;
+/* Cumulative poll I2C outcomes to quantify link marginality. */
+volatile uint32_t g_app_power_poll_ok_count = 0U;
+volatile uint32_t g_app_power_poll_err_count = 0U;
 #endif
 
 /* 4S Li-ion resting-voltage curve (per-cell values x4). */
@@ -415,6 +421,29 @@ void AppPower_Init(void)
 
   g_app_power_snapshot.flags |= APP_POWER_FLAG_BQ_PRESENT;
 
+  /* POR default is battery low-power mode (EN_LWPWR=1): I2C responds but
+   * the ADC never converts, so battery-only operation reads VBAT/VSYS as
+   * the 2.88 V range offset (board 2026-07-21, first power-board hookup).
+   * Performance mode costs the pack ~1-2 mA while the system runs -
+   * negligible against the ~2 A system load. Shipping note: consider
+   * setting EN_LWPWR back before a true power-down so an idle stored
+   * device does not drain through the always-wired CN2. */
+  {
+    uint16_t charge_option0;
+
+    status = BQ25730_ReadRegister16(&g_app_bq25730,
+                                    BQ25730_REG_CHARGE_OPTION0,
+                                    &charge_option0);
+    if (status == BQ25730_OK)
+    {
+      charge_option0 &= (uint16_t)~BQ25730_CHARGE_OPTION0_EN_LWPWR;
+      status = BQ25730_WriteRegister16(&g_app_bq25730,
+                                       BQ25730_REG_CHARGE_OPTION0,
+                                       charge_option0);
+    }
+    g_app_power_snapshot.last_i2c_status = (int32_t)status;
+  }
+
   status = BQ25730_SetOtgEnabled(&g_app_bq25730, 0U);
   g_app_power_snapshot.last_i2c_status = (int32_t)status;
 
@@ -520,6 +549,9 @@ void AppPower_Poll(uint32_t elapsed_ms)
   {
     status = BQ25730_ReadChargerStatus(&g_app_bq25730, &charger_status);
     g_app_power_snapshot.last_i2c_status = (int32_t)status;
+#ifdef DEBUG
+    g_app_power_poll_chgstat_status = (int32_t)status;
+#endif
     if (status == BQ25730_OK)
     {
       g_app_power_snapshot.charger_status = charger_status;
@@ -527,6 +559,17 @@ void AppPower_Poll(uint32_t elapsed_ms)
 
     status = BQ25730_ReadAdcMeasurements(&g_app_bq25730, &measurements);
     g_app_power_snapshot.last_i2c_status = (int32_t)status;
+#ifdef DEBUG
+    g_app_power_poll_adc_status = (int32_t)status;
+    if (status == BQ25730_OK)
+    {
+      g_app_power_poll_ok_count++;
+    }
+    else
+    {
+      g_app_power_poll_err_count++;
+    }
+#endif
     if (status == BQ25730_OK)
     {
       AppPower_RecordAdc(&measurements, elapsed_ms);

@@ -22,7 +22,9 @@ printf "BQ mfg=0x%02x dev=0x%02x (expect 0x40/0xD5)\n", g_app_bq25730_manufactur
 printf "BQ chg_status=0x%04x prochot=0x%04x pins=0x%02x refresh=%u\n", g_app_bq25730_charger_status, g_app_bq25730_prochot_status, g_app_bq25730_pin_state, g_app_bq25730_refresh_count
 printf "PWR state=%u flags=0x%03x vbat=%umV vsys=%umV soc=%u%% ibat=%dmA\n", g_app_power_state, g_app_power_flags, g_app_power_battery_mv, g_app_power_system_mv, g_app_power_battery_percent, g_app_power_battery_current_ma
 printf "PWR cmpin=%umV remain_mahx1k=%d\n", g_app_power_cmpin_mv, g_app_power_remaining_mah_x1000
+printf "CUR ichg=%umA idis=%umA iin=%umA (BQ ADC)\n", 'app_power.c'::g_app_power_snapshot.charge_current_ma, 'app_power.c'::g_app_power_snapshot.discharge_current_ma, 'app_power.c'::g_app_power_snapshot.input_current_ma
 printf "CHG request=%umA dirty=%u polls=%u (set 'app_power.c'::g_app_power_charge_request_ma to change)\n", 'app_power.c'::s_charge_request_ma, 'app_power.c'::s_charge_dirty, g_app_bq25730_refresh_count
+printf "POLL chgstat=%d adc=%d ok=%u err=%u (0=ok -3=io 99=never-ran)\n", g_app_power_poll_chgstat_status, g_app_power_poll_adc_status, g_app_power_poll_ok_count, g_app_power_poll_err_count
 printf "POWER_DBG_DONE\n"
 monitor resume
 detach
@@ -30,4 +32,4 @@ quit
 "@ | Set-Content $cmd -Encoding ascii
 
 & $gdb --batch -q -x $cmd $elf 2>&1 | ForEach-Object { $_.ToString() } |
-    Select-String "BQ |PWR |POWER_DBG_DONE|error"
+    Select-String "BQ |PWR |CHG |POLL |POWER_DBG_DONE|error"
