@@ -73,26 +73,29 @@ uint8_t sd_nand_is_inserted(void)
 
 uint8_t sd_nand_init(void)
 {
-#if defined(PWR_SD_EN_Pin) && defined(PWR_SD_EN_GPIO_Port)
-  HAL_GPIO_WritePin(PWR_SD_EN_GPIO_Port, PWR_SD_EN_Pin, GPIO_PIN_SET);
-  HAL_Delay(10U);
-#endif
-
   if (sd_nand_is_inserted() == 0U)
   {
     s_sd_nand_initialized = 0U;
     return SD_NAND_ERROR_NO_CARD;
   }
 
-  if ((s_sd_nand_initialized == 0U) || (hsd2.State == HAL_SD_STATE_RESET))
+  /* Fast path: already initialized. Keep it delay-free — this function is
+   * called on EVERY read/write (the 10ms rail-settle here used to cost
+   * ~110ms per 1KB MSC transfer = 9KB/s USB throughput). */
+  if ((s_sd_nand_initialized != 0U) && (hsd2.State != HAL_SD_STATE_RESET))
   {
-    if (MX_SDMMC2_SD_Init() != HAL_OK)
-    {
-      s_sd_nand_initialized = 0U;
-      return SD_NAND_ERROR;
-    }
+    return SD_NAND_OK;
+  }
 
-    s_sd_nand_initialized = 1U;
+#if defined(PWR_SD_EN_Pin) && defined(PWR_SD_EN_GPIO_Port)
+  HAL_GPIO_WritePin(PWR_SD_EN_GPIO_Port, PWR_SD_EN_Pin, GPIO_PIN_SET);
+  HAL_Delay(10U);
+#endif
+
+  if (MX_SDMMC2_SD_Init() != HAL_OK)
+  {
+    s_sd_nand_initialized = 0U;
+    return SD_NAND_ERROR;
   }
 
   if (HAL_SD_GetCardInfo(&hsd2, &g_sd_nand_info_struct) != HAL_OK)
@@ -107,31 +110,73 @@ uint8_t sd_nand_init(void)
     return SD_NAND_ERROR;
   }
 
+  s_sd_nand_initialized = 1U;
   return SD_NAND_OK;
 }
+
+#ifdef DEBUG
+/* Per-stage timing of the LAST read (DWT us) + running totals: separates
+ * "re-init overhead" from "SDMMC transfer" from "post-transfer wait". */
+volatile uint32_t g_sd_nand_perf_init_us;
+volatile uint32_t g_sd_nand_perf_read_us;
+volatile uint32_t g_sd_nand_perf_wait_us;
+volatile uint32_t g_sd_nand_perf_init_total;
+volatile uint32_t g_sd_nand_perf_read_total;
+volatile uint32_t g_sd_nand_perf_wait_total;
+
+static uint32_t sd_nand_perf_us(uint32_t start_cycles)
+{
+  const uint32_t cyc_per_us = (SystemCoreClock != 0U) ? (SystemCoreClock / 1000000U) : 600U;
+
+  return (DWT->CYCCNT - start_cycles) / cyc_per_us;
+}
+#endif
 
 uint8_t sd_nand_read_disk(uint8_t *buf, uint32_t address, uint32_t count)
 {
   const uint32_t bytes = sd_nand_transfer_bytes(count);
   uint8_t res;
+#ifdef DEBUG
+  uint32_t t0;
+#endif
 
   if ((buf == NULL) || (count == 0U) || (bytes == 0U))
   {
     return SD_NAND_ERROR_PARAM;
   }
 
+#ifdef DEBUG
+  t0 = DWT->CYCCNT;
+#endif
   res = sd_nand_init();
+#ifdef DEBUG
+  g_sd_nand_perf_init_us = sd_nand_perf_us(t0);
+  g_sd_nand_perf_init_total += g_sd_nand_perf_init_us;
+#endif
   if (res != SD_NAND_OK)
   {
     return res;
   }
 
+#ifdef DEBUG
+  t0 = DWT->CYCCNT;
+#endif
   if (HAL_SD_ReadBlocks(&hsd2, buf, address, count, SD_NAND_TIMEOUT_MS) != HAL_OK)
   {
     return SD_NAND_ERROR;
   }
+#ifdef DEBUG
+  g_sd_nand_perf_read_us = sd_nand_perf_us(t0);
+  g_sd_nand_perf_read_total += g_sd_nand_perf_read_us;
+  t0 = DWT->CYCCNT;
+#endif
 
-  return sd_nand_wait_transfer(SD_NAND_TIMEOUT_MS);
+  res = sd_nand_wait_transfer(SD_NAND_TIMEOUT_MS);
+#ifdef DEBUG
+  g_sd_nand_perf_wait_us = sd_nand_perf_us(t0);
+  g_sd_nand_perf_wait_total += g_sd_nand_perf_wait_us;
+#endif
+  return res;
 }
 
 uint8_t sd_nand_write_disk(uint8_t *buf, uint32_t address, uint32_t count)

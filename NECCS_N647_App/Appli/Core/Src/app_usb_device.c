@@ -35,20 +35,33 @@
 /* Sizing                                                              */
 /* ------------------------------------------------------------------ */
 
-/* ONE UX pool, INTERNAL RAM only. HyperRAM-backed USBX memory failed two
- * different ways on this board (2026-07-20):
+/* REGULAR UX pool, INTERNAL RAM only. HyperRAM-backed USBX memory failed
+ * two different ways on this board (2026-07-20):
  * - pool with class thread stacks in .EXTRAM -> INVSTATE HardFault (PSP
  *   pointed into the pool, registers full of the 0xEF fill pattern);
  * - transfer buffers in a .EXTRAM cache pool -> host received garbage
  *   sectors (8-byte repeats with raw pool ADDRESSES embedded - PC-side
  *   FAT dump contained 0x909A1D90/0x341768A4).
  * Same failure family as the FileX-cache-in-EXTRAM note in app_media.c.
- * 12 KB fits the device stack + MSC instance + 2 KB class thread stack +
- * 1 KB bulk buffers (DK reference ran the same class set in 5 KB; if a
- * future class addition starves it, AppUsbDevice_StackInit fails loudly
+ * 12 KB fits the device stack + MSC instance + 2 KB class thread stack
+ * (endpoint buffers now come from the separate cache-safe pool below; if
+ * a future class addition starves it, AppUsbDevice_StackInit fails loudly
  * with last_status=-3/-4/-5 in the snapshot). Internal RAM is fully
  * booked - every KB here trades against UI/DSP statics. */
 #define APP_USB_UX_POOL_BYTES        (12U * 1024U)
+/* CACHE-SAFE UX pool -> npuRAM3 (AXISRAM3, 0x34200000, 448 KB bank).
+ * USBX draws the per-endpoint transfer buffers (UX_CACHE_SAFE_MEMORY,
+ * 3 x UX_SLAVE_REQUEST_DATA_MAX_LENGTH = 3 x 16 KB) from here; they no
+ * longer fit internal RAM (<5 KB free) and HyperRAM corrupts them (see
+ * above). npuRAM3 is ON-DIE AXI SRAM - same fabric as the main RAM, safe
+ * for the PCD's PIO copies - and is idle: the sound-classifier network
+ * binds weights to npuRAM5 (0x342E0000) and activations to npuRAM4
+ * (0x34270000) only (network.c pool map; no 0x3420xxxx/0x3426xxxx
+ * addr_base anywhere). If a future stedgeai regeneration starts
+ * allocating npuRAM3, move this pool or re-pin the model. The bank clock
+ * is enabled here (app_npu also enables it, but USB init can run first). */
+#define APP_USB_UX_CACHE_POOL_ADDR   0x34200000UL
+#define APP_USB_UX_CACHE_POOL_BYTES  (128U * 1024U)
 /* 1.75 KB: deepest path is HAL_PCD_Init/RCC config at startup, then the
  * thread only sleeps and copies the snapshot (internal RAM is 160 B from
  * full - every straw counts). */
@@ -172,12 +185,11 @@ static int32_t AppUsbDevice_PcdInit(void)
   memset(&g_hpcd_usb1_otg_hs, 0, sizeof(g_hpcd_usb1_otg_hs));
   g_hpcd_usb1_otg_hs.Instance = USB1_OTG_HS;
   g_hpcd_usb1_otg_hs.Init.dev_endpoints = 9;
-  /* FULL speed on the HS PHY for now: the OTG1 data path runs through
-   * the USB relay module + jumper wires, and the 480 MHz chirp did not
-   * survive it (board 2026-07-20: host saw the attach but "port reset
-   * failed", device never received USBRST). FS (12 Mbps) is wiring-
-   * tolerant; switch back to PCD_SPEED_HIGH once OTG1 has a clean path. */
-  g_hpcd_usb1_otg_hs.Init.speed = PCD_SPEED_HIGH_IN_FULL;
+  /* HIGH speed (480 Mbps): requires the direct OTG1 cable path (2026-07-20
+   * evening rewiring). Through the earlier relay-module + jumper chain the
+   * chirp never completed and the host saw nothing; if HS regresses after
+   * wiring changes, drop back to PCD_SPEED_HIGH_IN_FULL to stay usable. */
+  g_hpcd_usb1_otg_hs.Init.speed = PCD_SPEED_HIGH;
   g_hpcd_usb1_otg_hs.Init.dma_enable = DISABLE;
   g_hpcd_usb1_otg_hs.Init.phy_itface = USB_OTG_HS_EMBEDDED_PHY;
   g_hpcd_usb1_otg_hs.Init.Sof_enable = DISABLE;
@@ -255,11 +267,24 @@ static UINT AppUsbDevice_StorageRead(VOID *storage_instance, ULONG lun,
     *media_status = APP_USB_SENSE_NOT_READY;
     return UX_ERROR;
   }
-  if (sd_nand_read_disk(data_pointer, (uint32_t)lba, (uint32_t)number_blocks) != SD_NAND_OK)
   {
-    s_snapshot.io_errors++;
-    *media_status = UX_DEVICE_CLASS_STORAGE_SENSE_STATUS(0x03U, 0x11U, 0x00U);
-    return UX_ERROR;
+    const uint32_t t0 = DWT->CYCCNT;
+    const uint32_t cyc_per_us = (SystemCoreClock != 0U) ? (SystemCoreClock / 1000000U) : 600U;
+    uint32_t us;
+
+    if (sd_nand_read_disk(data_pointer, (uint32_t)lba, (uint32_t)number_blocks) != SD_NAND_OK)
+    {
+      s_snapshot.io_errors++;
+      *media_status = UX_DEVICE_CLASS_STORAGE_SENSE_STATUS(0x03U, 0x11U, 0x00U);
+      return UX_ERROR;
+    }
+    us = (DWT->CYCCNT - t0) / cyc_per_us;
+    s_snapshot.read_calls++;
+    s_snapshot.sd_read_us_total += us;
+    if (us > s_snapshot.sd_read_us_max)
+    {
+      s_snapshot.sd_read_us_max = us;
+    }
   }
   s_snapshot.read_blocks += (uint32_t)number_blocks;
   return UX_SUCCESS;
@@ -334,7 +359,29 @@ static int32_t AppUsbDevice_StackInit(uint32_t block_count)
   UCHAR *language_id_framework;
   ULONG language_id_length;
 
-  if (ux_system_initialize(s_ux_pool, APP_USB_UX_POOL_BYTES, UX_NULL, 0) != UX_SUCCESS)
+  /* npuRAM3 powers up clock-gated AND in RAMCFG shutdown. The clock alone
+   * is NOT enough: with SRAMSD set, writes are dropped and reads return
+   * junk, and the D-cache masks it from the CPU until eviction (exact
+   * failure seen 2026-07-21: endpoint buffers full of random garbage,
+   * MSC thread spinning on PHASE_ERROR after a corrupted CBW). Same
+   * wake-up sequence as AppNpu_EnableClocks - idempotent, and USB init
+   * must not depend on NPU init having run first. */
+  __HAL_RCC_AXISRAM3_MEM_CLK_ENABLE();
+  __HAL_RCC_RAMCFG_CLK_ENABLE();
+  RAMCFG_SRAM3_AXI->CR &= ~RAMCFG_CR_SRAMSD;
+  {
+    uint32_t guard = 100000U;
+
+    while (((RAMCFG_SRAM3_AXI->ISR & RAMCFG_ISR_SRAMBUSY) != 0U) && (guard > 0U))
+    {
+      guard--;
+    }
+  }
+  __DSB();
+
+  if (ux_system_initialize(s_ux_pool, APP_USB_UX_POOL_BYTES,
+                           (VOID *)APP_USB_UX_CACHE_POOL_ADDR,
+                           APP_USB_UX_CACHE_POOL_BYTES) != UX_SUCCESS)
   {
     return -3;
   }

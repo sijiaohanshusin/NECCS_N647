@@ -260,7 +260,14 @@
    is 2048 bytes but can be reduced in memory constrained environments. For cd-rom support in the storage
    class, this value cannot be less than 2048.  */
 
-#define UX_SLAVE_REQUEST_DATA_MAX_LENGTH                    1024
+/* BISECT step: 1 KB chunk again but buffers in the npuRAM3 cache pool. */
+/* 16 KB: this is BOTH the per-endpoint transfer buffer size and the MSC
+ * per-SCSI-chunk size (UX_SLAVE_CLASS_STORAGE_BUFFER_SIZE). At 1024 every
+ * kilobyte paid one full SD-command + USB-transfer + scheduler round trip
+ * (~0.8 ms) which capped MSC at ~1.2 MB/s; 16 KB amortizes that 16x and
+ * lets the SD NAND do efficient 32-block bursts. Buffers live in the
+ * npuRAM3 cache-safe pool (see app_usb_device.c), NOT internal RAM. */
+#define UX_SLAVE_REQUEST_DATA_MAX_LENGTH                    16384
 
 /* Defined, it enables zero copy support (works if PRINTER owns endpoint buffer).
     Defined, it enables zero copy for bulk in/out endpoints (write/read). In this case, the endpoint

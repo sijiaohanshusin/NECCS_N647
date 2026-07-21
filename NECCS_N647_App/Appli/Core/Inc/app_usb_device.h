@@ -31,6 +31,11 @@ typedef struct
   uint32_t write_blocks;   /* MSC sector writes served                 */
   uint32_t io_errors;
   int32_t last_status;     /* last init/step status (0 = OK)           */
+  /* Throughput instrumentation (DWT us): total SD time vs read-callback
+   * count isolates "SD is slow" from "host/USB pacing is slow". */
+  uint32_t read_calls;     /* StorageRead invocations                  */
+  uint32_t sd_read_us_total;
+  uint32_t sd_read_us_max;
 } AppUsbDeviceSnapshot_t;
 
 /* Create the USB device thread (call from App_ThreadX_Init). The thread
