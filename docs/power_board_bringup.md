@@ -155,27 +155,39 @@ BQ 是开机探测的: 接好线后要**重启一次固件**(`n647.ps1 flash-deb
 PD 适配器插电源板 USB1 → 再跑 `power_dbg.ps1`:
 `pins` 的 CHRG_OK 位(0x02)置位, `chg_status` 非零, PG 位跟随。
 量 VBUS 实际电压(CH224A 由 CFG 电阻决定档位, 固件 I2C 控压尚未实现)。
-**充电电流默认 0**(`APP_POWER_DEFAULT_CHARGE_CURRENT_MA=0`), 真充电
-灌流测试等联调稳定后再放开——改这个宏或后续加 UI 开关。
+
+**充电电流默认 0**, 放流用 GDB 钩子(2026-07-21 加入, 上限钳位
+2048mA, BQ 看门狗 175s 由固件每 60s 自动续写):
+
+```powershell
+.\tools\debug\gimbal_test.ps1 charge -Ma 512   # 请求 0.5A 充电
+.\tools\debug\gimbal_test.ps1 charge -Ma 0     # 停充
+```
+
+回读 `dirty=0` = 已写入 BQ 成功; `dirty=1` 挂着 = I2C 没通(查 B2)。
+首次灌流从 256/512mA 起步, 盯电池温度与 `ibat` 读数。
 
 ### B4 激光
 
-激光头插 LASER 座。GDB 触发(OpenOCD 已起时):
+激光头插 LASER 座。一条命令翻转(内部自动先抬 7.4V 轨再开 U6):
 
-```
-set var g_app_gimbal_test_request = 2    # 翻转激光, 再发一次=关
+```powershell
+.\tools\debug\gimbal_test.ps1 laser    # 再跑一次=关
+.\tools\debug\gimbal_test.ps1 state    # 随时查: 固件状态+PC7/PC10 实际电平
 ```
 
-预期: PC10 拉高 → LED2/LED3 亮 → 激光亮; 关闭后轨压掉到 0
-(100k 下拉在, 且杜邦阶段拓展板 R14 已拆)。
+预期: `rail_on=1 laser=1 PC7=1 PC10=1`(已板验) → LED2/LED3 亮 →
+LASER 座 3.3V; 关闭后轨压掉到 0(100k 下拉在, 且拓展板 R14 已拆)。
 
 ### B5 舵机
 
 舵机电源: CN7(XH)取 7.4V/GND(杜邦阶段该轨常开); 信号:
 PAN←P1-10、TILT←P1-9(共地已通)。
 
-```
-set var g_app_gimbal_test_request = 1    # 使能+走中位(1500µs)
+```powershell
+.\tools\debug\gimbal_test.ps1 center                 # 使能+走中位(1500µs)
+.\tools\debug\gimbal_test.ps1 point -Theta 20 -Phi -10   # 指定角度(度)
+.\tools\debug\gimbal_test.ps1 enable                 # 使能开关翻转
 ```
 
 注意 F3(0603 保险丝)整条 7.4V 都过它, 双舵机堵转会超——大负载

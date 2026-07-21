@@ -1,7 +1,9 @@
 # One-shot BQ25730 / power-rail state dump over the live GDB server.
 # Usage: .\tools\debug\power_dbg.ps1   (board must be running the Debug build
 # with OpenOCD up - run .\tools\debug\n647.ps1 status first if unsure)
-$ErrorActionPreference = "Stop"
+# NOTE: gdb prints its halt banner to stderr; under "Stop" preference
+# PowerShell would turn that into a terminating NativeCommandError.
+$ErrorActionPreference = "Continue"
 
 $gdb = Get-ChildItem "C:\ST" -Recurse -Filter "arm-none-eabi-gdb.exe" -ErrorAction SilentlyContinue |
     Select-Object -First 1 -ExpandProperty FullName
@@ -20,6 +22,7 @@ printf "BQ mfg=0x%02x dev=0x%02x (expect 0x40/0xD5)\n", g_app_bq25730_manufactur
 printf "BQ chg_status=0x%04x prochot=0x%04x pins=0x%02x refresh=%u\n", g_app_bq25730_charger_status, g_app_bq25730_prochot_status, g_app_bq25730_pin_state, g_app_bq25730_refresh_count
 printf "PWR state=%u flags=0x%03x vbat=%umV vsys=%umV soc=%u%% ibat=%dmA\n", g_app_power_state, g_app_power_flags, g_app_power_battery_mv, g_app_power_system_mv, g_app_power_battery_percent, g_app_power_battery_current_ma
 printf "PWR cmpin=%umV remain_mahx1k=%d\n", g_app_power_cmpin_mv, g_app_power_remaining_mah_x1000
+printf "CHG request=%umA dirty=%u polls=%u (set 'app_power.c'::g_app_power_charge_request_ma to change)\n", 'app_power.c'::s_charge_request_ma, 'app_power.c'::s_charge_dirty, g_app_bq25730_refresh_count
 printf "POWER_DBG_DONE\n"
 monitor resume
 detach

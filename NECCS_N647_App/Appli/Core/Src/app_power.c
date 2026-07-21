@@ -77,6 +77,21 @@ static AppPowerSnapshot_t g_app_power_snapshot;
 static uint32_t g_app_power_undervoltage_ms;
 static uint8_t g_app_power_remaining_initialized;
 
+/* Active charge-current request (mA). 0 = charging off (the safe default).
+ * The BQ25730 charge watchdog resets ChargeCurrent 175 s after the last
+ * write, so a nonzero request is re-written every
+ * APP_POWER_CHARGE_REFRESH_MS from AppPower_Poll. */
+static uint32_t s_charge_request_ma;
+static uint32_t s_charge_elapsed_ms;
+static uint8_t s_charge_dirty;
+
+#ifdef DEBUG
+/* GDB bring-up hook: set to a milliamp value >= 0 to request that charge
+ * current on the next 1 Hz poll (clamped to APP_POWER_CHARGE_CURRENT_MAX_MA,
+ * 0 stops charging). Reads back as -1 once consumed. */
+volatile int32_t g_app_power_charge_request_ma = -1;
+#endif
+
 /* 4S Li-ion resting-voltage curve (per-cell values x4). */
 static const AppPowerSocPoint_t g_app_power_soc_table[] =
 {
@@ -450,6 +465,48 @@ void AppPower_Init(void)
   AppPower_UpdateDebugGlobals();
 }
 
+static void AppPower_ServiceChargeRequest(uint32_t elapsed_ms)
+{
+  BQ25730_StatusTypeDef status;
+
+#ifdef DEBUG
+  if (g_app_power_charge_request_ma >= 0)
+  {
+    uint32_t request_ma = (uint32_t)g_app_power_charge_request_ma;
+
+    g_app_power_charge_request_ma = -1;
+    if (request_ma > APP_POWER_CHARGE_CURRENT_MAX_MA)
+    {
+      request_ma = APP_POWER_CHARGE_CURRENT_MAX_MA;
+    }
+    s_charge_request_ma = request_ma;
+    s_charge_dirty = 1U;
+  }
+#endif
+
+  if (g_app_power_snapshot.probe_status != (int32_t)BQ25730_OK)
+  {
+    return;
+  }
+
+  s_charge_elapsed_ms += elapsed_ms;
+  if ((s_charge_dirty == 0U) &&
+      ((s_charge_request_ma == 0U) ||
+       (s_charge_elapsed_ms < APP_POWER_CHARGE_REFRESH_MS)))
+  {
+    return;
+  }
+
+  status = BQ25730_SetChargeCurrentMa(&g_app_bq25730, s_charge_request_ma);
+  g_app_power_snapshot.last_i2c_status = (int32_t)status;
+  if (status == BQ25730_OK)
+  {
+    /* Success is observable from GDB: s_charge_dirty back to 0. */
+    s_charge_dirty = 0U;
+    s_charge_elapsed_ms = 0U;
+  }
+}
+
 void AppPower_Poll(uint32_t elapsed_ms)
 {
   BQ25730_AdcMeasurementsTypeDef measurements;
@@ -457,6 +514,7 @@ void AppPower_Poll(uint32_t elapsed_ms)
   BQ25730_StatusTypeDef status;
 
   AppPower_ReadPins();
+  AppPower_ServiceChargeRequest(elapsed_ms);
 
   if (g_app_power_snapshot.probe_status == BQ25730_OK)
   {
