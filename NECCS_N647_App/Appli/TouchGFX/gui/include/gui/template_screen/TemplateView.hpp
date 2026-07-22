@@ -160,6 +160,12 @@ private:
     AppTextLabel beamClipsTitle;
     AppTextLabel beamClipsValue;
     AppTextLabel beamHintLabel;
+    AppRoundedPanel beamMonBtn;         /* live speaker monitor switch */
+    AppTextLabel beamMonLabel;
+    touchgfx::TouchArea beamMonTouch;
+    AppRoundedPanel beamPlayBtn;        /* latest-clip speaker playback */
+    AppTextLabel beamPlayLabel;
+    touchgfx::TouchArea beamPlayTouch;
     AppRoundedPanel beamDirCard;        /* rail: direction readout + dial */
     AppTextLabel beamDirTitle;
     AppTextLabel beamThetaLabel;

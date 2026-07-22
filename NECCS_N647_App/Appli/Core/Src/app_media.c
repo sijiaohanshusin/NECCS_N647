@@ -7,6 +7,7 @@
 
 #include "app_media.h"
 
+#include "app_beam_play.h"
 #include "app_beam_record.h"
 #include "app_camera_display.h"
 #include "app_media_jpeg.h"
@@ -77,8 +78,13 @@ typedef enum
   APP_MEDIA_CMD_THUMB_PAGE = 8,   /* arg = page */
   APP_MEDIA_CMD_SELECT_ITEM = 9,  /* arg = type | (index << 4) */
   APP_MEDIA_CMD_BEAM_START = 10,
-  APP_MEDIA_CMD_BEAM_STOP = 11
+  APP_MEDIA_CMD_BEAM_STOP = 11,
+  APP_MEDIA_CMD_AUDIO_PLAY_TOGGLE = 12
 } AppMediaCommand_t;
+
+/* WAV playback feed chunk: sized to the I2S ring's half so one tick can
+ * top the ring up without ever blocking on it. */
+#define APP_MEDIA_AUDIO_PLAY_CHUNK_SAMPLES 8192U
 
 /* Queue messages carry the command in the low byte and an argument above. */
 #define APP_MEDIA_CMD_ARG_SHIFT 8U
@@ -160,6 +166,15 @@ static uint32_t s_beam_open = 0U;
 static uint32_t s_beam_data_bytes = 0U;
 static int16_t s_beam_chunk[APP_MEDIA_BEAM_CHUNK_SAMPLES]
     __attribute__((section(".EXTRAM"), aligned(32)));
+/* WAV playback (most recent clip -> app_beam_play sink). Reuses
+ * s_beam_chunk as the FileX read staging buffer: playback and beam
+ * recording are mutually exclusive by design. */
+static FX_FILE s_audio_play_file;
+static uint32_t s_audio_play_open = 0U;
+static uint32_t s_audio_play_remaining = 0U;
+static uint32_t s_audio_play_total_bytes = 0U;
+static uint32_t s_audio_play_index = 0U;
+static uint8_t s_audio_play_eof = 0U;
 static uint32_t s_video_play_frame = 0U;
 static uint32_t s_video_play_frame_count = 0U;
 static uint32_t s_record_file_pos = 0U;
@@ -183,6 +198,7 @@ static void AppMedia_ThreadEntry(ULONG thread_input);
 static void AppMedia_FileXDriver(FX_MEDIA *media_ptr);
 static uint32_t read_selected_file(void);
 static void load_thumb_page(uint32_t page);
+static uint32_t stop_audio_playback(void);
 
 static void status_lock(void)
 {
@@ -1833,6 +1849,8 @@ static uint32_t start_beam_recording(void)
     status_set_error(APP_MEDIA_ERROR_ALREADY_RECORDING);
     return APP_MEDIA_ERROR_ALREADY_RECORDING;
   }
+  /* Recording preempts WAV playback (shares the pipeline + chunk buffer). */
+  (void)stop_audio_playback();
   /* ~5.5 MB per minute; require room for a couple of minutes. */
   if (has_free_space(4U * 1024U * 1024U) == 0U)
   {
@@ -1952,6 +1970,180 @@ static void process_beam_tick(void)
 
   status_lock();
   s_status.beam_seconds = s_beam_data_bytes / APP_MEDIA_BEAM_BYTES_PER_SECOND;
+  status_unlock();
+}
+
+/* ------------------------------------------------------------------ */
+/* WAV playback (latest NECCS/AUDIO clip -> speaker via app_beam_play)  */
+/* ------------------------------------------------------------------ */
+
+/* Feed the playback sink from the open WAV, bounded by ring space. */
+static void audio_play_feed(void)
+{
+  while ((s_audio_play_remaining > 0U) &&
+         (AppBeamPlay_WavFreeSpace() >= APP_MEDIA_AUDIO_PLAY_CHUNK_SAMPLES))
+  {
+    uint32_t request_bytes = APP_MEDIA_AUDIO_PLAY_CHUNK_SAMPLES * 2U;
+    ULONG actual = 0U;
+
+    if (request_bytes > s_audio_play_remaining)
+    {
+      request_bytes = s_audio_play_remaining;
+    }
+
+    if (fx_file_read(&s_audio_play_file, s_beam_chunk, request_bytes,
+                     &actual) != FX_SUCCESS)
+    {
+      s_audio_play_remaining = 0U;
+      break;
+    }
+    if (actual == 0U)
+    {
+      s_audio_play_remaining = 0U;
+      break;
+    }
+
+    (void)AppBeamPlay_WavWrite(s_beam_chunk, (uint32_t)actual / 2U);
+    s_audio_play_remaining -= (uint32_t)actual;
+    if ((uint32_t)actual < request_bytes)
+    {
+      s_audio_play_remaining = 0U;
+    }
+  }
+
+  if (s_audio_play_remaining == 0U)
+  {
+    s_audio_play_eof = 1U;
+  }
+}
+
+static uint32_t stop_audio_playback(void)
+{
+  if (s_audio_play_open == 0U)
+  {
+    return APP_MEDIA_ERROR_NONE;
+  }
+
+  AppBeamPlay_WavStop();
+  (void)fx_file_close(&s_audio_play_file);
+  s_audio_play_open = 0U;
+  s_audio_play_eof = 0U;
+  s_audio_play_remaining = 0U;
+
+  status_lock();
+  s_status.flags &= ~APP_MEDIA_FLAG_AUDIO_PLAYING;
+  s_status.audio_play_seconds = 0U;
+  status_unlock();
+
+  return APP_MEDIA_ERROR_NONE;
+}
+
+static uint32_t start_audio_playback(void)
+{
+  char path[APP_MEDIA_FILE_NAME_LEN];
+  uint8_t header[APP_MEDIA_WAV_HEADER_BYTES];
+  ULONG actual = 0U;
+  uint32_t clip;
+  UINT status;
+
+  if (s_audio_play_open != 0U)
+  {
+    return APP_MEDIA_ERROR_NONE;
+  }
+  if (s_media_mounted == 0U)
+  {
+    status_set_error(APP_MEDIA_ERROR_NOT_MOUNTED);
+    return APP_MEDIA_ERROR_NOT_MOUNTED;
+  }
+  /* Beam recording owns the audio pipeline (and s_beam_chunk). */
+  if (s_beam_open != 0U)
+  {
+    status_set_error(APP_MEDIA_ERROR_ALREADY_RECORDING);
+    return APP_MEDIA_ERROR_ALREADY_RECORDING;
+  }
+
+  clip = s_next_audio - 1U; /* most recent finished clip */
+  if (clip == 0U)
+  {
+    status_set_error(APP_MEDIA_ERROR_NO_SELECTION);
+    return APP_MEDIA_ERROR_NO_SELECTION;
+  }
+
+  make_audio_path(clip, path, sizeof(path));
+  status = fx_file_open(&s_media, &s_audio_play_file, (CHAR *)path,
+                        FX_OPEN_FOR_READ);
+  if (status != FX_SUCCESS)
+  {
+    status_set_error(APP_MEDIA_ERROR_FILE_OPEN);
+    return APP_MEDIA_ERROR_FILE_OPEN;
+  }
+
+  /* Header sanity: our own writer's format only (PCM mono 16-bit 48 k).
+   * Anything else on the card is politely refused, not guessed at. */
+  if ((fx_file_read(&s_audio_play_file, header, sizeof(header),
+                    &actual) != FX_SUCCESS) ||
+      (actual != sizeof(header)) ||
+      (memcmp(&header[0], "RIFF", 4U) != 0) ||
+      (memcmp(&header[8], "WAVE", 4U) != 0) ||
+      (header[20] != 1U) || (header[21] != 0U) ||   /* PCM */
+      (header[22] != 1U) || (header[23] != 0U) ||   /* mono */
+      (header[34] != 16U) ||                        /* 16-bit */
+      ((header[24] | ((uint32_t)header[25] << 8) |
+        ((uint32_t)header[26] << 16) | ((uint32_t)header[27] << 24)) !=
+       APP_BEAM_RECORD_SAMPLE_RATE_HZ))
+  {
+    (void)fx_file_close(&s_audio_play_file);
+    status_set_error(APP_MEDIA_ERROR_UNSUPPORTED_FORMAT);
+    return APP_MEDIA_ERROR_UNSUPPORTED_FORMAT;
+  }
+
+  s_audio_play_total_bytes = header[40] | ((uint32_t)header[41] << 8) |
+                             ((uint32_t)header[42] << 16) |
+                             ((uint32_t)header[43] << 24);
+  s_audio_play_remaining = s_audio_play_total_bytes;
+  s_audio_play_index = clip;
+  s_audio_play_eof = (s_audio_play_remaining == 0U) ? 1U : 0U;
+
+  if (AppBeamPlay_WavStart() != 0)
+  {
+    (void)fx_file_close(&s_audio_play_file);
+    status_set_error(APP_MEDIA_ERROR_FILE_READ);
+    return APP_MEDIA_ERROR_FILE_READ;
+  }
+
+  s_audio_play_open = 1U;
+  audio_play_feed();
+
+  status_lock();
+  s_status.flags |= APP_MEDIA_FLAG_AUDIO_PLAYING;
+  s_status.audio_play_index = clip;
+  s_status.audio_play_seconds = 0U;
+  status_set_file(s_status.last_file, path);
+  status_unlock();
+
+  return APP_MEDIA_ERROR_NONE;
+}
+
+static void process_audio_play_tick(void)
+{
+  if (s_audio_play_open == 0U)
+  {
+    return;
+  }
+
+  audio_play_feed();
+
+  /* EOF: let the sink drain, then close out. */
+  if ((s_audio_play_eof != 0U) && (AppBeamPlay_WavDrained() != 0U))
+  {
+    (void)stop_audio_playback();
+    return;
+  }
+
+  status_lock();
+  s_status.audio_play_seconds =
+      (s_audio_play_total_bytes - s_audio_play_remaining) /
+      APP_MEDIA_BEAM_BYTES_PER_SECOND;
   status_unlock();
 }
 
@@ -3030,6 +3222,16 @@ static void process_command(AppMediaCommand_t command, uint32_t arg)
   case APP_MEDIA_CMD_BEAM_STOP:
     (void)stop_beam_recording();
     break;
+  case APP_MEDIA_CMD_AUDIO_PLAY_TOGGLE:
+    if (s_audio_play_open != 0U)
+    {
+      (void)stop_audio_playback();
+    }
+    else
+    {
+      (void)start_audio_playback();
+    }
+    break;
   default:
     break;
   }
@@ -3114,6 +3316,7 @@ static void process_usb_mode_transition(void)
     set_playing(0U);
     (void)stop_recording();
     (void)stop_beam_recording();
+    (void)stop_audio_playback();
     if (s_media_mounted != 0U)
     {
       (void)fx_media_flush(&s_media);
@@ -3189,6 +3392,7 @@ static void AppMedia_ThreadEntry(ULONG thread_input)
       process_record_tick();
       process_play_tick();
       process_beam_tick();
+      process_audio_play_tick();
     }
   }
 }
@@ -3371,6 +3575,11 @@ uint32_t AppMedia_RequestBeamStart(void)
 uint32_t AppMedia_RequestBeamStop(void)
 {
   return post_command(APP_MEDIA_CMD_BEAM_STOP);
+}
+
+uint32_t AppMedia_RequestAudioPlayToggle(void)
+{
+  return post_command(APP_MEDIA_CMD_AUDIO_PLAY_TOGGLE);
 }
 
 uint32_t AppMedia_RequestRefresh(void)

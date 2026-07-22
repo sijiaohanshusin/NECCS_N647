@@ -80,6 +80,8 @@ extern DMA_HandleTypeDef handle_GPDMA1_Channel1;
 extern SAI_HandleTypeDef hsai_BlockA1;
 extern SAI_HandleTypeDef hsai_BlockB1;
 extern PCD_HandleTypeDef g_hpcd_usb1_otg_hs;
+extern I2S_HandleTypeDef g_hi2s2;
+extern DMA_HandleTypeDef g_hdma_i2s2_tx;
 
 /* USER CODE END EV */
 
@@ -230,6 +232,24 @@ void GPDMA1_Channel1_IRQHandler(void)
   /* USER CODE BEGIN GPDMA1_Channel1_IRQn 1 */
 
   /* USER CODE END GPDMA1_Channel1_IRQn 1 */
+}
+
+/**
+  * @brief GPDMA1 Channel 2: I2S2 TX (beam playback / speaker).
+  */
+void GPDMA1_Channel2_IRQHandler(void)
+{
+  g_app_boot_diag.last_irqn = (uint32_t)GPDMA1_Channel2_IRQn;
+  HAL_DMA_IRQHandler(&g_hdma_i2s2_tx);
+}
+
+/**
+  * @brief SPI2 (I2S mode) global interrupt: underrun/error reporting.
+  */
+void SPI2_IRQHandler(void)
+{
+  g_app_boot_diag.last_irqn = (uint32_t)SPI2_IRQn;
+  HAL_I2S_IRQHandler(&g_hi2s2);
 }
 
 /**

@@ -587,6 +587,28 @@ void TemplateView::setupBeamPage()
     setupLabel(beamHintLabel, 30, CamY + 248, 132, 20, 1, "触摸点选方位", ColorMuted);
     add(beamHintLabel);
 
+    /* Speaker row 1: live monitor switch (MAX98357A on I2S2). */
+    beamMonBtn.setPosition(16, CamY + 292, 160, 64);
+    beamMonBtn.setStyle(ColorPanel, 12U);
+    beamMonBtn.setBorder(ColorLine, true);
+    add(beamMonBtn);
+    setupLabel(beamMonLabel, 16, CamY + 314, 160, 20, 1, "监听 关", ColorMuted, AppTextLabel::ALIGN_CENTER);
+    add(beamMonLabel);
+    beamMonTouch.setPosition(16, CamY + 292, 160, 64);
+    beamMonTouch.setAction(beamPressedCallback);
+    add(beamMonTouch);
+
+    /* Speaker row 2: latest-clip playback. */
+    beamPlayBtn.setPosition(16, CamY + 368, 160, 64);
+    beamPlayBtn.setStyle(ColorPanel, 12U);
+    beamPlayBtn.setBorder(ColorLine, true);
+    add(beamPlayBtn);
+    setupLabel(beamPlayLabel, 16, CamY + 390, 160, 20, 1, "回放", ColorMuted, AppTextLabel::ALIGN_CENTER);
+    add(beamPlayLabel);
+    beamPlayTouch.setPosition(16, CamY + 368, 160, 64);
+    beamPlayTouch.setAction(beamPressedCallback);
+    add(beamPlayTouch);
+
     /* Right rail: direction card (readout + dial). */
     beamDirCard.setPosition(RailX, 60, RailW, 214);
     beamDirCard.setStyle(ColorPanel, 10U);
@@ -2070,6 +2092,40 @@ void TemplateView::refreshBeamPage(const AppUiSnapshot& snapshot)
     beamClipsValue.setText(text);
     beamHintLabel.setText(manual ? "按自动回声源" : "触摸点选方位");
 
+    /* Live speaker monitor switch. */
+    {
+        const bool monitorOn = (snapshot.beamMonitorOn != 0U);
+
+        beamMonLabel.setText(monitorOn ? "监听 开" : "监听 关");
+        beamMonLabel.setColors(monitorOn ? ColorGreen : ColorMuted, ColorBg, false);
+        beamMonBtn.setFillColor(monitorOn ? ColorPanel2 : ColorPanel);
+        beamMonBtn.setBorder(monitorOn ? ColorGreen : ColorLine, true);
+    }
+
+    /* Latest-clip playback: shows position while running, count-gated. */
+    {
+        const bool playing = (snapshot.audioPlaying != 0U);
+        const bool playable = (snapshot.beamClips != 0U) && !recording;
+
+        if (playing)
+        {
+            (void)snprintf(text, sizeof(text), "停 %02u:%02u",
+                           snapshot.audioPlaySeconds / 60U,
+                           snapshot.audioPlaySeconds % 60U);
+            beamPlayLabel.setText(text);
+            beamPlayLabel.setColors(ColorAmber, ColorBg, false);
+            beamPlayBtn.setFillColor(ColorPanel2);
+            beamPlayBtn.setBorder(ColorAmber, true);
+        }
+        else
+        {
+            beamPlayLabel.setText("回放");
+            beamPlayLabel.setColors(playable ? ColorText : ColorMuted, ColorBg, false);
+            beamPlayBtn.setFillColor(ColorPanel);
+            beamPlayBtn.setBorder(playable ? ColorLine : ColorPanel2, true);
+        }
+    }
+
     /* State card. */
     beamStateLine[0].setText(available ? "48k · 32麦" : "限48k模式");
     beamStateLine[0].setColors(available ? ColorText : ColorAmber, ColorBg, false);
@@ -2541,6 +2597,14 @@ void TemplateView::onBeamPressed(const touchgfx::AbstractButton& source)
     else if (&source == &beamRecTouch)
     {
         presenter->toggleBeamRecording();
+    }
+    else if (&source == &beamMonTouch)
+    {
+        presenter->toggleBeamMonitor();
+    }
+    else if (&source == &beamPlayTouch)
+    {
+        presenter->toggleAudioPlayback();
     }
 }
 

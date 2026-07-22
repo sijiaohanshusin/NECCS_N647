@@ -79,6 +79,10 @@ typedef struct
     uint32_t record_frames;
     uint32_t dropped_frames;
     uint32_t record_seconds;
+    uint32_t beam_seconds;
+    uint32_t audio_clips;
+    uint32_t audio_play_index;
+    uint32_t audio_play_seconds;
     uint32_t last_read_bytes;
     uint32_t preview_generation;
     uint32_t preview_type;
@@ -136,6 +140,24 @@ static uint32_t AppMedia_RequestReadSelected()
 static uint32_t AppMedia_RequestPlayToggle()
 {
     return 0U;
+}
+
+static uint32_t AppMedia_RequestAudioPlayToggle()
+{
+    return 0U;
+}
+
+static uint8_t s_sim_beam_monitor = 0U;
+
+static int32_t AppBeamPlay_SetMonitor(uint8_t on)
+{
+    s_sim_beam_monitor = on;
+    return 0;
+}
+
+static uint8_t AppBeamPlay_GetMonitor()
+{
+    return s_sim_beam_monitor;
 }
 
 static void AppMedia_GetStatus(AppMediaStatus_t* status)
@@ -1028,6 +1050,10 @@ void pollMedia(AppUiSnapshot& snapshot)
     snapshot.beamRecording = ((media.flags & APP_MEDIA_FLAG_BEAM_RECORDING) != 0U) ? 1U : 0U;
     snapshot.beamSeconds = static_cast<uint16_t>((media.beam_seconds <= 0xFFFFU) ? media.beam_seconds : 0xFFFFU);
     snapshot.beamClips = media.audio_clips;
+    snapshot.audioPlaying = ((media.flags & APP_MEDIA_FLAG_AUDIO_PLAYING) != 0U) ? 1U : 0U;
+    snapshot.audioPlaySeconds = static_cast<uint16_t>((media.audio_play_seconds <= 0xFFFFU) ? media.audio_play_seconds : 0xFFFFU);
+    snapshot.audioPlayIndex = media.audio_play_index;
+    snapshot.beamMonitorOn = AppBeamPlay_GetMonitor();
     copyFileName(snapshot.mediaLastFile, media.last_file, sizeof(snapshot.mediaLastFile));
     copyFileName(snapshot.mediaSelectedFile, media.selected_file, sizeof(snapshot.mediaSelectedFile));
 
@@ -1078,6 +1104,14 @@ void pollBeam(AppUiSnapshot& snapshot)
     /* 48k-only: in the 192k array mode the page shows a hint instead. */
     const bool shouldRun = (snapshot.arrayMode == 0U) &&
                            (onPage || (snapshot.beamRecording != 0U));
+
+    /* The live speaker monitor is bound to the page: leaving it (or
+     * switching array modes) always mutes - no surprise audio elsewhere. */
+    if (!onPage && (snapshot.beamMonitorOn != 0U))
+    {
+        (void)AppBeamPlay_SetMonitor(0U);
+        snapshot.beamMonitorOn = 0U;
+    }
 
     if (!shouldRun)
     {
@@ -1179,6 +1213,10 @@ volatile uint32_t g_app_ui_request_trigger = 0xFFU;
  * ambient chatter must not fire the trigger. */
 volatile int32_t g_app_ui_trigger_min_dbfs = -72;
 
+/* GDB speaker hooks: 1 = toggle live monitor (jumps to the beam page),
+ * 2 = toggle playback of the latest recorded clip. Consumed each tick. */
+volatile uint32_t g_app_beam_play_test_request = 0U;
+
 Model::Model()
     : modelListener(0),
       tickCount(0U),
@@ -1210,6 +1248,30 @@ void Model::tick()
     pollPower(snapshot);
     pollMedia(snapshot);
     pollBeam(snapshot);
+
+#if defined(STM32N647xx) && defined(DEBUG)
+    /* GDB speaker hooks (board testing without touching the panel):
+     * 1 = toggle live monitor (forces the beam page so the tap runs),
+     * 2 = toggle playback of the latest clip. */
+    if (g_app_beam_play_test_request != 0U)
+    {
+        const uint32_t request = g_app_beam_play_test_request;
+
+        g_app_beam_play_test_request = 0U;
+        if (request == 1U)
+        {
+            if (snapshot.activeScreen != APP_UI_SCREEN_BEAM)
+            {
+                setActiveScreen(APP_UI_SCREEN_BEAM);
+            }
+            toggleBeamMonitor();
+        }
+        else if (request == 2U)
+        {
+            toggleAudioPlayback();
+        }
+    }
+#endif
 
     /* Gimbal/laser pre-integration (hardware in transit): steer at the beam
      * page target when engaged, otherwise follow the acoustic lock. Poll
@@ -1540,6 +1602,32 @@ void Model::toggleBeamRecording()
 void Model::beamAutoTrack()
 {
     snapshot.beamManual = 0U;
+    if (modelListener != 0)
+    {
+        modelListener->uiSnapshotUpdated(snapshot);
+    }
+}
+
+void Model::toggleBeamMonitor()
+{
+    const uint8_t next = (snapshot.beamMonitorOn != 0U) ? 0U : 1U;
+
+    if (AppBeamPlay_SetMonitor(next) == 0)
+    {
+        snapshot.beamMonitorOn = next;
+    }
+    if (modelListener != 0)
+    {
+        modelListener->uiSnapshotUpdated(snapshot);
+    }
+}
+
+void Model::toggleAudioPlayback()
+{
+    (void)AppMedia_RequestAudioPlayToggle();
+    /* Optimistic flip for instant button feedback; pollMedia confirms
+     * from the media status on the next tick. */
+    snapshot.audioPlaying = (snapshot.audioPlaying != 0U) ? 0U : 1U;
     if (modelListener != 0)
     {
         modelListener->uiSnapshotUpdated(snapshot);

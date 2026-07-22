@@ -37,6 +37,8 @@ extern "C" {
 #define APP_MEDIA_FLAG_BEAM_RECORDING  0x00000100UL
 /* SD handed over to the USB MSC bridge (FileX closed, PC owns the disk). */
 #define APP_MEDIA_FLAG_USB_MODE        0x00000200UL
+/* Latest AUDnnnnn.WAV streaming to the speaker (app_beam_play sink). */
+#define APP_MEDIA_FLAG_AUDIO_PLAYING   0x00000400UL
 
 typedef enum
 {
@@ -113,6 +115,8 @@ typedef struct
   uint32_t record_seconds;
   uint32_t beam_seconds;
   uint32_t audio_clips;
+  uint32_t audio_play_index;    /* 1-based clip number while playing */
+  uint32_t audio_play_seconds;  /* playback position */
   uint32_t last_read_bytes;
   uint32_t preview_generation;
   uint32_t preview_type;
@@ -140,6 +144,9 @@ uint32_t AppMedia_RequestRecordStop(void);
 /* Beamformed mono WAV recording (NECCS/AUDIO/AUDnnnnn.WAV). */
 uint32_t AppMedia_RequestBeamStart(void);
 uint32_t AppMedia_RequestBeamStop(void);
+/* Toggle speaker playback of the most recent audio clip (refused while
+ * beam recording; beam recording start preempts a running playback). */
+uint32_t AppMedia_RequestAudioPlayToggle(void);
 uint32_t AppMedia_RequestRefresh(void);
 uint32_t AppMedia_RequestSelectNext(void);
 uint32_t AppMedia_RequestReadSelected(void);

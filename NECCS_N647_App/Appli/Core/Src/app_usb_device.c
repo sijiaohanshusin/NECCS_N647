@@ -35,19 +35,26 @@
 /* Sizing                                                              */
 /* ------------------------------------------------------------------ */
 
-/* REGULAR UX pool, INTERNAL RAM only. HyperRAM-backed USBX memory failed
- * two different ways on this board (2026-07-20):
+/* REGULAR UX pool -> npuRAM3 @0x34220000, right above the cache-safe
+ * pool. History (2026-07-20): HyperRAM-backed USBX memory failed two
+ * different ways -
  * - pool with class thread stacks in .EXTRAM -> INVSTATE HardFault (PSP
  *   pointed into the pool, registers full of the 0xEF fill pattern);
  * - transfer buffers in a .EXTRAM cache pool -> host received garbage
  *   sectors (8-byte repeats with raw pool ADDRESSES embedded - PC-side
  *   FAT dump contained 0x909A1D90/0x341768A4).
- * Same failure family as the FileX-cache-in-EXTRAM note in app_media.c.
+ * Both were HyperRAM/XSPI pathologies. npuRAM3 is ON-DIE AXI SRAM on the
+ * same interconnect class as the main AXISRAM every other thread stack
+ * lives in, so the class thread stack is safe here; moving the pool out
+ * of internal RAM paid for the I2S speaker path (2026-07-22 the link
+ * overflowed by 7.4 KB with the pool still internal). Raw address, not a
+ * C array: .bss zeroing would touch the bank before its RAMCFG wake-up
+ * (StackInit wakes it, then ux_system_initialize memsets the pool).
  * 12 KB fits the device stack + MSC instance + 2 KB class thread stack
- * (endpoint buffers now come from the separate cache-safe pool below; if
- * a future class addition starves it, AppUsbDevice_StackInit fails loudly
- * with last_status=-3/-4/-5 in the snapshot). Internal RAM is fully
- * booked - every KB here trades against UI/DSP statics. */
+ * (endpoint buffers come from the separate cache-safe pool below; if a
+ * future class addition starves it, AppUsbDevice_StackInit fails loudly
+ * with last_status=-3/-4/-5 in the snapshot). */
+#define APP_USB_UX_POOL_ADDR         0x34220000UL
 #define APP_USB_UX_POOL_BYTES        (12U * 1024U)
 /* CACHE-SAFE UX pool -> npuRAM3 (AXISRAM3, 0x34200000, 448 KB bank).
  * USBX draws the per-endpoint transfer buffers (UX_CACHE_SAFE_MEMORY,
@@ -58,8 +65,10 @@
  * binds weights to npuRAM5 (0x342E0000) and activations to npuRAM4
  * (0x34270000) only (network.c pool map; no 0x3420xxxx/0x3426xxxx
  * addr_base anywhere). If a future stedgeai regeneration starts
- * allocating npuRAM3, move this pool or re-pin the model. The bank clock
- * is enabled here (app_npu also enables it, but USB init can run first). */
+ * allocating npuRAM3, move BOTH pools or re-pin the model. The bank clock
+ * is enabled here (app_npu also enables it, but USB init can run first).
+ * Layout in the bank: cache pool 0x34200000..0x3421FFFF (128 KB), regular
+ * pool 0x34220000..0x34222FFF (12 KB). */
 #define APP_USB_UX_CACHE_POOL_ADDR   0x34200000UL
 #define APP_USB_UX_CACHE_POOL_BYTES  (128U * 1024U)
 /* 1.75 KB: deepest path is HAL_PCD_Init/RCC config at startup, then the
@@ -80,7 +89,6 @@
 
 PCD_HandleTypeDef g_hpcd_usb1_otg_hs;
 
-static UCHAR s_ux_pool[APP_USB_UX_POOL_BYTES] __attribute__((aligned(32)));
 static TX_THREAD s_usb_thread;
 static ULONG s_usb_thread_stack[APP_USB_APP_THREAD_STACK / sizeof(ULONG)];
 static UX_SLAVE_CLASS_STORAGE_PARAMETER s_storage_parameter;
@@ -379,7 +387,7 @@ static int32_t AppUsbDevice_StackInit(uint32_t block_count)
   }
   __DSB();
 
-  if (ux_system_initialize(s_ux_pool, APP_USB_UX_POOL_BYTES,
+  if (ux_system_initialize((VOID *)APP_USB_UX_POOL_ADDR, APP_USB_UX_POOL_BYTES,
                            (VOID *)APP_USB_UX_CACHE_POOL_ADDR,
                            APP_USB_UX_CACHE_POOL_BYTES) != UX_SUCCESS)
   {

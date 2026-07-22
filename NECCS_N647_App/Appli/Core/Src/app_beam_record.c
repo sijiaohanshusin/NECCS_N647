@@ -1,6 +1,7 @@
 #include "app_beam_record.h"
 
 #include "app_acoustic_imaging.h" /* speed of sound */
+#include "app_beam_play.h"        /* live monitor tap */
 #include "app_mic_array.h"
 
 #include "stm32n6xx.h"
@@ -221,6 +222,9 @@ void AppBeamRecord_FeedFrame(const AppAudioFrame_t *frame)
     float sum_sq = 0.0f;
     const uint8_t recording = s_recording;
     uint32_t dropped = 0U;
+    /* Static like acc[]: the quantized frame doubles as the live-monitor
+     * feed and 512 B would crowd the capture thread stack. */
+    static int16_t pcm[APP_BEAM_FRAME_LEN];
 
     for (uint32_t i = 0U; i < frame_len; i++)
     {
@@ -235,12 +239,13 @@ void AppBeamRecord_FeedFrame(const AppAudioFrame_t *frame)
         v = -0.999f;
       }
       sum_sq += v * v;
+      pcm[i] = (int16_t)(v * 32767.0f);
 
       if (recording != 0U)
       {
         if ((s_ring_wr - s_ring_rd) < APP_BEAM_RING_SAMPLES)
         {
-          s_ring[s_ring_wr & APP_BEAM_RING_MASK] = (int16_t)(v * 32767.0f);
+          s_ring[s_ring_wr & APP_BEAM_RING_MASK] = pcm[i];
           s_ring_wr++;
         }
         else
@@ -249,6 +254,10 @@ void AppBeamRecord_FeedFrame(const AppAudioFrame_t *frame)
         }
       }
     }
+
+    /* Live speaker monitor: mirrors the exact samples the WAV gets. The
+     * feed no-ops unless the monitor owns the playback sink. */
+    AppBeamPlay_MonitorFeed(pcm, frame_len);
 
     if (recording != 0U)
     {

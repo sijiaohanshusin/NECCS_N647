@@ -277,6 +277,11 @@ struct AppUiSnapshot
     int8_t beamRmsDbfs;       /* beam output level */
     uint16_t beamSeconds;     /* recording duration */
     uint32_t beamClips;       /* AUDnnnnn.WAV count on card */
+    /* Speaker output (MAX98357A on I2S2). */
+    uint8_t beamMonitorOn;    /* live monitor switch */
+    uint8_t audioPlaying;     /* latest WAV streaming to the speaker */
+    uint16_t audioPlaySeconds;
+    uint32_t audioPlayIndex;  /* 1-based clip number while playing */
     /* Laser pointer / gimbal (hardware pending; laser relay pin is live). */
     uint8_t laserOn;
     char mediaLastFile[32];
@@ -338,6 +343,10 @@ public:
     void beamAutoTrack();
     /* Manual steering from the aim surface (camera-frame pixels 0..639/0..479). */
     void setBeamManualTargetPx(int16_t px, int16_t py);
+    /* Live speaker monitor (MAX98357A): hear where the beam points. */
+    void toggleBeamMonitor();
+    /* Speaker playback of the most recent recorded clip. */
+    void toggleAudioPlayback();
     /* Laser pointer relay (gimbal skeleton; servos gated on new hardware). */
     void toggleLaser();
     void refreshMedia();

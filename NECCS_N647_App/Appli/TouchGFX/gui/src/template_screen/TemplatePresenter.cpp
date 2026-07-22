@@ -152,6 +152,16 @@ void TemplatePresenter::beamAutoTrack()
     model->beamAutoTrack();
 }
 
+void TemplatePresenter::toggleBeamMonitor()
+{
+    model->toggleBeamMonitor();
+}
+
+void TemplatePresenter::toggleAudioPlayback()
+{
+    model->toggleAudioPlayback();
+}
+
 void TemplatePresenter::toggleLaser()
 {
     model->toggleLaser();

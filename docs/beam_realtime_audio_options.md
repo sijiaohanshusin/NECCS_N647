@@ -1,5 +1,16 @@
 # 定向录音实时播放方案 (2026-07-15, 2026-07-19 引脚核定)
 
+> **2026-07-22 方案 1 已实现(固件侧, 待上板)**: `app_beam_play.c` =
+> I2S2 主发 48k/16bit, 时钟 PLL2→IC8/10=24.576MHz(与 SAI1 同 VCO, 采样
+> 锁定), GPDMA1_Ch2 单节点循环链表 + `.noncacheable` 双半缓冲, 单声道
+> 复制 L/R。两个互斥生产者喂同一 16384 样本环缓: 录音页「监听」开关
+> (FeedFrame tap, ~10ms 延迟垫) 和「回放」键(媒体线程流最近一条
+> AUDnnnnn.WAV, 与录制互斥)。GDB 钩子 `g_app_beam_play_test_request`
+> (1=监听翻转+跳录音页, 2=回放翻转)。接线见下表(MAX98357: VIN=5V,
+> GAIN/SD 悬空, 喇叭 4Ω)。为给内部 RAM 腾位, USBX regular 池挪到
+> npuRAM3 0x34220000(cache 池 0x34200000 上方)。双构建零错零警;
+> **板级验收待板子回实验室**(底噪/指向性/录听一致/互斥/5min 长跑)。
+
 现状:波束成形输出是 48 kHz 单声道 int16 流(`app_beam_record` 环形缓冲),
 已能写 WAV 到 SD 并经 SWD 拉取(`tools/debug/pull_audio.ps1`)。要"实时听",
 需要给这条流加一个实时出口。三条路线,按推荐顺序:

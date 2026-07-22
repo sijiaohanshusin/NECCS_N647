@@ -61,6 +61,9 @@ public:
     void toggleBeamRecording();
     void beamAutoTrack();
     void setBeamManualTargetPx(int16_t px, int16_t py);
+    /* Speaker: live beam monitor + latest-clip playback. */
+    void toggleBeamMonitor();
+    void toggleAudioPlayback();
     /* Laser pointer (gimbal skeleton). */
     void toggleLaser();
     void refreshMedia();
