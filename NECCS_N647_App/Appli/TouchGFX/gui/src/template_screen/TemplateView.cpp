@@ -1432,6 +1432,14 @@ void TemplateView::refreshVisibility()
     beamClipsTitle.setVisible(beamVisible);
     beamClipsValue.setVisible(beamVisible);
     beamHintLabel.setVisible(beamVisible);
+    beamMonBtn.setVisible(beamVisible);
+    beamMonLabel.setVisible(beamVisible);
+    beamMonTouch.setVisible(beamVisible);
+    beamMonTouch.setTouchable(beamVisible);
+    beamPlayBtn.setVisible(beamVisible);
+    beamPlayLabel.setVisible(beamVisible);
+    beamPlayTouch.setVisible(beamVisible);
+    beamPlayTouch.setTouchable(beamVisible);
     beamDirCard.setVisible(beamVisible);
     beamDirTitle.setVisible(beamVisible);
     beamThetaLabel.setVisible(beamVisible);
@@ -1834,7 +1842,7 @@ void TemplateView::refreshImagePage(const AppUiSnapshot& snapshot)
     (void)snprintf(text, sizeof(text), "%s %u-%u Hz",
                    (snapshot.acousticBandMode != 0U)
                        ? "手动"
-                       : ((snapshot.acousticBandAutoActive != 0U) ? "自动·追踪" : "自动"),
+                       : ((snapshot.acousticBandAutoActive != 0U) ? "追踪" : "自动"),
                    snapshot.acousticBandLoHz,
                    snapshot.acousticBandHiHz);
     spectrumBandLabel.setColors((snapshot.acousticBandMode != 0U) ? ColorAmber : ColorMuted,
@@ -2315,7 +2323,7 @@ void TemplateView::refreshParamsPage(const AppUiSnapshot& snapshot)
     (void)snprintf(text, sizeof(text), "%s %u-%u Hz",
                    (snapshot.acousticBandMode != 0U)
                        ? "手动"
-                       : ((snapshot.acousticBandAutoActive != 0U) ? "自动·追踪" : "自动"),
+                       : ((snapshot.acousticBandAutoActive != 0U) ? "追踪" : "自动"),
                    snapshot.acousticBandLoHz,
                    snapshot.acousticBandHiHz);
     paramRowValue[1].setColors((snapshot.acousticBandMode != 0U) ? ColorAmber : ColorBlue,
