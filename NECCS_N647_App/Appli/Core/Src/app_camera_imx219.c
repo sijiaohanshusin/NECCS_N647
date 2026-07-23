@@ -128,8 +128,10 @@ static const AppCameraIMX219Reg_t g_imx219_base_regs[] =
   {IMX219_REG_LINE_LENGTH_A,    IMX219_640X480_LINE_LENGTH, 2U},
   {IMX219_REG_X_ODD_INC_A,      0x0001U, 1U},
   {IMX219_REG_Y_ODD_INC_A,      0x0001U, 1U},
-  {IMX219_REG_BINNING_MODE_H,   0x0003U, 1U},
-  {IMX219_REG_BINNING_MODE_V,   0x0003U, 1U},
+  /* x4 binning (0x02) pairs with the 2560x1920 window in IMX219_WriteCrop;
+   * 0x03 was x2-analog for the old 1280x960 window. */
+  {IMX219_REG_BINNING_MODE_H,   0x0002U, 1U},
+  {IMX219_REG_BINNING_MODE_V,   0x0002U, 1U},
   {IMX219_REG_DIGITAL_GAIN,     IMX219_640X480_DEFAULT_DIGITAL_GAIN, 2U},
   {IMX219_REG_ANALOG_GAIN,      IMX219_640X480_DEFAULT_ANALOG_GAIN,  1U},
   {IMX219_REG_INTEGRATION_TIME, IMX219_640X480_DEFAULT_EXPOSURE_LINES, 2U},
@@ -272,10 +274,18 @@ static int32_t IMX219_WriteCrop(uint16_t width, uint16_t height)
 
   if ((width == 640U) && (height == 480U))
   {
-    x_start = 1000U;
-    x_end = 2279U;
-    y_start = 752U;
-    y_end = 1711U;
+    /* Widest 4:3 field that still yields 640x480: 2560x1920 sensor window
+     * with x4 binning (was 1280x960 + x2 = only 39% of the sensor width;
+     * user 2026-07-23: FOV visibly too narrow). 78% of the sensor width
+     * doubles the linear FOV; the output geometry (640x480 RAW10) and
+     * every downstream DCMIPP/ISP setting stay identical. Bayer phase is
+     * preserved (even start coords). Overlay FOV constants live in
+     * app_acoustic_service.h (+ Model.cpp copy) and MUST track this
+     * window: HFOV = 2*atan((w/3280)*tan(31.1deg)), V analogous. */
+    x_start = 360U;
+    x_end = 2919U;
+    y_start = 272U;
+    y_end = 2191U;
     frame_length = IMX219_640X480_FRAME_LENGTH_15FPS;
   }
 
