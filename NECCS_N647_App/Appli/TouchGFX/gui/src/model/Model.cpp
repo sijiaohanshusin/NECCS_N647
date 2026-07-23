@@ -853,7 +853,9 @@ void pollAcoustic(AppUiSnapshot& snapshot)
          * frame border instead: an edge-pinned crosshair with the dB tag
          * still tells the operator where to swing the camera. */
         const float px = 320.0f + angleToPxOffset(theta, halfH, 320.0f);
-        const float py = 240.0f - angleToPxOffset(phi, halfV, 240.0f);
+        /* +phi maps DOWN on screen: array mounted with its +y opposite the
+         * camera's up (speaker ground-truth test, 2026-07-23). */
+        const float py = 240.0f + angleToPxOffset(phi, halfV, 240.0f);
         markers[markerCount].x = static_cast<uint16_t>((px < 10.0f) ? 10.0f : ((px > 629.0f) ? 629.0f : px));
         markers[markerCount].y = static_cast<uint16_t>((py < 10.0f) ? 10.0f : ((py > 469.0f) ? 469.0f : py));
         markers[markerCount].strength = snapshot.candStrength[i];
@@ -1159,7 +1161,8 @@ void pollBeam(AppUiSnapshot& snapshot)
         const float halfH = APP_ACOUSTIC_SERVICE_CAMERA_HFOV_DEG * 0.5f;
         const float halfV = APP_ACOUSTIC_SERVICE_CAMERA_VFOV_DEG * 0.5f;
         float px = 320.0f + angleToPxOffset(static_cast<float>(beam.theta_deg), halfH, 320.0f);
-        float py = 240.0f - angleToPxOffset(static_cast<float>(beam.phi_deg), halfV, 240.0f);
+        /* Same flipped vertical convention as the acoustic markers. */
+        float py = 240.0f + angleToPxOffset(static_cast<float>(beam.phi_deg), halfV, 240.0f);
         uint8_t style = APP_CAMERA_DISPLAY_BEAM_AIM;
 
         px = (px < 32.0f) ? 32.0f : ((px > 607.0f) ? 607.0f : px);
@@ -1679,7 +1682,8 @@ void Model::setBeamManualTargetPx(int16_t px, int16_t py)
         const float halfH = APP_ACOUSTIC_SERVICE_CAMERA_HFOV_DEG * 0.5f;
         const float halfV = APP_ACOUSTIC_SERVICE_CAMERA_VFOV_DEG * 0.5f;
         float theta = pxOffsetToAngle(static_cast<float>(px) - 320.0f, halfH, 320.0f);
-        float phi = pxOffsetToAngle(240.0f - static_cast<float>(py), halfV, 240.0f);
+        /* Inverse of the flipped vertical convention (see marker mapping). */
+        float phi = pxOffsetToAngle(static_cast<float>(py) - 240.0f, halfV, 240.0f);
 
         if (theta < -60.0f) { theta = -60.0f; }
         if (theta > 60.0f) { theta = 60.0f; }

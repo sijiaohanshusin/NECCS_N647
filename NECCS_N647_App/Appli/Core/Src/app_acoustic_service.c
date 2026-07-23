@@ -620,8 +620,10 @@ static float AppAcousticService_FieldRowToPhi(uint32_t fy)
 {
   const float tan_half_v =
       tanf(APP_ACOUSTIC_SERVICE_CAMERA_VFOV_HALF_DEG * APP_ACOUSTIC_SERVICE_DEG_TO_RAD);
-  const float y_norm = 1.0f - (((float)fy + 0.5f) * 2.0f /
-                               (float)APP_ACOUSTIC_SERVICE_FIELD_H);
+  /* Row 0 (screen top) = MINUS phi: the array is mounted with its +y
+   * opposite the camera's up (speaker ground-truth test, 2026-07-23). */
+  const float y_norm = (((float)fy + 0.5f) * 2.0f /
+                        (float)APP_ACOUSTIC_SERVICE_FIELD_H) - 1.0f;
 
   return atanf(y_norm * tan_half_v) * APP_ACOUSTIC_SERVICE_RAD_TO_DEG;
 }
@@ -813,8 +815,9 @@ static void AppAcousticService_BuildLinearField(const AppAcousticImagingVisFrame
       const float fy_scale = (float)APP_ACOUSTIC_SERVICE_FIELD_H / APP_ACOUSTIC_SERVICE_CAMERA_VFOV_DEG;
       int32_t cx0 = (int32_t)((th_lo + APP_ACOUSTIC_SERVICE_CAMERA_HFOV_HALF_DEG) * fx_scale - 0.5f);
       int32_t cx1 = (int32_t)((th_hi + APP_ACOUSTIC_SERVICE_CAMERA_HFOV_HALF_DEG) * fx_scale + 0.5f);
-      int32_t cy0 = (int32_t)((APP_ACOUSTIC_SERVICE_CAMERA_VFOV_HALF_DEG - ph_hi) * fy_scale - 0.5f);
-      int32_t cy1 = (int32_t)((APP_ACOUSTIC_SERVICE_CAMERA_VFOV_HALF_DEG - ph_lo) * fy_scale + 0.5f);
+      /* Flipped vertical: row 0 = -phi (matches FieldRowToPhi). */
+      int32_t cy0 = (int32_t)((ph_lo + APP_ACOUSTIC_SERVICE_CAMERA_VFOV_HALF_DEG) * fy_scale - 0.5f);
+      int32_t cy1 = (int32_t)((ph_hi + APP_ACOUSTIC_SERVICE_CAMERA_VFOV_HALF_DEG) * fy_scale + 0.5f);
 
       if (cx0 < 0) { cx0 = 0; }
       if (cy0 < 0) { cy0 = 0; }
