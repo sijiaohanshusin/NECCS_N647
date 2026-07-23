@@ -1150,8 +1150,18 @@ uint32_t App_AcousticSrp_GetRefSpectrum(const AppAcousticSrpContext_t *ctx,
                                         float *mags,
                                         uint32_t mag_count)
 {
+  /* Per-bin MEDIAN over a handful of active channels spread across the
+   * array. The previous "first active channel" reference made the display
+   * spectrum (and the AUTO band tracker feeding on it) hostage to ONE
+   * mic: its transients showed up as bin spikes, and whenever the
+   * activity mask flapped (threshold-hovering mics, board 2026-07-23:
+   * active count breathing 23..32 at rest) the reference SWITCHED mics
+   * and the whole comb jumped. A 5-way median rejects any single-channel
+   * glitch and barely moves when one contributor swaps out. */
+#define APP_SRP_REF_SPECTRUM_CHANNELS 5U
   const AppAcousticSrpWorkspace_t *workspace = &s_srp_workspace;
-  const float *freq = NULL;
+  const float *freq[APP_SRP_REF_SPECTRUM_CHANNELS];
+  uint32_t found = 0U;
   uint32_t half;
 
   if ((ctx == NULL) || (mags == NULL) || (mag_count == 0U) || (ctx->initialized == 0U))
@@ -1159,17 +1169,32 @@ uint32_t App_AcousticSrp_GetRefSpectrum(const AppAcousticSrpContext_t *ctx,
     return 0U;
   }
 
-  /* First active channel's spectrum from the frame just processed (the
-   * service is single-threaded, so the workspace still holds it). */
-  for (uint32_t channel = 0U; channel < ctx->config.channel_count; channel++)
+  /* Stride the channel list so contributors are spatially spread (glitchy
+   * neighbours on one FPC finger do not dominate the median). */
   {
-    if (App_AcousticSrp_ChannelIsActive(ctx, channel) != 0U)
+    const uint32_t channel_count = ctx->config.channel_count;
+    const uint32_t stride =
+        (channel_count > APP_SRP_REF_SPECTRUM_CHANNELS)
+            ? (channel_count / APP_SRP_REF_SPECTRUM_CHANNELS)
+            : 1U;
+
+    for (uint32_t start = 0U;
+         (start < stride) && (found < APP_SRP_REF_SPECTRUM_CHANNELS);
+         start++)
     {
-      freq = &workspace->freq[channel * ctx->config.nfft];
-      break;
+      for (uint32_t channel = start;
+           (channel < channel_count) && (found < APP_SRP_REF_SPECTRUM_CHANNELS);
+           channel += stride)
+      {
+        if (App_AcousticSrp_ChannelIsActive(ctx, channel) != 0U)
+        {
+          freq[found] = &workspace->freq[channel * ctx->config.nfft];
+          found++;
+        }
+      }
     }
   }
-  if (freq == NULL)
+  if (found == 0U)
   {
     return 0U;
   }
@@ -1182,11 +1207,37 @@ uint32_t App_AcousticSrp_GetRefSpectrum(const AppAcousticSrpContext_t *ctx,
 
   /* CMSIS rfft packed layout: [X0.re, XN/2.re, X1.re, X1.im, ...].
    * |re| + |im| is a fine magnitude proxy for a display spectrum. */
-  mags[0] = App_AcousticSrp_AbsF32(freq[0]);
-  for (uint32_t bin = 1U; bin < mag_count; bin++)
+  for (uint32_t bin = 0U; bin < mag_count; bin++)
   {
-    mags[bin] = App_AcousticSrp_AbsF32(freq[bin * 2U]) +
-                App_AcousticSrp_AbsF32(freq[(bin * 2U) + 1U]);
+    float v[APP_SRP_REF_SPECTRUM_CHANNELS];
+
+    for (uint32_t c = 0U; c < found; c++)
+    {
+      if (bin == 0U)
+      {
+        v[c] = App_AcousticSrp_AbsF32(freq[c][0]);
+      }
+      else
+      {
+        v[c] = App_AcousticSrp_AbsF32(freq[c][bin * 2U]) +
+               App_AcousticSrp_AbsF32(freq[c][(bin * 2U) + 1U]);
+      }
+    }
+
+    /* Insertion sort of <=5 floats, take the middle. */
+    for (uint32_t i = 1U; i < found; i++)
+    {
+      const float key = v[i];
+      uint32_t j = i;
+
+      while ((j > 0U) && (v[j - 1U] > key))
+      {
+        v[j] = v[j - 1U];
+        j--;
+      }
+      v[j] = key;
+    }
+    mags[bin] = v[found / 2U];
   }
 
   return mag_count;
