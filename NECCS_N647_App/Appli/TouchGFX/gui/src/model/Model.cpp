@@ -1217,6 +1217,10 @@ volatile int32_t g_app_ui_trigger_min_dbfs = -72;
  * 2 = toggle playback of the latest recorded clip. Consumed each tick. */
 volatile uint32_t g_app_beam_play_test_request = 0U;
 
+/* GDB array-mode control: 0xFF = idle, 0 = Wide32@48k, 1 = Core16@192k
+ * (mirrors the params-page toggle for remote mic-array debugging). */
+volatile uint32_t g_app_ui_request_arraymode = 0xFFU;
+
 Model::Model()
     : modelListener(0),
       tickCount(0U),
@@ -1250,6 +1254,18 @@ void Model::tick()
     pollBeam(snapshot);
 
 #if defined(STM32N647xx) && defined(DEBUG)
+    /* GDB array-mode switch (remote debugging of Core16/Wide32 issues). */
+    if (g_app_ui_request_arraymode != 0xFFU)
+    {
+        const uint32_t want = g_app_ui_request_arraymode;
+
+        g_app_ui_request_arraymode = 0xFFU;
+        if (((want != 0U) ? 1U : 0U) != snapshot.arrayMode)
+        {
+            toggleArrayMode();
+        }
+    }
+
     /* GDB speaker hooks (board testing without touching the panel):
      * 1 = toggle live monitor (forces the beam page so the tap runs),
      * 2 = toggle playback of the latest clip. */

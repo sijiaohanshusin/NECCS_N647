@@ -178,6 +178,21 @@ void HAL_I2S_MspInit(I2S_HandleTypeDef *hi2s)
       return;
     }
 
+    /* TrustZone: the app runs secure and the node carries SRC_SEC/DEST_SEC,
+     * so the CHANNEL must be secure too - a non-secure channel gets its
+     * first transfer killed by the RIF (board 2026-07-22: I2S err=0x8 DMA
+     * error, zero halves out). Channels 0/1 get the same treatment in
+     * SystemIsolation_Config; channel 2 is ours to configure here. */
+    if (HAL_DMA_ConfigChannelAttributes(&g_hdma_i2s2_tx,
+                                        DMA_CHANNEL_SEC |
+                                        DMA_CHANNEL_PRIV |
+                                        DMA_CHANNEL_SRC_SEC |
+                                        DMA_CHANNEL_DEST_SEC) != HAL_OK)
+    {
+      s_last_status = -16;
+      return;
+    }
+
     __HAL_LINKDMA(hi2s, hdmatx, g_hdma_i2s2_tx);
 
     HAL_NVIC_SetPriority(GPDMA1_Channel2_IRQn, APP_BEAM_PLAY_IRQ_PRIORITY, 0);

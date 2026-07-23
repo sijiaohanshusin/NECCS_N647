@@ -110,6 +110,13 @@ extern DMA_HandleTypeDef handle_GPDMA1_Channel1;
 
 volatile uint32_t g_app_pcmd_debug_ui_enable = APP_PCMD_DIAG_UI_ENABLE;
 
+#ifdef DEBUG
+/* GDB: set to 1 to re-read every present device's registers into the
+ * snapshot (serviced by the capture thread, done counter increments). */
+volatile uint32_t g_app_pcmd_status_reread;
+volatile uint32_t g_app_pcmd_status_reread_done;
+#endif
+
 static int16_t s_bus_a_rx[APP_PCMD_CAPTURE_DMA_WORDS]
     __attribute__((section(".noncacheable"), aligned(32)));
 static int16_t s_bus_b_rx[APP_PCMD_CAPTURE_DMA_WORDS]
@@ -425,7 +432,13 @@ static HAL_StatusTypeDef AppPcmdCapture_ConfigureSaiForMode(AppMicArrayMode_t mo
   hsai_BlockA1.Init.OutputDrive = SAI_OUTPUTDRIVE_DISABLE;
   hsai_BlockA1.Init.NoDivider = SAI_MASTERDIVIDER_DISABLE;
   hsai_BlockA1.Init.FIFOThreshold = SAI_FIFOTHRESHOLD_EMPTY;
-  hsai_BlockA1.Init.AudioFrequency = core16 ? SAI_AUDIO_FREQUENCY_192K
+  /* DIAGNOSTIC EXPERIMENT 2026-07-23: Core16 at 96 kHz instead of 192 kHz.
+   * Hypothesis: 192 k forces PDMCLK=6.144 MHz (the only chip-supported
+   * ratio) which overclocks the PDM mics (spec max 3.3-4.8 MHz) - all 16
+   * channels read uniform -30 dBFS garbage. At 96 k the chip decimates
+   * 32x from an in-spec 3.072 MHz. Revert or formalize after the board
+   * verdict. */
+  hsai_BlockA1.Init.AudioFrequency = core16 ? SAI_AUDIO_FREQUENCY_96K
                                             : SAI_AUDIO_FREQUENCY_48K;
   hsai_BlockA1.Init.SynchroExt = SAI_SYNCEXT_DISABLE;
   hsai_BlockA1.Init.MckOutput = SAI_MCK_OUTPUT_DISABLE;
@@ -1481,10 +1494,15 @@ AppPcmdCaptureStatus_t AppPcmdCapture_Init(AppMicArrayMode_t mode)
     s_pcmd_configs[index].enable_micbias = 0U;
     if (mode == APP_MIC_ARRAY_MODE_CORE16_192K)
     {
-      /* 192 kHz: the default 64xFS divider would put 12.288 MHz on the PDM
-       * mics - beyond their spec. 32xFS keeps PDMCLK at 6.144 MHz, the
-       * documented PCMD3180 clocking for 192 kHz output. */
-      s_pcmd_configs[index].pdmclk_divider = PCMD3180_PDMCLK_DIV_32FS;
+      /* DIAGNOSTIC EXPERIMENT 2026-07-23 (pairs with the 96 kHz SAI change
+       * above). Datasheet truth (PDMCLK_CFG 0x1F): the divider selects an
+       * ABSOLUTE frequency - 0=3.072 MHz, 1=1.536 MHz, 2=768 kHz,
+       * 3=6.144 MHz; the driver's ...FS enum names are wrong. The old
+       * DIV_32FS(=3) drove the mics at 6.144 MHz, beyond PDM MEMS spec
+       * (3.3-4.8 MHz max even for ultrasonic parts) - suspected root cause
+       * of the all-16-channels-garbage symptom. 0 = 3.072 MHz, in spec,
+       * 32x decimation at 96 kHz. */
+      s_pcmd_configs[index].pdmclk_divider = PCMD3180_PDMCLK_DIV_64FS;
     }
   }
 
@@ -1762,6 +1780,26 @@ void AppPcmdCapture_ThreadEntry(ULONG thread_input)
     }
 
     (void)AppPcmdCapture_Poll(TX_TIMER_TICKS_PER_SECOND / 10U);
+
+#ifdef DEBUG
+    /* GDB hook: live PCMD register re-read into device_status[] (uses the
+     * normal locked I2C path). Distinguishes "chip drifted/reset since
+     * boot" from "boot config never took" while chasing intermittents. */
+    if (g_app_pcmd_status_reread != 0U)
+    {
+      g_app_pcmd_status_reread = 0U;
+      for (uint32_t index = 0U; index < APP_PCMD_CAPTURE_DEVICE_COUNT; index++)
+      {
+        if ((s_snapshot.device_present_mask & (uint8_t)(1U << index)) != 0U)
+        {
+          s_snapshot.device_status_status[index] =
+              (int32_t)PCMD3180_ReadStatus(&s_pcmd_handles[index],
+                                           &s_snapshot.device_status[index]);
+        }
+      }
+      g_app_pcmd_status_reread_done++;
+    }
+#endif
 
     /* Frame-stall watchdog: SAI/DMA can wedge silently (e.g. cable brownout
      * on the mic array) - the loop keeps polling but latest_seq freezes.
