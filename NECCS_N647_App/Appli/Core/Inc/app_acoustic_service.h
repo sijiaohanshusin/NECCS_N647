@@ -14,12 +14,14 @@ extern "C" {
 #include "app_acoustic_srp.h"
 #include "tx_api.h"
 
-/* FOV of the CURRENT sensor crop, not the lens spec. IMX219 full array
- * 3280x2464 = 62.2x48.8 deg; crop 2560x1920 (app_camera_imx219.c
- * IMX219_WriteCrop) => 2*atan((2560/3280)*tan(31.1deg)) = 50.4 deg etc.
- * Keep in sync with the crop window or every marker/heatmap lands wrong. */
-#define APP_ACOUSTIC_SERVICE_CAMERA_HFOV_DEG  50.4f
-#define APP_ACOUSTIC_SERVICE_CAMERA_VFOV_DEG  38.9f
+/* FOV of the CURRENT sensor crop, measured acoustically (2026-07-23):
+ * a broadband source at two known pixels fit tan-scale 1.77x over the
+ * RPi-v2 62.2deg-lens assumption => this module carries a WIDE lens
+ * (~94deg full-width). For the 2560x1920 crop: HFOV 80.0, VFOV 64.4
+ * (square pixels: tanV = tanH * 1920/2560). Keep in sync with the crop
+ * window in app_camera_imx219.c or every marker/heatmap lands wrong. */
+#define APP_ACOUSTIC_SERVICE_CAMERA_HFOV_DEG  80.0f
+#define APP_ACOUSTIC_SERVICE_CAMERA_VFOV_DEG  64.4f
 
 /* Continuous heat field resampled from the SRP grid (camera aspect 4:3).
  * 96x72 keeps the bilinear upscale step at ~6.7 px per field cell, which
