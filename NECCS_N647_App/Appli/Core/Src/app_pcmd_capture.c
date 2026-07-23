@@ -48,6 +48,38 @@ _Static_assert((APP_MIC_ARRAY_CORE16_MIC_COUNT *
 #define APP_PCMD_CAPTURE_POST_CONFIG_DISCARD_HALVES  16U
 /* Full-array bring-up attempts before the partial-array failsafe engages. */
 #define APP_PCMD_CAPTURE_FULL_ATTEMPTS       3U
+/* Silent-chip watchdog. Field evidence 2026-07-23: PCMD3180s drop off the
+ * TDM bus ONE BY ONE at runtime (U2/U4 first, later U3; marginal FPC clock
+ * lines suspected) with I2C readback still clean and frames still flowing,
+ * so neither cfg_ok nor the frame-stall watchdog notices. Only a full
+ * same-mode rebuild (clock + SAI + PCMD reconfig, i.e. the mode-switch
+ * path) provably revives a dropped chip - a DMA-only restart does not
+ * touch the wedged ASI state machine. A device counts as silent when its
+ * ENTIRE slot range reads the -90 dBFS floor (an undriven line accumulates
+ * zeros; a live MEMS mic idles at -84..-72), sustained for SILENT_TICKS
+ * thread passes (~100 ms each). Budget-limited so genuinely dead hardware
+ * cannot cause a restart storm; the budget refills only after a sustained
+ * healthy window, so a fast flapper drains it and stops. */
+#define APP_PCMD_CAPTURE_SILENT_TICKS            30U
+#define APP_PCMD_CAPTURE_SILENT_RESTART_BUDGET   3U
+#define APP_PCMD_CAPTURE_SILENT_HEALTHY_TICKS    100U
+#define APP_PCMD_CAPTURE_SILENT_FLOOR_DBFS       (-90)
+/* TDM bit-shift detector. Field evidence 2026-07-23 (raw slot words): after
+ * a rebuild, one chip can come up with its TDM output shifted by ~8 BCLK -
+ * every sample lands as (real << 8), so the idle noise floor reads a hot
+ * -20 dBFS-ish, the chip's first slot falls into the frame gap (constant
+ * 0xFFFF / -90), and the neighbour chip's first slots get overlap garbage.
+ * I2C readback stays clean; a same-mode rebuild re-rolls the alignment and
+ * has been observed to fix it in one go. Sound-independent signature: real
+ * audio ALWAYS dithers the low bits, a >=4-bit shift leaves low_or bits
+ * 1..3 permanently zero (bit 0 can leak from the neighbouring word), so a
+ * HOT slot with (low_or & 0x0E) == 0 across a whole window is corrupt, and
+ * a real acoustic source can never fake it. */
+#define APP_PCMD_CAPTURE_SHIFT_WINDOW_FLUSHES    128U
+#define APP_PCMD_CAPTURE_SHIFT_HOT_LEVEL         128U
+#define APP_PCMD_CAPTURE_SHIFT_LOW_MASK          0x0EU
+#define APP_PCMD_CAPTURE_SHIFT_MIN_SLOTS         2U
+#define APP_PCMD_CAPTURE_SHIFT_STREAK            3U
 #define APP_PCMD_CAPTURE_POST_CONFIG_STATUS_KICK  1U
 #define APP_PCMD_CAPTURE_KEEP_SW_I2C_ACTIVE  0U
 #define APP_PCMD_CAPTURE_EVENT_HALF0         0x00000001UL
@@ -492,9 +524,85 @@ static HAL_StatusTypeDef AppPcmdCapture_ConfigureSaiForMode(AppMicArrayMode_t mo
   return HAL_SAI_Init(&hsai_BlockB1);
 }
 
+/* TDM bit-shift detector state (see the SHIFT macro block): per-slot OR of
+ * the low sample byte across the current window, plus per-device streaks. */
+static uint8_t s_shift_low_or[APP_PCMD_CAPTURE_BUS_COUNT][APP_PCMD_CAPTURE_SLOTS_PER_BUS];
+static uint16_t s_shift_flush_count;
+static uint8_t s_shift_streak[APP_PCMD_CAPTURE_DEVICE_COUNT];
+
+static void AppPcmdCapture_ShiftDetectorReset(void)
+{
+  memset(s_shift_low_or, 0, sizeof(s_shift_low_or));
+  s_shift_flush_count = 0U;
+  memset(s_shift_streak, 0, sizeof(s_shift_streak));
+  s_snapshot.shift_chip_mask = 0U;
+}
+
+/* Window evaluation: a configured device is shift-corrupt when at least
+ * SHIFT_MIN_SLOTS of its slots spent the whole window hot with dead low
+ * bits; SHIFT_STREAK consecutive windows latch it into the snapshot. */
+static void AppPcmdCapture_ShiftEvalWindow(void)
+{
+  uint8_t latched = 0U;
+
+  for (uint32_t index = 0U; index < APP_PCMD_CAPTURE_DEVICE_COUNT; index++)
+  {
+    const PCMD3180_ArrayDevicePlanTypeDef *plan = &s_mode_config.devices[index];
+    uint32_t corrupt_slots = 0U;
+
+    if (((s_snapshot.device_config_ok_mask & (uint8_t)(1U << index)) == 0U) ||
+        (plan->mic_count == 0U))
+    {
+      s_shift_streak[index] = 0U;
+      continue;
+    }
+
+    for (uint32_t mic = 0U; mic < plan->mic_count; mic++)
+    {
+      const uint32_t bus = (plan->tdm_bus == PCMD3180_TDM_BUS_B) ? 1U : 0U;
+      const uint32_t slot = (uint32_t)plan->start_slot + mic;
+
+      if ((slot < APP_PCMD_CAPTURE_SLOTS_PER_BUS) &&
+          (s_snapshot.slot_level_raw[bus][slot] >= APP_PCMD_CAPTURE_SHIFT_HOT_LEVEL) &&
+          ((s_shift_low_or[bus][slot] & APP_PCMD_CAPTURE_SHIFT_LOW_MASK) == 0U))
+      {
+        corrupt_slots++;
+      }
+    }
+
+    if (corrupt_slots >= APP_PCMD_CAPTURE_SHIFT_MIN_SLOTS)
+    {
+      if (s_shift_streak[index] < 0xFFU)
+      {
+        s_shift_streak[index]++;
+      }
+    }
+    else
+    {
+      s_shift_streak[index] = 0U;
+    }
+    if (s_shift_streak[index] >= APP_PCMD_CAPTURE_SHIFT_STREAK)
+    {
+      latched = (uint8_t)(latched | (uint8_t)(1U << index));
+    }
+  }
+
+  s_snapshot.shift_chip_mask = latched;
+  memset(s_shift_low_or, 0, sizeof(s_shift_low_or));
+}
+
 static void AppPcmdCapture_ClearRuntime(void)
 {
+  /* Self-heal observability must survive full rebuilds: Init re-runs this
+   * on every watchdog-triggered rebuild, and a counter that zeroes itself
+   * right after the heal it just counted is useless. */
+  const uint32_t wdog_count = s_snapshot.watchdog_restart_count;
+  const uint16_t heal_count = s_snapshot.silent_restart_count;
+
   memset(&s_snapshot, 0, sizeof(s_snapshot));
+  s_snapshot.watchdog_restart_count = wdog_count;
+  s_snapshot.silent_restart_count = heal_count;
+  AppPcmdCapture_ShiftDetectorReset();
   s_raw_accum_enabled = 0U;
   AppPcmdCapture_ClearRawAccumulator();
   for (uint32_t i = 0U; i < APP_PCMD_CAPTURE_DMA_HALVES; i++)
@@ -777,10 +885,21 @@ static void AppPcmdCapture_FlushRawLevels(void)
       s_snapshot.slot_last_sample[bus][slot] = last_sample[bus][slot];
       s_snapshot.slot_dbfs[bus][slot] = dbfs;
       s_snapshot.slot_level[bus][slot] = AppPcmdCapture_DbfsToPercent(dbfs);
+      if (count[bus][slot] != 0U)
+      {
+        s_shift_low_or[bus][slot] |=
+            (uint8_t)((uint16_t)last_sample[bus][slot] & 0xFFU);
+      }
     }
   }
 
   AppPcmdCapture_UpdateMicLevels();
+
+  if (++s_shift_flush_count >= APP_PCMD_CAPTURE_SHIFT_WINDOW_FLUSHES)
+  {
+    s_shift_flush_count = 0U;
+    AppPcmdCapture_ShiftEvalWindow();
+  }
 }
 
 static void AppPcmdCapture_UpdateMicLevels(void)
@@ -1679,6 +1798,47 @@ AppPcmdCaptureStatus_t AppPcmdCapture_Poll(ULONG wait_ticks)
   return APP_PCMD_CAPTURE_OK;
 }
 
+/* Bitmask of configured devices whose entire TDM slot range reads the dBFS
+ * floor (see the silent-chip watchdog macro block for the field evidence).
+ * Uses the active mode's device plan, so Wide32 (8 slots/chip) and Core16
+ * (4 slots/chip) both map correctly. */
+static uint8_t AppPcmdCapture_SilentChipMask(void)
+{
+  uint8_t mask = 0U;
+
+  for (uint32_t index = 0U; index < APP_PCMD_CAPTURE_DEVICE_COUNT; index++)
+  {
+    const PCMD3180_ArrayDevicePlanTypeDef *plan = &s_mode_config.devices[index];
+    uint8_t all_floor = 1U;
+
+    if (((s_snapshot.device_config_ok_mask & (uint8_t)(1U << index)) == 0U) ||
+        (plan->mic_count == 0U))
+    {
+      continue;
+    }
+
+    for (uint32_t mic = 0U; mic < plan->mic_count; mic++)
+    {
+      const uint32_t bus = (plan->tdm_bus == PCMD3180_TDM_BUS_B) ? 1U : 0U;
+      const uint32_t slot = (uint32_t)plan->start_slot + mic;
+
+      if ((slot < APP_PCMD_CAPTURE_SLOTS_PER_BUS) &&
+          (s_snapshot.slot_dbfs[bus][slot] > APP_PCMD_CAPTURE_SILENT_FLOOR_DBFS))
+      {
+        all_floor = 0U;
+        break;
+      }
+    }
+
+    if (all_floor != 0U)
+    {
+      mask = (uint8_t)(mask | (uint8_t)(1U << index));
+    }
+  }
+
+  return mask;
+}
+
 void AppPcmdCapture_ThreadEntry(ULONG thread_input)
 {
   /* The thread is created at a boosted priority (above TouchGFX): during the
@@ -1716,6 +1876,9 @@ void AppPcmdCapture_ThreadEntry(ULONG thread_input)
   uint32_t last_seq = 0U;
   uint32_t stall_ticks = 0U;
   uint8_t start_attempts = 0U;
+  uint32_t silent_ticks = 0U;
+  uint32_t healthy_ticks = 0U;
+  uint8_t silent_budget = APP_PCMD_CAPTURE_SILENT_RESTART_BUDGET;
 
   while (1)
   {
@@ -1837,6 +2000,68 @@ void AppPcmdCapture_ThreadEntry(ULONG thread_input)
           AppPcmdCapture_RequestRestart((uint32_t)APP_PCMD_CAPTURE_PCMD_ERROR);
         }
       }
+    }
+
+    /* Self-heal watchdog: frames flow but a configured PCMD is broken -
+     * either its whole slot range sits at the dBFS floor (dropped off the
+     * TDM bus) or its slot words carry the bit-shift signature (hot with
+     * dead low bits; the shift mask is already streak-qualified by the
+     * window evaluator). Recovery = same-mode full rebuild via the
+     * mode-switch path; a rebuild is a re-roll (it revives dropped chips
+     * but can itself land a shifted alignment), so the detectors re-check
+     * the result and re-roll within the budget. See the macro blocks. */
+    if ((s_snapshot.started != 0U) && (s_switch_pending == 0U) &&
+        (s_snapshot.recovering == 0U) && (s_snapshot.raw_audio_valid != 0U))
+    {
+      const uint8_t silent_mask = AppPcmdCapture_SilentChipMask();
+      const uint8_t shift_mask = s_snapshot.shift_chip_mask;
+      uint8_t want_rebuild = 0U;
+
+      s_snapshot.silent_chip_mask = silent_mask;
+      if (silent_mask != 0U)
+      {
+        if (++silent_ticks >= APP_PCMD_CAPTURE_SILENT_TICKS)
+        {
+          silent_ticks = 0U;
+          want_rebuild = 1U;
+        }
+      }
+      else
+      {
+        silent_ticks = 0U;
+      }
+      if (shift_mask != 0U)
+      {
+        want_rebuild = 1U;
+      }
+
+      if ((silent_mask == 0U) && (shift_mask == 0U))
+      {
+        if (healthy_ticks < APP_PCMD_CAPTURE_SILENT_HEALTHY_TICKS)
+        {
+          healthy_ticks++;
+        }
+        else
+        {
+          silent_budget = APP_PCMD_CAPTURE_SILENT_RESTART_BUDGET;
+        }
+      }
+      else
+      {
+        healthy_ticks = 0U;
+      }
+
+      if ((want_rebuild != 0U) && (silent_budget > 0U))
+      {
+        silent_budget--;
+        s_snapshot.silent_restart_count++;
+        s_switch_mode = s_active_mode;
+        s_switch_pending = 1U;
+      }
+    }
+    else
+    {
+      silent_ticks = 0U;
     }
   }
 }

@@ -298,7 +298,7 @@ printf "tag=RUNNING\n"
 monitor halt
 printf "tag=STATUS\n"
 printf "uptime_ms=%u\n", uwTick
-printf "pcmd: present=0x%x cfg_ok=0x%x started=%u frames=%u wdog=%u raw_valid=%u active_slots=%u\n", 'app_pcmd_capture.c'::s_snapshot.device_present_mask, 'app_pcmd_capture.c'::s_snapshot.device_config_ok_mask, 'app_pcmd_capture.c'::s_snapshot.started, 'app_pcmd_capture.c'::s_snapshot.published_frames, 'app_pcmd_capture.c'::s_snapshot.watchdog_restart_count, 'app_pcmd_capture.c'::s_snapshot.raw_audio_valid, 'app_pcmd_capture.c'::s_snapshot.raw_active_slot_count
+printf "pcmd: present=0x%x cfg_ok=0x%x started=%u frames=%u wdog=%u raw_valid=%u active_slots=%u silent=0x%x shift=0x%x heals=%u\n", 'app_pcmd_capture.c'::s_snapshot.device_present_mask, 'app_pcmd_capture.c'::s_snapshot.device_config_ok_mask, 'app_pcmd_capture.c'::s_snapshot.started, 'app_pcmd_capture.c'::s_snapshot.published_frames, 'app_pcmd_capture.c'::s_snapshot.watchdog_restart_count, 'app_pcmd_capture.c'::s_snapshot.raw_audio_valid, 'app_pcmd_capture.c'::s_snapshot.raw_active_slot_count, 'app_pcmd_capture.c'::s_snapshot.silent_chip_mask, 'app_pcmd_capture.c'::s_snapshot.shift_chip_mask, 'app_pcmd_capture.c'::s_snapshot.silent_restart_count
 printf "camera: frames=%u\n", g_app_camera_frame_count
 printf "npu: init=%u count=%u us=%u status=%u\n", 'app_npu.c'::s_npu.initialized, 'app_npu.c'::s_npu.inference_count, 'app_npu.c'::s_npu.last_us, 'app_npu.c'::s_npu.last_status
 printf "touch: ready=%u down=%u samples=%u wire_err=%u\n", 'app_touch.c'::g_touch.ready, 'app_touch.c'::g_touch.down, 'app_touch.c'::g_touch.sample_count, 'app_touch.c'::g_touch.wire_error_count

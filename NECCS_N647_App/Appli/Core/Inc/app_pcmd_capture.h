@@ -91,6 +91,13 @@ typedef struct
    * recovery is currently in progress (drives the UI reconnect banner). */
   uint32_t watchdog_restart_count;
   uint8_t recovering;
+  /* Self-heal watchdogs: configured PCMDs whose whole TDM slot range sits
+   * at the dBFS floor (silent), or whose slot words show the bit-shift
+   * corruption signature (shift), bit per device; and how many full
+   * rebuilds the pair has triggered since boot (survives rebuilds). */
+  uint8_t silent_chip_mask;
+  uint8_t shift_chip_mask;
+  uint16_t silent_restart_count;
   uint32_t raw_rail_sample_count;
   uint32_t raw_total_sample_count;
   uint16_t published_fps_x10;
